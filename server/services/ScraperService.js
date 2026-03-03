@@ -49,10 +49,10 @@ class ScraperService {
         try {
             const allSources = await sources.getAll();
             const exists = allSources.find(s => s.id === 0 || s.name === 'EVENTI-LIVE');
+            const m3uUrl = `file://${this.m3uPath}`;
 
             if (!exists) {
                 this.addLog('Creating system source: EVENTI-LIVE');
-                const m3uUrl = `file://${this.m3uPath}`;
                 await sources.create({
                     id: 0, // Force ID 0 if possible
                     user_id: 0, // Special system user
@@ -61,9 +61,20 @@ class ScraperService {
                     url: m3uUrl,
                     enabled: true
                 });
-            } else if (exists.user_id !== 0) {
-                this.addLog('Migrating EVENTI-LIVE source to system user (user_id: 0)');
-                await sources.update(exists.id, { user_id: 0 });
+            } else {
+                // Self-healing: Ensure user_id is 0 and the path is valid for this OS
+                const updates = {};
+                if (exists.user_id !== 0) updates.user_id = 0;
+
+                // Crucial for Windows -> Alpine migrations, ensure URL path matches
+                if (exists.url !== m3uUrl && !exists.url.includes(this.m3uPath)) {
+                    updates.url = m3uUrl;
+                }
+
+                if (Object.keys(updates).length > 0) {
+                    this.addLog('Migrating EVENTI-LIVE source permissions/paths...');
+                    await sources.update(exists.id, updates);
+                }
             }
         } catch (err) {
             this.addLog(`Error ensuring system source: ${err.message}`);

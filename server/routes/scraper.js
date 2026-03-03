@@ -18,7 +18,7 @@ router.post('/run', requireAuth, requireAdmin, (req, res) => {
 });
 
 // Download the generated playlist
-router.get('/playlist', requireAuth, requireAdmin, (req, res) => {
+router.get('/playlist', (req, res) => {
     const fs = require('fs');
     const path = require('path');
 

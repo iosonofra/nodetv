@@ -7,7 +7,7 @@ const { requireAuth } = require('../auth');
 async function checkOwnership(req, sourceId) {
     if (req.user.role === 'admin') return true;
     const source = await sources.getById(sourceId);
-    return source && source.user_id === req.user.id;
+    return source && (source.user_id === req.user.id || source.user_id === 0);
 }
 
 // Get all favorites

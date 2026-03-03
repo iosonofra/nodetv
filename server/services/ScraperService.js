@@ -94,10 +94,31 @@ class ScraperService {
         };
         this.addLog('Starting Python scraper...');
 
-        // Use python3 as standard for Alpine
-        const pythonProcess = spawn('python3', [this.scraperPath], {
+        // Path to virtualenv python (standard for Alpine/Linux setup)
+        const venvPython = path.join(this.workDir, 'venv', 'bin', 'python3');
+        const pythonBinary = fs.existsSync(venvPython) ? venvPython : 'python3';
+
+        if (pythonBinary !== 'python3') {
+            this.addLog(`Using Virtualenv Python: ${pythonBinary}`);
+        }
+
+        const pythonProcess = spawn(pythonBinary, [this.scraperPath], {
             cwd: this.workDir,
             env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+
+        pythonProcess.on('error', (err) => {
+            this.scrapingInProgress = false;
+            this.addLog(`CRITICAL ERROR: Failed to start scraper process: ${err.message}`);
+            if (err.code === 'ENOENT') {
+                this.addLog('Hint: "python3" binary not found. Please run the setup script: sh scripts/setup-scraper.sh');
+            }
+            this.lastRun = {
+                startTime: this.lastRun?.startTime,
+                endTime: new Date().toISOString(),
+                status: 'error',
+                error: err.message
+            };
         });
 
         pythonProcess.stdout.on('data', (data) => {

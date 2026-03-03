@@ -27,6 +27,7 @@ class ScraperSettings {
                     </div>
                     <div class="warp-actions">
                         <button id="btn-scraper-run" class="btn btn-primary">Run Now</button>
+                        <a href="/api/scraper/playlist" class="btn btn-secondary" target="_blank" download="eventi-live.m3u" style="margin-left: 10px;">Download M3U</a>
                     </div>
                 </div>
                 

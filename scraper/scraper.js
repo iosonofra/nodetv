@@ -63,24 +63,49 @@ async function scrape() {
 
         const m3uLines = ["#EXTM3U"];
 
+        // Monitor script to catch URLs from JS (fetch/XHR)
+        const MONITOR_SCRIPT = `
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = function() {
+                const url = arguments[0];
+                if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
+                    console.log('INTERCEPT_URL:' + url);
+                }
+                return originalFetch.apply(this, arguments);
+            };
+            const originalOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function() {
+                const url = arguments[1];
+                if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
+                    console.log('INTERCEPT_URL:' + url);
+                }
+                return originalOpen.apply(this, arguments);
+            };
+        })();
+        `;
+
         for (let i = 0; i < events.length; i++) {
             const event = events[i];
             if (!event.link) continue;
 
-            const playerUrl = event.link;
+            let playerUrl = event.link;
+            if (playerUrl.startsWith('/')) {
+                playerUrl = BASE_URL + playerUrl;
+            }
+
             const eventName = event.evento || 'Unknown';
             console.log(`[${i + 1}/${events.length}] Processing ${eventName} (${event.canale})...`);
 
             let mpdUrl = null;
             let ckParam = null;
 
-            // Setup interception
-            await page.setRequestInterception(true);
+            // Passive listeners (more robust on slow connections)
             const requestHandler = request => {
                 const url = request.url();
                 if ((url.includes('.mpd') || url.includes('.m3u8')) && !url.toLowerCase().includes('ad')) {
                     if (!mpdUrl) {
-                        console.log(`  [+] Intercepted manifest URL: ${url}`);
+                        console.log(`  [+] Intercepted from request: ${url}`);
                         mpdUrl = url;
 
                         try {
@@ -90,35 +115,72 @@ async function scrape() {
                         } catch (err) { }
                     }
                 }
-                request.continue();
+                // No request.continue() needed as interception is not enabled globally
             };
-            page.on('request', requestHandler);
 
-            try {
-                await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
-                await new Promise(r => setTimeout(r, 8000)); // Sleep for 8s like Python version
+            const consoleHandler = msg => {
+                const text = msg.text();
+                if (text.startsWith('INTERCEPT_URL:')) {
+                    const url = text.replace('INTERCEPT_URL:', '');
+                    if (!mpdUrl) {
+                        console.log(`  [+] Intercepted from console: ${url}`);
+                        mpdUrl = url;
 
-                // Check iframes
-                const frames = page.frames();
-                for (const frame of frames) {
-                    const src = frame.url();
-                    if (src && (src.includes('.mpd') || src.includes('.m3u8')) && !mpdUrl) {
-                        console.log(`  [+] Found manifest in frame URL: ${src}`);
-                        mpdUrl = src;
+                        try {
+                            const parsedUrl = new URL(url);
+                            const ck = parsedUrl.searchParams.get('ck');
+                            if (ck) ckParam = ck;
+                        } catch (err) { }
                     }
                 }
+            };
 
-                // Simulate clicks to trigger playback/loads
+            page.on('request', requestHandler);
+            page.on('console', consoleHandler);
+
+            try {
+                // Apply monitor script before navigation
+                await page.evaluateOnNewDocument(MONITOR_SCRIPT);
+
+                await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
+                await new Promise(r => setTimeout(r, 10000)); // Increased to 10s
+
+                // Check all frames again after interaction
+                const checkFrames = () => {
+                    for (const frame of page.frames()) {
+                        try {
+                            const src = frame.url();
+                            if (src && (src.includes('.mpd') || src.includes('.m3u8')) && !mpdUrl) {
+                                console.log(`  [+] Found manifest in frame URL: ${src}`);
+                                mpdUrl = src;
+
+                                try {
+                                    const parsedUrl = new URL(src);
+                                    const ck = parsedUrl.searchParams.get('ck');
+                                    if (ck) ckParam = ck;
+                                } catch (err) { }
+                                break;
+                            }
+                        } catch (e) { }
+                    }
+                };
+
+                checkFrames();
+
+                // Interactive bypass
                 await page.mouse.click(640, 360);
-                await new Promise(r => setTimeout(r, 2000));
+                await new Promise(r => setTimeout(r, 3000));
+                checkFrames();
+
                 await page.mouse.click(640, 400);
                 await new Promise(r => setTimeout(r, 5000));
+                checkFrames();
 
             } catch (err) {
                 console.error(` [!] Error on ${playerUrl}: ${err.message}`);
             } finally {
                 page.off('request', requestHandler);
-                await page.setRequestInterception(false);
+                page.off('console', consoleHandler);
             }
 
             if (mpdUrl) {

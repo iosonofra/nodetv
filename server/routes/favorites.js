@@ -26,7 +26,7 @@ router.get('/', requireAuth, async (req, res) => {
         // If no sourceId is provided, we must filter out favorites for sources they don't own
         if (!sourceId && req.user.role !== 'admin') {
             const allSources = await sources.getAll();
-            const allowedSourceIds = allSources.filter(s => s.user_id === req.user.id).map(s => s.id);
+            const allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
             const filteredItems = items.filter(item => allowedSourceIds.includes(parseInt(item.source_id)));
             return res.json(filteredItems);
         }

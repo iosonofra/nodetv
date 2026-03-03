@@ -20,7 +20,7 @@ async function loadDb() {
       // Migration: backfill user_id for existing sources and fix partial urls
       if (data.sources) {
         data.sources.forEach(source => {
-          if (!source.user_id) source.user_id = 1; // Default to first user (admin)
+          if (source.user_id === undefined || source.user_id === null) source.user_id = 1; // Default to first user (admin)
           if (source.url && !source.url.startsWith('http://') && !source.url.startsWith('https://') && !source.url.startsWith('file://')) {
             source.url = 'http://' + source.url;
           }

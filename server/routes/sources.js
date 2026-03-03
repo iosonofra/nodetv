@@ -62,7 +62,7 @@ router.get('/:id', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Source not found' });
         }
 
-        if (source.user_id !== req.user.id && req.user.role !== 'admin') {
+        if (source.user_id !== req.user.id && source.user_id !== 0 && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Access denied to this source' });
         }
 
@@ -197,7 +197,7 @@ router.post('/:id/sync', requireAuth, async (req, res) => {
         const source = await sources.getById(id);
         if (!source) return res.status(404).json({ error: 'Source not found' });
 
-        if (source.user_id !== req.user.id && req.user.role !== 'admin') {
+        if (source.user_id !== req.user.id && source.user_id !== 0 && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Access denied to this source' });
         }
 

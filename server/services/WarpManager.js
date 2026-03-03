@@ -17,6 +17,14 @@ class WarpManager {
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });
         }
+
+        // Ensure binaries have execute permissions (fixes deployments that lose perms)
+        try {
+            if (fs.existsSync(this.wgcfPath)) fs.chmodSync(this.wgcfPath, 0o755);
+            if (fs.existsSync(this.wireproxyPath)) fs.chmodSync(this.wireproxyPath, 0o755);
+        } catch (e) {
+            // Ignore on Windows or if permissions can't be set
+        }
     }
 
     async register() {

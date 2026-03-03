@@ -353,7 +353,8 @@ class MoviesPage {
                         tvgLogo: movie.stream_icon || movie.cover,
                         sourceType: 'xtream',
                         sourceId: movie.sourceId,
-                        isVod: true // Mark as VOD for player handling
+                        isVod: true, // Mark as VOD for player handling
+                        useWarp: this.sources?.find(s => s.id === movie.sourceId)?.use_warp || false
                     };
 
                     // For VOD, use direct URL (don't proxy through HLS)

@@ -730,6 +730,10 @@ class ChannelList {
         const categories = await API.proxy.xtream.liveCategories(sourceId);
         const streams = await API.proxy.xtream.liveStreams(sourceId);
 
+        // Lookup source's use_warp flag
+        const sourceObj = this.sources?.find(s => s.id === sourceId);
+        const useWarp = sourceObj?.use_warp || false;
+
         // Map categories to groups
         const categoryGroups = categories.map(cat => ({
             id: `xtream_${sourceId}_${cat.category_id}`,
@@ -751,7 +755,8 @@ class ChannelList {
             // Use string comparison to handle type mismatches (number vs string category_id)
             groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
             sourceId,
-            sourceType: 'xtream'
+            sourceType: 'xtream',
+            useWarp
         }));
 
         // Deduplicate by name within the same group (Xtream often sends backup streams with same name)
@@ -789,6 +794,10 @@ class ChannelList {
 
         this.groups.push(...m3uGroups);
 
+        // Lookup source's use_warp flag
+        const sourceObj = this.sources?.find(s => s.id === sourceId);
+        const useWarp = sourceObj?.use_warp || false;
+
         // Add channels - use the stable id from the server
         const channelList = data.channels.map(ch => ({
             ...ch,
@@ -799,7 +808,8 @@ class ChannelList {
             streamId: ch.id,
             groupId: `m3u_${sourceId}_group_${data.groups.findIndex(g => g.name === ch.groupTitle)}`,
             sourceId,
-            sourceType: 'm3u'
+            sourceType: 'm3u',
+            useWarp
         }));
 
         this.channels.push(...channelList);

@@ -437,7 +437,8 @@ class SeriesPage {
                         name: `${this.currentSeries?.name || 'Series'} - ${episodeTitle}`,
                         sourceType: 'xtream',
                         sourceId: sourceId,
-                        isVod: true
+                        isVod: true,
+                        useWarp: this.sources?.find(s => s.id === sourceId)?.use_warp || false
                     };
 
                     this.app.player.play(channel, result.url);

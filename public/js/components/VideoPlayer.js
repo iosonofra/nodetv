@@ -1224,6 +1224,20 @@ class VideoPlayer {
             this.shaka.getNetworkingEngine().clearAllRequestFilters();
             this.shaka.getNetworkingEngine().clearAllResponseFilters();
 
+            // WARP Proxy: Route all manifest/segment requests through server-side WARP proxy
+            if (channel.useWarp) {
+                console.log('[Shaka] WARP enabled for source', channel.sourceId, '- proxying all requests through server');
+                this.shaka.getNetworkingEngine().registerRequestFilter((type, request) => {
+                    if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST ||
+                        type === shaka.net.NetworkingEngine.RequestType.SEGMENT) {
+                        const originalUrl = request.uris[0];
+                        if (originalUrl && !originalUrl.startsWith('/api/')) {
+                            request.uris[0] = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${channel.sourceId}`;
+                        }
+                    }
+                });
+            }
+
             // Configure DRM if needed
             if (drmConfig) {
                 const servers = {};

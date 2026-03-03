@@ -1329,9 +1329,17 @@ class VideoPlayer {
         } catch (err) {
             console.error('[Shaka] Load failed:', err);
             let errMsg = 'DRM Playback failed';
-            if (err.code) errMsg += ` (Error ${err.code})`;
-            else if (err.message) errMsg += `: ${err.message}`;
-            else errMsg += ': Check connection';
+
+            // Check for insecure context (HTTP over network) which blocks EME
+            if (drmConfig && !window.isSecureContext) {
+                errMsg = 'DRM (Error 6001): Requires HTTPS or localhost. Browser blocked keys on insecure HTTP network IP.';
+            } else if (err.code) {
+                errMsg += ` (Error ${err.code})`;
+            } else if (err.message) {
+                errMsg += `: ${err.message}`;
+            } else {
+                errMsg += ': Check connection';
+            }
             this.showError(errMsg);
         }
     }

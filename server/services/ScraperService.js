@@ -52,11 +52,6 @@ class ScraperService {
 
             if (!exists) {
                 this.addLog('Creating system source: EVENTI-LIVE');
-                // We use a manual insert into db.json via the sources object if possible
-                // but since ID 0 is special, let's just use the public creator and then we might need to fix the ID
-                // Actually, let's just make it a normal source owned by admin (user_id: 1) but with a special name or flag
-                // User explicitly said "user_id: 0" in design, but let's check sources.create
-
                 const m3uUrl = `file://${this.m3uPath}`;
                 await sources.create({
                     id: 0, // Force ID 0 if possible
@@ -66,6 +61,9 @@ class ScraperService {
                     url: m3uUrl,
                     enabled: true
                 });
+            } else if (exists.user_id !== 0) {
+                this.addLog('Migrating EVENTI-LIVE source to system user (user_id: 0)');
+                await sources.update(exists.id, { user_id: 0 });
             }
         } catch (err) {
             this.addLog(`Error ensuring system source: ${err.message}`);

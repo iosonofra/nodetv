@@ -1,15 +1,11 @@
 #!/bin/sh
-# Setup script for NodeCast-TV Scraper on Alpine Linux (Virtualenv Version)
+# Setup script for NodeCast-TV Scraper on Alpine Linux (Node.js/Puppeteer Version)
 
 set -e
 
-SCRAPER_DIR="$(dirname "$0")/../scraper"
-cd "$SCRAPER_DIR"
-
+# System dependencies for Chromium on Alpine
 echo "[*] Installing system dependencies via apk..."
 apk add --no-cache \
-    python3 \
-    py3-pip \
     chromium \
     nss \
     freetype \
@@ -17,32 +13,33 @@ apk add --no-cache \
     ca-certificates \
     ttf-freefont \
     dbus-libs \
-    libstdc++
+    libstdc++ \
+    nodejs \
+    npm
 
-echo "[*] Creating Python Virtualenv..."
-python3 -m venv venv
+echo "[*] Installing Node.js dependencies for scraper..."
+# Install the new dependencies added to package.json
+npm install
 
-echo "[*] Installing Python dependencies into venv..."
-# No need for --break-system-packages inside a venv
-./venv/bin/pip install --no-cache-dir playwright playwright-stealth
-
-echo "[*] Configuring Playwright..."
-# We use system chromium, so skip the big heavy downloads
-export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+echo "[*] Configuring Puppeteer environment..."
+# We use system chromium to avoid musl libc issues with bundled chrome
+export PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+export PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 echo "[*] Verifying installations..."
-./venv/bin/python3 --version
+node --version
+npm --version
 chromium-browser --version
 
-echo "[*] Verifying Python modules in venv..."
-if ./venv/bin/python3 -c "import playwright; import playwright_stealth; print('[✓] Playwright modules found in venv')" 2>/dev/null; then
-    echo "[✓] Virtualenv setup verified successfully!"
+echo "[*] Verifying Puppeteer modules..."
+if node -e "require('puppeteer-core'); require('puppeteer-extra'); require('puppeteer-extra-plugin-stealth'); console.log('[✓] Puppeteer modules found')" 2>/dev/null; then
+    echo "[✓] Node.js setup verified successfully!"
 else
-    echo "[!] ERROR: Modules not found in venv. Please check the logs above."
+    echo "[!] ERROR: Modules not found. Please try running 'npm install' manually."
     exit 1
 fi
 
 echo ""
-echo "[✓] Virtualenv setup complete!"
-echo "[*] The scraper will now use the private environment in: $SCRAPER_DIR/venv"
+echo "[✓] Setup complete!"
+echo "[*] The scraper is now configured to use Node.js and system Chromium."
 echo "[*] You can now restart the application or run the scraper from the Settings page."

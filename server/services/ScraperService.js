@@ -11,7 +11,7 @@ class ScraperService {
         this.maxLogs = 100;
         this.intervalMs = 60 * 60 * 1000; // 1 hour
         this.timer = null;
-        this.scraperPath = path.join(__dirname, '..', '..', 'scraper', 'scraper.py');
+        this.scraperPath = path.join(__dirname, '..', '..', 'scraper', 'scraper.js');
         this.workDir = path.join(__dirname, '..', '..', 'scraper');
         this.m3uPath = path.join(this.workDir, 'playlist.m3u');
     }
@@ -92,27 +92,18 @@ class ScraperService {
             startTime: new Date().toISOString(),
             status: 'running'
         };
-        this.addLog('Starting Python scraper...');
+        this.addLog('Starting Node.js scraper...');
 
-        // Path to virtualenv python (standard for Alpine/Linux setup)
-        const venvPython = path.join(this.workDir, 'venv', 'bin', 'python3');
-        const pythonBinary = fs.existsSync(venvPython) ? venvPython : 'python3';
+        const nodeBinary = process.execPath; // Use current node binary
 
-        if (pythonBinary !== 'python3') {
-            this.addLog(`Using Virtualenv Python: ${pythonBinary}`);
-        }
-
-        const pythonProcess = spawn(pythonBinary, [this.scraperPath], {
+        const pythonProcess = spawn(nodeBinary, [this.scraperPath], {
             cwd: this.workDir,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            env: { ...process.env, CHROMIUM_PATH: '/usr/bin/chromium-browser' }
         });
 
         pythonProcess.on('error', (err) => {
             this.scrapingInProgress = false;
             this.addLog(`CRITICAL ERROR: Failed to start scraper process: ${err.message}`);
-            if (err.code === 'ENOENT') {
-                this.addLog('Hint: "python3" binary not found. Please run the setup script: sh scripts/setup-scraper.sh');
-            }
             this.lastRun = {
                 startTime: this.lastRun?.startTime,
                 endTime: new Date().toISOString(),

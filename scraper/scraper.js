@@ -146,35 +146,66 @@ async function scrape() {
                 await new Promise(r => setTimeout(r, 10000)); // Increased to 10s
 
                 // Check all frames again after interaction
-                const checkFrames = () => {
+                const checkFrames = async () => {
+                    // Method 1: Check frame URLs (built-in)
                     for (const frame of page.frames()) {
                         try {
                             const src = frame.url();
                             if (src && (src.includes('.mpd') || src.includes('.m3u8')) && !mpdUrl) {
                                 console.log(`  [+] Found manifest in frame URL: ${src}`);
                                 mpdUrl = src;
-
-                                try {
-                                    const parsedUrl = new URL(src);
-                                    const ck = parsedUrl.searchParams.get('ck');
-                                    if (ck) ckParam = ck;
-                                } catch (err) { }
                                 break;
                             }
                         } catch (e) { }
                     }
+
+                    // Method 2: Explicit DOM src inspection (matches Python's effectiveness)
+                    if (!mpdUrl) {
+                        try {
+                            const iframeSrcs = await page.evaluate(() => {
+                                return Array.from(document.querySelectorAll('iframe'))
+                                    .map(f => f.getAttribute('src'))
+                                    .filter(s => s);
+                            });
+
+                            for (let src of iframeSrcs) {
+                                if (src.startsWith("//")) src = "https:" + src;
+                                if ((src.includes('.mpd') || src.includes('.m3u8')) && !mpdUrl) {
+                                    console.log(`  [+] Found manifest in iframe DOM src: ${src}`);
+                                    mpdUrl = src;
+                                    break;
+                                }
+                            }
+                        } catch (e) { }
+                    }
+
+                    if (mpdUrl) {
+                        try {
+                            const parsedUrl = new URL(mpdUrl.includes('#') ? mpdUrl.split('#')[0] : mpdUrl);
+                            const ck = parsedUrl.searchParams.get('ck');
+                            if (ck) ckParam = ck;
+
+                            // If not found in main URL, check fragment (common in extension wrappers)
+                            if (!ckParam && mpdUrl.includes('#')) {
+                                const frag = mpdUrl.split('#')[1];
+                                if (frag.includes('ck=')) {
+                                    ckParam = frag.split('ck=')[1].split('&')[0];
+                                }
+                            }
+                        } catch (err) { }
+                    }
                 };
 
-                checkFrames();
+                await checkFrames();
 
                 // Interactive bypass
                 await page.mouse.click(640, 360);
                 await new Promise(r => setTimeout(r, 3000));
-                checkFrames();
+                await checkFrames();
 
                 await page.mouse.click(640, 400);
                 await new Promise(r => setTimeout(r, 5000));
-                checkFrames();
+                await checkFrames();
 
             } catch (err) {
                 console.error(` [!] Error on ${playerUrl}: ${err.message}`);
@@ -184,6 +215,14 @@ async function scrape() {
             }
 
             if (mpdUrl) {
+                // Clean up chrome-extension prefix if present (matches Python version)
+                if (mpdUrl.startsWith("chrome-extension://")) {
+                    if (mpdUrl.includes("#")) {
+                        console.log(`  [*] Cleaning extension wrapper: ${mpdUrl.split('#')[0]}`);
+                        mpdUrl = mpdUrl.split("#")[1];
+                    }
+                }
+
                 // Decode keys
                 let keysStr = "";
                 if (!ckParam && mpdUrl.includes("ck=")) {
@@ -195,7 +234,11 @@ async function scrape() {
 
                 if (ckParam) {
                     try {
-                        let decoded = Buffer.from(ckParam, 'base64').toString('utf-8');
+                        // Fix padding
+                        let cleanCk = ckParam;
+                        while (cleanCk.length % 4 !== 0) cleanCk += '=';
+
+                        let decoded = Buffer.from(cleanCk, 'base64').toString('utf-8');
                         try {
                             const ckJson = JSON.parse(decoded);
                             if (ckJson.keys) {

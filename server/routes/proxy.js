@@ -434,7 +434,7 @@ async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
             if (source && source.use_warp) {
                 const warpStatus = warpManager.getStatus();
                 if (warpStatus.status === 'connected') {
-                    fetchOptions.agent = new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`);
+                    fetchOptions.agent = new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`, { rejectUnauthorized: false });
                     console.log(`[Proxy] Routing M3U8 rewrite through WARP for source ${sourceId}`);
                 }
             }
@@ -468,12 +468,14 @@ router.get('/stream', async (req, res) => {
 
     try {
         let agent = null;
+        let skipTlsVerify = false;
         if (sourceId) {
             const source = await sources.getById(sourceId);
             if (source && source.use_warp) {
                 const warpStatus = warpManager.getStatus();
                 if (warpStatus.status === 'connected') {
                     agent = new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`);
+                    skipTlsVerify = true;
                     console.log(`[Proxy] Routing stream through WARP for source ${sourceId}`);
                 }
             }
@@ -498,7 +500,7 @@ router.get('/stream', async (req, res) => {
         // Handle different protocols
         const lib = url.startsWith('https') ? https : http;
 
-        const proxyReq = lib.get(url, { ...options, agent }, (proxyRes) => {
+        const proxyReq = lib.get(url, { ...options, agent, rejectUnauthorized: skipTlsVerify ? false : undefined }, (proxyRes) => {
             // Forward headers
             res.status(proxyRes.statusCode);
             for (const [key, value] of Object.entries(proxyRes.headers)) {

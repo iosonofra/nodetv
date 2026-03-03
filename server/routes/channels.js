@@ -21,7 +21,7 @@ function mapItemType(apiType) {
 async function checkOwnership(req, sourceId) {
     if (req.user.role === 'admin') return true;
     const source = await sources.getById(sourceId);
-    return source && source.user_id === req.user.id;
+    return source && (source.user_id === req.user.id || source.user_id === 0);
 }
 
 // Get all hidden items (formatted like db.json for frontend compatibility)
@@ -33,7 +33,7 @@ router.get('/hidden', requireAuth, async (req, res) => {
         let allowedSourceIds = [];
         if (req.user.role !== 'admin') {
             const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id).map(s => s.id);
+            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
 
             // If user requested a specific source they don't own, return empty OR if they have no sources
             if (sourceId && !allowedSourceIds.includes(parseInt(sourceId))) {
@@ -194,7 +194,7 @@ router.post('/hide/bulk', requireAuth, async (req, res) => {
         let allowedSourceIds = null;
         if (req.user.role !== 'admin') {
             const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id).map(s => s.id);
+            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
         }
 
         // Prepare statements once
@@ -245,7 +245,7 @@ router.post('/show/bulk', requireAuth, async (req, res) => {
         let allowedSourceIds = null;
         if (req.user.role !== 'admin') {
             const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id).map(s => s.id);
+            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
         }
 
         // Prepare statements once

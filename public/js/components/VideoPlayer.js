@@ -1228,8 +1228,33 @@ class VideoPlayer {
             if (drmConfig) {
                 const servers = {};
                 const clearKeys = {};
-                const licenseType = drmConfig.licenseType || 'com.widevine.alpha';
+
+                // Normalize "clearkey" to "org.w3.clearkey"
+                let licenseType = drmConfig.licenseType || 'com.widevine.alpha';
+                if (licenseType.toLowerCase() === 'clearkey') {
+                    licenseType = 'org.w3.clearkey';
+                }
+
                 const licenseKey = drmConfig.licenseKey;
+
+                // Helper to decode Base64Url to Hex
+                const base64ToHex = (str) => {
+                    try {
+                        let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+                        while (b64.length % 4 !== 0) b64 += '=';
+                        const raw = atob(b64);
+                        let hex = '';
+                        for (let i = 0; i < raw.length; i++) {
+                            const h = raw.charCodeAt(i).toString(16);
+                            hex += (h.length === 2 ? h : '0' + h);
+                        }
+                        return hex.toLowerCase();
+                    } catch (e) {
+                        return str; // Return original if not valid base64
+                    }
+                };
+
+                const isHex = (str) => /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
 
                 if (licenseKey) {
                     if (licenseKey.startsWith('http')) {
@@ -1238,8 +1263,11 @@ class VideoPlayer {
                         // Handle comma-separated multiple keys (e.g. kid1:key1,kid2:key2)
                         const keyPairs = licenseKey.split(',');
                         keyPairs.forEach(pair => {
-                            const [kid, key] = pair.trim().split(':');
+                            let [kid, key] = pair.trim().split(':');
                             if (kid && key) {
+                                // Shaka Player requires Hex format for kid/key
+                                if (!isHex(kid)) kid = base64ToHex(kid);
+                                if (!isHex(key)) key = base64ToHex(key);
                                 clearKeys[kid] = key;
                             }
                         });

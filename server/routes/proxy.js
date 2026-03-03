@@ -31,7 +31,7 @@ router.param('sourceId', async (req, res, next, sourceId) => {
 
     if (req.user) {
         const source = await sources.getById(sourceId);
-        if (source && source.user_id === req.user.id) {
+        if (source && (source.user_id === req.user.id || source.user_id === 0)) {
             return next();
         }
     }

@@ -1232,11 +1232,18 @@ class VideoPlayer {
                 const licenseKey = drmConfig.licenseKey;
 
                 if (licenseKey) {
-                    if (licenseKey.includes(':') && !licenseKey.startsWith('http')) {
-                        const [kid, key] = licenseKey.split(':');
-                        clearKeys[kid] = key;
-                    } else if (licenseKey.startsWith('http')) {
+                    if (licenseKey.startsWith('http')) {
                         servers[licenseType] = licenseKey;
+                    } else if (licenseKey.includes(':')) {
+                        // Handle comma-separated multiple keys (e.g. kid1:key1,kid2:key2)
+                        const keyPairs = licenseKey.split(',');
+                        keyPairs.forEach(pair => {
+                            const [kid, key] = pair.trim().split(':');
+                            if (kid && key) {
+                                clearKeys[kid] = key;
+                            }
+                        });
+                        console.log(`[Player] Loaded ${Object.keys(clearKeys).length} ClearKey(s)`);
                     }
                 }
 
@@ -1293,7 +1300,11 @@ class VideoPlayer {
             this.video.play().catch(() => { });
         } catch (err) {
             console.error('[Shaka] Load failed:', err);
-            this.showError('DRM Playback failed: ' + (err.message || 'Check connection'));
+            let errMsg = 'DRM Playback failed';
+            if (err.code) errMsg += ` (Error ${err.code})`;
+            else if (err.message) errMsg += `: ${err.message}`;
+            else errMsg += ': Check connection';
+            this.showError(errMsg);
         }
     }
 

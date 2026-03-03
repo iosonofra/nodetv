@@ -287,7 +287,7 @@ class WarpManager {
                 const text = data.toString();
                 console.log(`[WARP] wireproxy: ${text.trim()}`);
 
-                if (text.includes('Socks5') || text.includes('socks5') || text.includes('listening')) {
+                if (text.includes('Socks5') || text.includes('socks5') || text.includes('listening') || text.includes('now Up')) {
                     this.status = 'connected';
                     console.log('[WARP] Proxy connected successfully.');
                     clearTimeout(startTimeout);

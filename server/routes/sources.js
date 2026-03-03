@@ -76,7 +76,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 // Create source
 router.post('/', requireAuth, async (req, res) => {
     try {
-        let { type, name, url, username, password } = req.body;
+        let { type, name, url, username, password, use_warp } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
@@ -95,7 +95,7 @@ router.post('/', requireAuth, async (req, res) => {
             ownerId = parseInt(req.body.user_id);
         }
 
-        const source = await sources.create({ type, name, url, username, password, user_id: ownerId });
+        const source = await sources.create({ type, name, url, username, password, use_warp: !!use_warp, user_id: ownerId });
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -117,7 +117,7 @@ router.put('/:id', requireAuth, async (req, res) => {
             return res.status(403).json({ error: 'Access denied to this source' });
         }
 
-        let { name, url, username, password } = req.body;
+        let { name, url, username, password, use_warp } = req.body;
 
         if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'http://' + url;
@@ -127,7 +127,8 @@ router.put('/:id', requireAuth, async (req, res) => {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
-            password: password !== undefined ? password : existing.password
+            password: password !== undefined ? password : existing.password,
+            use_warp: use_warp !== undefined ? !!use_warp : existing.use_warp
         };
 
         if (req.user.role === 'admin' && req.body.user_id) {

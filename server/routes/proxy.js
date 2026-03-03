@@ -426,13 +426,28 @@ router.delete('/cache/:sourceId', (req, res) => {
 // --- Stream Proxy (Unchanged mostly) --- //
 
 // Helper: fetch URL with optional WARP agent, returns { statusCode, headers, body }
-function proxyFetch(targetUrl, agent = null) {
+// Follows redirects (up to 5 hops)
+function proxyFetch(targetUrl, agent = null, maxRedirects = 5) {
     return new Promise((resolve, reject) => {
         const lib = targetUrl.startsWith('https') ? https : http;
-        const opts = { agent };
-        if (agent) opts.rejectUnauthorized = false;
+        const opts = {};
+        if (agent) {
+            opts.agent = agent;
+            opts.rejectUnauthorized = false;
+        }
 
         const req = lib.get(targetUrl, opts, (res) => {
+            // Follow redirects
+            if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location && maxRedirects > 0) {
+                let redirectUrl = res.headers.location;
+                if (!redirectUrl.startsWith('http')) {
+                    const urlObj = new URL(targetUrl);
+                    redirectUrl = urlObj.origin + redirectUrl;
+                }
+                res.resume(); // Consume response to free up memory
+                return proxyFetch(redirectUrl, agent, maxRedirects - 1).then(resolve, reject);
+            }
+
             const chunks = [];
             res.on('data', chunk => chunks.push(chunk));
             res.on('end', () => {
@@ -509,11 +524,13 @@ router.get('/stream', async (req, res) => {
         // Native Proxy
         const range = req.headers.range;
         const requestOpts = {
-            headers: range ? { Range: range } : {},
-            agent
+            headers: range ? { Range: range } : {}
         };
-        // Skip TLS verification when routing through WARP (Alpine CA bundle issue)
-        if (agent) requestOpts.rejectUnauthorized = false;
+        // Only set agent + skip TLS when routing through WARP
+        if (agent) {
+            requestOpts.agent = agent;
+            requestOpts.rejectUnauthorized = false;
+        }
 
         // Handle different protocols
         const lib = url.startsWith('https') ? https : http;

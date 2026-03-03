@@ -425,24 +425,51 @@ router.delete('/cache/:sourceId', (req, res) => {
 
 // --- Stream Proxy (Unchanged mostly) --- //
 
+// Helper: fetch URL with optional WARP agent, returns { statusCode, headers, body }
+function proxyFetch(targetUrl, agent = null) {
+    return new Promise((resolve, reject) => {
+        const lib = targetUrl.startsWith('https') ? https : http;
+        const opts = { agent };
+        if (agent) opts.rejectUnauthorized = false;
+
+        const req = lib.get(targetUrl, opts, (res) => {
+            const chunks = [];
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+                resolve({
+                    ok: res.statusCode >= 200 && res.statusCode < 400,
+                    statusCode: res.statusCode,
+                    headers: res.headers,
+                    body: Buffer.concat(chunks).toString('utf-8')
+                });
+            });
+            res.on('error', reject);
+        });
+        req.on('error', reject);
+    });
+}
+
+// Helper: create a WARP SOCKS agent if source has use_warp enabled
+async function getWarpAgent(sourceId) {
+    if (!sourceId) return null;
+    const source = await sources.getById(sourceId);
+    if (!source || !source.use_warp) return null;
+    const warpStatus = warpManager.getStatus();
+    if (warpStatus.status !== 'connected') return null;
+
+    console.log(`[Proxy] Routing through WARP for source ${sourceId}`);
+    return new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`, {
+        rejectUnauthorized: false
+    });
+}
+
 // Rewrite M3U8 for proxying
 async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
     try {
-        let fetchOptions = {};
-        if (sourceId) {
-            const source = await sources.getById(sourceId);
-            if (source && source.use_warp) {
-                const warpStatus = warpManager.getStatus();
-                if (warpStatus.status === 'connected') {
-                    fetchOptions.agent = new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`, { rejectUnauthorized: false });
-                    console.log(`[Proxy] Routing M3U8 rewrite through WARP for source ${sourceId}`);
-                }
-            }
-        }
-
-        const response = await fetch(m3u8Url, fetchOptions);
-        if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-        let content = await response.text();
+        const agent = await getWarpAgent(sourceId);
+        const response = await proxyFetch(m3u8Url, agent);
+        if (!response.ok) throw new Error(`Fetch failed: ${response.statusCode}`);
+        let content = response.body;
 
         // Resolve relative URLs
         const m3u8Base = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
@@ -452,7 +479,7 @@ async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
             if (!chunkUrl.startsWith('http')) {
                 chunkUrl = m3u8Base + chunkUrl;
             }
-            return `${baseUrl}?url=${encodeURIComponent(chunkUrl)}`;
+            return `${baseUrl}?url=${encodeURIComponent(chunkUrl)}${sourceId ? `&sourceId=${sourceId}` : ''}`;
         });
 
         return content;
@@ -467,19 +494,7 @@ router.get('/stream', async (req, res) => {
     if (!url) return res.status(400).send('URL required');
 
     try {
-        let agent = null;
-        let skipTlsVerify = false;
-        if (sourceId) {
-            const source = await sources.getById(sourceId);
-            if (source && source.use_warp) {
-                const warpStatus = warpManager.getStatus();
-                if (warpStatus.status === 'connected') {
-                    agent = new SocksProxyAgent(`socks5h://127.0.0.1:${warpStatus.port}`);
-                    skipTlsVerify = true;
-                    console.log(`[Proxy] Routing stream through WARP for source ${sourceId}`);
-                }
-            }
-        }
+        const agent = await getWarpAgent(sourceId);
 
         // Handle M3U8 rewrite
         if (url.includes('.m3u8')) {
@@ -493,14 +508,17 @@ router.get('/stream', async (req, res) => {
 
         // Native Proxy
         const range = req.headers.range;
-        const options = {
-            headers: range ? { Range: range } : {}
+        const requestOpts = {
+            headers: range ? { Range: range } : {},
+            agent
         };
+        // Skip TLS verification when routing through WARP (Alpine CA bundle issue)
+        if (agent) requestOpts.rejectUnauthorized = false;
 
         // Handle different protocols
         const lib = url.startsWith('https') ? https : http;
 
-        const proxyReq = lib.get(url, { ...options, agent, rejectUnauthorized: skipTlsVerify ? false : undefined }, (proxyRes) => {
+        const proxyReq = lib.get(url, requestOpts, (proxyRes) => {
             // Forward headers
             res.status(proxyRes.statusCode);
             for (const [key, value] of Object.entries(proxyRes.headers)) {

@@ -273,6 +273,27 @@ async function scrape() {
         if (m3uLines.length > 1) {
             fs.writeFileSync(PLAYLIST_FILE, m3uLines.join("\n"), 'utf8');
             console.log(`[*] Successfully saved playlist to: ${PLAYLIST_FILE}`);
+
+            // Trigger sync on the app server so it picks up the new playlist
+            const APP_PORT = process.env.PORT || 3000;
+            const syncUrl = `http://127.0.0.1:${APP_PORT}/api/sources/sync-all`;
+            try {
+                const http = require('http');
+                await new Promise((resolve, reject) => {
+                    const req = http.request(syncUrl, { method: 'POST' }, (res) => {
+                        res.resume();
+                        console.log(`[*] Sync triggered (status: ${res.statusCode})`);
+                        resolve();
+                    });
+                    req.on('error', (err) => {
+                        console.warn(`[!] Could not trigger sync (server may not be running): ${err.message}`);
+                        resolve(); // Don't fail the scraper if sync fails
+                    });
+                    req.end();
+                });
+            } catch (err) {
+                console.warn(`[!] Sync trigger failed: ${err.message}`);
+            }
         }
 
         // Save History

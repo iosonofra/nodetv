@@ -996,7 +996,17 @@ class VideoPlayer {
                         if (isCorsLikely && !this.isUsingProxy) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
-                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, this.currentChannel?.sourceId));
+
+                            if (channel && channel.sourceType === 'xtream') {
+                                // Fallback to external CORS proxy to bypass Cloudflare Node.js blocks
+                                // allorigins supports raw proxying including binary streams
+                                const corsProxy = 'https://api.allorigins.win/raw?url=';
+                                console.log('[Player] Using external CORS proxy for Xtream stream to evade Cloudflare WAF...');
+                                this.hls.loadSource(corsProxy + encodeURIComponent(this.currentUrl));
+                            } else {
+                                this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel?.sourceId));
+                            }
+
                             this.hls.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             // Fatal media error - try recovery with cooldown

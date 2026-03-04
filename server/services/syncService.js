@@ -267,6 +267,7 @@ class SyncService {
                 name = excluded.name,
                 category_id = excluded.category_id,
                 stream_icon = excluded.stream_icon,
+                stream_url = excluded.stream_url,
                 container_extension = excluded.container_extension,
                 data = excluded.data
         `);
@@ -311,7 +312,7 @@ class SyncService {
                     name,
                     String(catId),
                     icon,
-                    null, // Direct URL not stored for Xtream usually, built on fly
+                    item.stream_url || null, // M3U items have stream_url; Xtream builds URLs on the fly
                     container,
                     rating,
                     year,
@@ -420,6 +421,14 @@ class SyncService {
         const { channels, groups } = await m3uParser.fetchAndParse(source.url);
 
         console.log(`[Sync] M3U Parsed: ${channels.length} channels, ${groups.length} groups`);
+
+        // Remove stale items from previous sync for this source.
+        // M3U playlists (especially scraped ones like EVENTI-LIVE) change completely
+        // between runs, so old items must be purged to prevent stale data accumulating.
+        const db = getDb();
+        const deletedItems = db.prepare('DELETE FROM playlist_items WHERE source_id = ? AND type = ?').run(source.id, 'live');
+        const deletedCats = db.prepare('DELETE FROM categories WHERE source_id = ? AND type = ?').run(source.id, 'live');
+        console.log(`[Sync] Cleared old M3U data for source ${source.id}: ${deletedItems.changes} items, ${deletedCats.changes} categories`);
 
         // Save Categories (Groups)
         // M3U groups are just strings usually, we need to normalize them

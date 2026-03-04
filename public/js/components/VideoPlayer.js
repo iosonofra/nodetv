@@ -916,10 +916,12 @@ class VideoPlayer {
             // Proactively use proxy for:
             // 1. User enabled "Force Proxy" in settings
             // 2. Known CORS-restricted domains (like Pluto TV)
-            // Note: Xtream sources are NOT auto-proxied because many providers IP-lock streams
+            // 3. Xtream sources — they never set CORS headers, so direct browser fetch always fails.
+            //    IP-lock is not a concern: the server is the same origin whether direct or proxied.
             // Note: WARP routing for HLS is NOT forced here - it only applies to MPD via Shaka Player
+            const isXtream = channel.sourceType === 'xtream';
             const proxyRequiredDomains = ['pluto.tv'];
-            const needsProxy = this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain));
+            const needsProxy = this.settings.forceProxy || isXtream || proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId) : streamUrl;

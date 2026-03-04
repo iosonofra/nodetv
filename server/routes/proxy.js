@@ -427,10 +427,20 @@ router.delete('/cache/:sourceId', (req, res) => {
 
 // Helper: fetch URL with optional WARP agent, returns { statusCode, headers, body }
 // Follows redirects (up to 5 hops)
-function proxyFetch(targetUrl, agent = null, maxRedirects = 5) {
+function proxyFetch(targetUrl, agent = null, clientReq = null, maxRedirects = 5) {
     return new Promise((resolve, reject) => {
         const lib = targetUrl.startsWith('https') ? https : http;
-        const opts = {};
+        const opts = { headers: {} };
+        const defaultAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+        if (clientReq) {
+            opts.headers['User-Agent'] = clientReq.headers['user-agent'] || defaultAgent;
+            if (clientReq.headers['accept']) opts.headers['Accept'] = clientReq.headers['accept'];
+            if (clientReq.headers['accept-language']) opts.headers['Accept-Language'] = clientReq.headers['accept-language'];
+        } else {
+            opts.headers['User-Agent'] = defaultAgent;
+        }
+
         if (agent) {
             opts.agent = agent;
             opts.rejectUnauthorized = false;
@@ -445,7 +455,7 @@ function proxyFetch(targetUrl, agent = null, maxRedirects = 5) {
                     redirectUrl = urlObj.origin + redirectUrl;
                 }
                 res.resume(); // Consume response to free up memory
-                return proxyFetch(redirectUrl, agent, maxRedirects - 1).then(resolve, reject);
+                return proxyFetch(redirectUrl, agent, clientReq, maxRedirects - 1).then(resolve, reject);
             }
 
             const chunks = [];
@@ -479,10 +489,10 @@ async function getWarpAgent(sourceId) {
 }
 
 // Rewrite M3U8 for proxying
-async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
+async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null, clientReq = null) {
     try {
         const agent = await getWarpAgent(sourceId);
-        const response = await proxyFetch(m3u8Url, agent);
+        const response = await proxyFetch(m3u8Url, agent, clientReq);
         if (!response.ok) throw new Error(`Fetch failed: ${response.statusCode}`);
         let content = response.body;
 
@@ -513,13 +523,17 @@ async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
 // Unlike proxyFetch (which buffers), this streams data directly.
 function pipeWithRedirects(targetUrl, agent, clientReq, clientRes, maxRedirects = 5) {
     const lib = targetUrl.startsWith('https') ? https : http;
-    const opts = {
-        headers: {}
-    };
+    const opts = { headers: {} };
+    const defaultAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
-    // Forward Range header for partial content requests
-    if (clientReq.headers.range) {
-        opts.headers.Range = clientReq.headers.range;
+    // Forward browser headers to prevent anti-bot 403 Forbidden errors
+    if (clientReq) {
+        opts.headers['User-Agent'] = clientReq.headers['user-agent'] || defaultAgent;
+        if (clientReq.headers['accept']) opts.headers['Accept'] = clientReq.headers['accept'];
+        if (clientReq.headers['accept-language']) opts.headers['Accept-Language'] = clientReq.headers['accept-language'];
+        if (clientReq.headers.range) opts.headers.Range = clientReq.headers.range;
+    } else {
+        opts.headers['User-Agent'] = defaultAgent;
     }
 
     if (agent) {
@@ -574,7 +588,7 @@ router.get('/stream', async (req, res) => {
         // Handle M3U8 rewrite
         if (url.includes('.m3u8')) {
             const proxyBase = `${req.protocol}://${req.get('host')}/api/proxy/stream`;
-            const manifest = await rewriteM3u8(url, proxyBase, sourceId);
+            const manifest = await rewriteM3u8(url, proxyBase, sourceId, req);
             if (manifest) {
                 res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
                 return res.send(manifest);

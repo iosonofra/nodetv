@@ -1003,17 +1003,18 @@ class VideoPlayer {
                             this.isUsingProxy = true;
 
                             if (channel && channel.sourceType === 'xtream') {
-                                // THE ULTIMATE BYPASS: FFmpeg Remux (Fragmented MP4)
+                                // THE ULTIMATE BYPASS: FFmpeg Transcode (Fragmented MP4)
                                 // Cloudflare blocks Node.js HTTP reqs (403) and Alpine blocks 302 Downgrades (Mixed Content).
                                 // FFmpeg native binary easily bypasses Cloudflare WAF and streams to backend without Mixed Content errors.
-                                console.log('[Player] Cloudflare CORS/HTTP block detected for Xtream stream. Falling back to native FFmpeg Remux...');
+                                // We use transcode instead of remux because AAC audio in TS requires bitstream filters or re-encoding to work in MP4.
+                                console.log('[Player] Cloudflare CORS/HTTP block detected for Xtream stream. Falling back to native FFmpeg Transcode...');
 
                                 // Clean up HLS.js since we will play the transcoded MP4 natively via the <video> tag
                                 this.hls.stopLoad();
                                 this.hls.detachMedia();
 
-                                const remuxUrl = this.getRemuxUrl(this.currentUrl);
-                                this.video.src = remuxUrl;
+                                const proxyUrl = this.getTranscodeUrl(this.currentUrl);
+                                this.video.src = proxyUrl;
                                 this.video.play().catch(e => {
                                     if (e.name !== 'AbortError') console.error('[Player] FFmpeg fallback autoplay prevented:', e);
                                 });

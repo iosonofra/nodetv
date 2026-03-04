@@ -1011,8 +1011,14 @@ class VideoPlayer {
                                 console.log('[Player] Node.js Proxy failed. Escaping to native FFmpeg Transcode...');
                                 this.isUsingTranscode = true;
 
-                                this.hls.stopLoad();
-                                this.hls.detachMedia();
+                                // CRITICAL: We must destroy() HLS entirely, not just detachMedia().
+                                // detachMedia() is asynchronous and will wipe out this.video.src immediately
+                                // after we assign the proxyUrl to it, leaving the video spinning infinitely!
+                                // destroying it also prevents in-flight XHR 403 errors from firing multiple times.
+                                if (this.hls) {
+                                    this.hls.destroy();
+                                    this.hls = null;
+                                }
 
                                 const proxyUrl = this.getTranscodeUrl(this.currentUrl);
                                 this.video.src = proxyUrl;

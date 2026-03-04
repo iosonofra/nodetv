@@ -913,6 +913,15 @@ class VideoPlayer {
                 return;
             }
 
+            // HTTPS Upgrade: Bypass Mixed Content on Alpine
+            // If the app is served via HTTPS (via Cloudflared), the browser blocks direct HTTP streams.
+            // Upgrading the stream URL to HTTPS prevents Mixed Content and avoids routing through our 
+            // backend proxy, bypassing Cloudflare's strict Node.js HTTP 403 blocks.
+            if (window.location.protocol === 'https:' && streamUrl.startsWith('http://') && !streamUrl.startsWith(window.location.origin)) {
+                console.log('[Player] Upgrading HTTP stream to HTTPS to avoid Mixed Content...');
+                streamUrl = streamUrl.replace('http://', 'https://');
+            }
+
             // Proactively use proxy for:
             // 1. User enabled "Force Proxy" in settings
             // 2. Known CORS-restricted domains (like Pluto TV)

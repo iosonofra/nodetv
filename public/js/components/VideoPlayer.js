@@ -913,6 +913,9 @@ class VideoPlayer {
                 return;
             }
 
+            // Initialize currentUrl before any modifications so fallbacks always have a valid target
+            this.currentUrl = streamUrl;
+
             // HTTPS Upgrade: Bypass Mixed Content on Alpine
             // If the app is served via HTTPS (via Cloudflared), the browser blocks direct HTTP streams.
             // Upgrading the stream URL to HTTPS prevents Mixed Content and avoids routing through our 

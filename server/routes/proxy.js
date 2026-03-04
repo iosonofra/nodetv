@@ -555,6 +555,10 @@ function pipeWithRedirects(targetUrl, agent, clientReq, clientRes, maxRedirects 
     });
 }
 
+// =============================================================================
+// GENERIC STREAM PROXY (used by M3U, WARP/MPD, Pluto TV, etc.)
+// =============================================================================
+
 router.get('/stream', async (req, res) => {
     const { url, sourceId } = req.query;
     if (!url) return res.status(400).send('URL required');

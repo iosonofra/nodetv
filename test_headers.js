@@ -1,28 +1,20 @@
 const http = require('http');
 
-// Get the URL from arguments
-const targetUrl = process.argv[2] || 'http://8yr1cw.hhkys.com/hls/7605c0c9404459fd91de64acb4c10afe/417100_4600.ts';
-
-// Extract hostname for Referer
-const urlObj = new URL(targetUrl);
-const referer = `${urlObj.protocol}//${urlObj.host}/`;
-console.log(`Testing with Referer: ${referer}`);
+const targetUrl = 'http://aa199.forever-youngs.top:8080/hls/1ec4e47143e0a34695c02a65deabac77/417100_5306.ts';
 
 const opts = {
     headers: {
-        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        'Accept': '*/*, application/vnd.apple.mpegurl',
-        'Referer': referer,
-        'Origin': referer.slice(0, -1) // remove trailing slash
+        'Host': 'aa199.forever-youngs.top:8080',
+        'User-Agent': 'curl/8.18.0',
+        'Accept': '*/* ' // Space added to defeat simple exact matching if any, or just plain
     }
 };
+opts.headers['Accept'] = '*/*';
 
 http.get(targetUrl, opts, (res) => {
-    console.log('Status:', res.statusCode);
+    console.log('Status spoofing curl perfectly:', res.statusCode);
     console.log('Headers:', res.headers);
-    if (res.statusCode === 403) {
-        let body = '';
-        res.on('data', c => body += c);
-        res.on('end', () => console.log('Body:', body.substring(0, 300)));
-    }
+    let body = '';
+    res.on('data', c => body += c);
+    res.on('end', () => console.log('Body length:', body.length));
 }).on('error', console.error);

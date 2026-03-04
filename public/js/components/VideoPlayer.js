@@ -1003,16 +1003,24 @@ class VideoPlayer {
                             this.isUsingProxy = true;
 
                             if (channel && channel.sourceType === 'xtream') {
-                                // Fallback to external CORS proxy to bypass Cloudflare Node.js blocks
-                                // allorigins supports raw proxying including binary streams
-                                const corsProxy = 'https://api.allorigins.win/raw?url=';
-                                console.log('[Player] Using external CORS proxy for Xtream stream to evade Cloudflare WAF...');
-                                this.hls.loadSource(corsProxy + encodeURIComponent(this.currentUrl));
+                                // THE ULTIMATE BYPASS: FFmpeg Remux (Fragmented MP4)
+                                // Cloudflare blocks Node.js HTTP reqs (403) and Alpine blocks 302 Downgrades (Mixed Content).
+                                // FFmpeg native binary easily bypasses Cloudflare WAF and streams to backend without Mixed Content errors.
+                                console.log('[Player] Cloudflare CORS/HTTP block detected for Xtream stream. Falling back to native FFmpeg Remux...');
+
+                                // Clean up HLS.js since we will play the transcoded MP4 natively via the <video> tag
+                                this.hls.stopLoad();
+                                this.hls.detachMedia();
+
+                                const remuxUrl = this.getRemuxUrl(this.currentUrl);
+                                this.video.src = remuxUrl;
+                                this.video.play().catch(e => {
+                                    if (e.name !== 'AbortError') console.error('[Player] FFmpeg fallback autoplay prevented:', e);
+                                });
                             } else {
                                 this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel?.sourceId));
+                                this.hls.startLoad();
                             }
-
-                            this.hls.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             // Fatal media error - try recovery with cooldown
                             const now = Date.now();

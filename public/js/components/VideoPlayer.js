@@ -920,6 +920,7 @@ class VideoPlayer {
             if (window.location.protocol === 'https:' && streamUrl.startsWith('http://') && !streamUrl.startsWith(window.location.origin)) {
                 console.log('[Player] Upgrading HTTP stream to HTTPS to avoid Mixed Content...');
                 streamUrl = streamUrl.replace('http://', 'https://');
+                this.currentUrl = streamUrl; // Ensure fallback proxy uses the HTTPS version
             }
 
             // Proactively use proxy for:
@@ -927,7 +928,11 @@ class VideoPlayer {
             // 2. Known CORS-restricted domains (like Pluto TV)
             const proxyRequiredDomains = ['pluto.tv'];
             const alreadyProxied = streamUrl.startsWith('/api/');
-            const needsProxy = !alreadyProxied && (this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain)));
+            const isXtream = channel && channel.sourceType === 'xtream';
+
+            // CRITICAL: NEVER proactively proxy Xtream streams locally. Cloudflare always 403 blocks our Node.js proxy.
+            // We must let it fail with CORS so it triggers the external proxy fallback (corsproxy.io)
+            const needsProxy = !alreadyProxied && !isXtream && (this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain)));
 
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId) : streamUrl;

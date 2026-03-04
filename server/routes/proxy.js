@@ -486,14 +486,19 @@ async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
         if (!response.ok) throw new Error(`Fetch failed: ${response.statusCode}`);
         let content = response.body;
 
-        // Resolve relative URLs
-        const m3u8Base = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
-
         content = content.replace(/^(?!#)(.+)$/gm, (match) => {
             let chunkUrl = match.trim();
-            if (!chunkUrl.startsWith('http')) {
-                chunkUrl = m3u8Base + chunkUrl;
+            if (!chunkUrl) return match;
+
+            try {
+                // Use native URL parser to correctly handle absolute paths (e.g., /hls/...) 
+                // and relative paths (e.g., chunk1.ts) without creating double slashes //
+                chunkUrl = new URL(chunkUrl, m3u8Url).href;
+            } catch (e) {
+                // If the URL is completely unparseable, skip rewriting it
+                return match;
             }
+
             return `${baseUrl}?url=${encodeURIComponent(chunkUrl)}${sourceId ? `&sourceId=${sourceId}` : ''}`;
         });
 

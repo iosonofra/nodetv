@@ -930,11 +930,12 @@ class VideoPlayer {
             const alreadyProxied = streamUrl.startsWith('/api/');
             const isXtream = channel && channel.sourceType === 'xtream';
 
-            // CRITICAL: NEVER proactively proxy Xtream streams locally. Cloudflare always 403 blocks our Node.js proxy.
-            // We must let it fail with CORS so it triggers the external proxy fallback (corsproxy.io)
+            // CRITICAL: NEVER proactively proxy Xtream streams locally if we can avoid it.
+            // Cloudflare often 403 blocks our Node.js proxy on Xtream servers.
             const needsProxy = !alreadyProxied && !isXtream && (this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain)));
 
             this.isUsingProxy = needsProxy;
+            this.isUsingTranscode = false;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId) : streamUrl;
 
             // Detect if this is likely an HLS stream (has .m3u8 in URL)
@@ -998,18 +999,15 @@ class VideoPlayer {
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
 
-                        if (isCorsLikely && !this.isUsingProxy) {
-                            console.log('CORS/Network error detected, retrying via proxy...', data.details);
-                            this.isUsingProxy = true;
+                        if (isCorsLikely && !this.isUsingTranscode) {
+                            console.log('CORS/Network error detected. Fallback cascade activated:', data.details);
 
-                            if (channel && channel.sourceType === 'xtream') {
-                                // THE ULTIMATE BYPASS: FFmpeg Transcode (Fragmented MP4)
-                                // Cloudflare blocks Node.js HTTP reqs (403) and Alpine blocks 302 Downgrades (Mixed Content).
-                                // FFmpeg native binary easily bypasses Cloudflare WAF and streams to backend without Mixed Content errors.
-                                // We use transcode instead of remux because AAC audio in TS requires bitstream filters or re-encoding to work in MP4.
-                                console.log('[Player] Cloudflare CORS/HTTP block detected for Xtream stream. Falling back to native FFmpeg Transcode...');
+                            if (this.isUsingProxy) {
+                                // Cascade Level 3: Proxy failed (likely Cloudflare 403 or Alpine 302 Mixed Content). 
+                                // Escalate to Ultimate Bypass: FFmpeg Transcode
+                                console.log('[Player] Node.js Proxy failed. Escaping to native FFmpeg Transcode...');
+                                this.isUsingTranscode = true;
 
-                                // Clean up HLS.js since we will play the transcoded MP4 natively via the <video> tag
                                 this.hls.stopLoad();
                                 this.hls.detachMedia();
 
@@ -1019,6 +1017,9 @@ class VideoPlayer {
                                     if (e.name !== 'AbortError') console.error('[Player] FFmpeg fallback autoplay prevented:', e);
                                 });
                             } else {
+                                // Cascade Level 2: Direct play failed. Try Node.js Proxy.
+                                console.log('[Player] Direct play failed. Retrying via Node.js proxy...');
+                                this.isUsingProxy = true;
                                 this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel?.sourceId));
                                 this.hls.startLoad();
                             }
@@ -1058,12 +1059,21 @@ class VideoPlayer {
                 this.video.src = finalUrl;
                 this.video.play().catch(e => {
                     if (e.name === 'AbortError') return; // Ignore interruption by new load
-                    console.log('Autoplay prevented, trying proxy if CORS error:', e);
-                    if (!this.isUsingProxy) {
-                        this.isUsingProxy = true;
-                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId);
+                    console.log('Autoplay prevented, trying proxy cascade if CORS error:', e);
+
+                    if (!this.isUsingTranscode) {
+                        if (this.isUsingProxy) {
+                            // Cascade Level 3
+                            this.isUsingTranscode = true;
+                            this.video.src = this.getTranscodeUrl(this.currentUrl);
+                        } else {
+                            // Cascade Level 2
+                            this.isUsingProxy = true;
+                            this.video.src = this.getProxiedUrl(this.currentUrl, channel.sourceId);
+                        }
+
                         this.video.play().catch(err => {
-                            if (err.name !== 'AbortError') console.error('Proxy play failed:', err);
+                            if (err.name !== 'AbortError') console.error('Proxy cascade play failed:', err);
                         });
                     }
                 });

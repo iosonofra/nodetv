@@ -30,6 +30,7 @@ class ScraperSettings {
                         <a href="/api/scraper/playlist" class="btn btn-secondary" target="_blank" download="eventi-live.m3u" style="margin-left: 10px;">Download M3U</a>
                     </div>
                 </div>
+                <div id="scraper-last-run" style="font-size: 0.82rem; color: var(--color-text-secondary); margin-top: 8px; padding: 0 4px;"></div>
                 
                 <div class="scraper-logs-container" style="background: #000; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; color: #0f0; height: 150px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--color-border);">
                     <div id="scraper-logs">Checking scraper status...</div>
@@ -50,6 +51,7 @@ class ScraperSettings {
         this.statusText = document.getElementById('scraper-status-text');
         this.logsContainer = document.getElementById('scraper-logs');
         this.runBtn = document.getElementById('btn-scraper-run');
+        this.lastRunEl = document.getElementById('scraper-last-run');
     }
 
     bindEvents() {
@@ -70,6 +72,9 @@ class ScraperSettings {
                 this.runBtn.disabled = false;
             }
 
+            // Show last run timestamp
+            this.updateLastRunInfo(status.lastRun);
+
             if (status.logs && status.logs.length > 0) {
                 this.logsContainer.innerHTML = status.logs.join('<br>');
                 const parent = this.logsContainer.parentElement;
@@ -79,6 +84,32 @@ class ScraperSettings {
             console.error('Failed to update scraper status:', err);
             if (this.statusText) this.statusText.textContent = 'Error: ' + err.message;
         }
+    }
+
+    updateLastRunInfo(lastRun) {
+        if (!this.lastRunEl) return;
+
+        if (!lastRun || !lastRun.endTime) {
+            this.lastRunEl.textContent = 'No runs recorded yet.';
+            return;
+        }
+
+        const endDate = new Date(lastRun.endTime);
+        const timeStr = endDate.toLocaleString();
+        const ago = this.timeAgo(endDate);
+        const icon = lastRun.status === 'success' ? '✅' : '❌';
+        this.lastRunEl.innerHTML = `${icon} Last run: <strong>${timeStr}</strong> (${ago})`;
+    }
+
+    timeAgo(date) {
+        const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
     }
 
     async runScraper() {

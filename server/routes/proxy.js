@@ -504,6 +504,57 @@ async function rewriteM3u8(m3u8Url, baseUrl, sourceId = null) {
     }
 }
 
+// Pipe a stream response to the client, following redirects (up to maxRedirects hops).
+// Unlike proxyFetch (which buffers), this streams data directly.
+function pipeWithRedirects(targetUrl, agent, clientReq, clientRes, maxRedirects = 5) {
+    const lib = targetUrl.startsWith('https') ? https : http;
+    const opts = {
+        headers: {}
+    };
+
+    // Forward Range header for partial content requests
+    if (clientReq.headers.range) {
+        opts.headers.Range = clientReq.headers.range;
+    }
+
+    if (agent) {
+        opts.agent = agent;
+        opts.rejectUnauthorized = false;
+    }
+
+    const proxyReq = lib.get(targetUrl, opts, (proxyRes) => {
+        // Follow redirects
+        const isRedirect = [301, 302, 307, 308].includes(proxyRes.statusCode);
+        if (isRedirect && proxyRes.headers.location && maxRedirects > 0) {
+            let redirectUrl = proxyRes.headers.location;
+            if (!redirectUrl.startsWith('http')) {
+                const urlObj = new URL(targetUrl);
+                redirectUrl = urlObj.origin + redirectUrl;
+            }
+            proxyRes.resume(); // Drain the response to free memory
+            return pipeWithRedirects(redirectUrl, agent, clientReq, clientRes, maxRedirects - 1);
+        }
+
+        // Forward status and headers to client
+        clientRes.status(proxyRes.statusCode);
+        for (const [key, value] of Object.entries(proxyRes.headers)) {
+            clientRes.setHeader(key, value);
+        }
+        // Pipe the stream data
+        proxyRes.pipe(clientRes);
+    });
+
+    proxyReq.on('error', (err) => {
+        console.error('Stream proxy error:', err.message);
+        if (!clientRes.headersSent) clientRes.status(502).end();
+    });
+
+    // Abort upstream request if client disconnects
+    clientReq.on('close', () => {
+        proxyReq.destroy();
+    });
+}
+
 router.get('/stream', async (req, res) => {
     const { url, sourceId } = req.query;
     if (!url) return res.status(400).send('URL required');
@@ -521,39 +572,8 @@ router.get('/stream', async (req, res) => {
             }
         }
 
-        // Native Proxy
-        const range = req.headers.range;
-        const requestOpts = {
-            headers: range ? { Range: range } : {}
-        };
-        // Only set agent + skip TLS when routing through WARP
-        if (agent) {
-            requestOpts.agent = agent;
-            requestOpts.rejectUnauthorized = false;
-        }
-
-        // Handle different protocols
-        const lib = url.startsWith('https') ? https : http;
-
-        const proxyReq = lib.get(url, requestOpts, (proxyRes) => {
-            // Forward headers
-            res.status(proxyRes.statusCode);
-            for (const [key, value] of Object.entries(proxyRes.headers)) {
-                res.setHeader(key, value);
-            }
-            // Pipe data
-            proxyRes.pipe(res);
-        });
-
-        proxyReq.on('error', (err) => {
-            console.error('Stream proxy error:', err.message);
-            if (!res.headersSent) res.status(502).end();
-        });
-
-        // Handle aborts
-        req.on('close', () => {
-            proxyReq.destroy();
-        });
+        // Pipe stream with redirect following (Xtream servers commonly 302-redirect)
+        pipeWithRedirects(url, agent, req, res);
 
     } catch (err) {
         console.error('Stream handler error:', err);

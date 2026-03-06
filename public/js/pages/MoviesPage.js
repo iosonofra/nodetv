@@ -27,9 +27,9 @@ class MoviesPage {
 
     init() {
         // Source change handler
-        this.sourceSelect?.addEventListener('change', () => {
-            this.loadCategories();
-            this.loadMovies();
+        this.sourceSelect?.addEventListener('change', async () => {
+            await this.loadCategories();
+            await this.loadMovies();
         });
 
         // Category change handler
@@ -272,12 +272,11 @@ class MoviesPage {
 
         const fragment = document.createDocumentFragment();
 
-        batch.forEach((movie, i) => {
+        batch.forEach(movie => {
             const card = document.createElement('div');
             card.className = 'movie-card';
             card.dataset.movieId = movie.stream_id;
             card.dataset.sourceId = movie.sourceId;
-            card.style.setProperty('--item-index', Math.min(i, 20));
 
             const poster = movie.stream_icon || movie.cover || '/img/placeholder.png';
             const year = movie.year || movie.releaseDate?.substring(0, 4) || '';
@@ -342,24 +341,20 @@ class MoviesPage {
             const result = await API.proxy.xtream.getStreamUrl(movie.sourceId, movie.stream_id, 'movie', container);
 
             if (result && result.url) {
-                // Navigate to home and play
-                this.app.navigateTo('home');
-
-                // Play the movie
-                if (this.app.player) {
-                    const channel = {
-                        id: `movie:${movie.stream_id}`,
-                        name: movie.name,
-                        tvgLogo: movie.stream_icon || movie.cover,
-                        sourceType: 'xtream',
+                // Play in dedicated Watch page
+                if (this.app.pages.watch) {
+                    this.app.pages.watch.play({
+                        type: 'movie',
+                        id: movie.stream_id,
+                        title: movie.name,
+                        poster: movie.stream_icon || movie.cover,
+                        description: movie.plot || '',
+                        year: movie.year || movie.releaseDate?.substring(0, 4),
+                        rating: movie.rating,
                         sourceId: movie.sourceId,
-                        isVod: true, // Mark as VOD for player handling
-                        useWarp: this.sources?.find(s => s.id === movie.sourceId)?.use_warp || false
-                    };
-
-                    // For VOD, use direct URL (don't proxy through HLS)
-                    // The video element can play mp4/mkv directly
-                    this.app.player.play(channel, result.url);
+                        categoryId: movie.category_id,
+                        containerExtension: container
+                    }, result.url);
                 }
             }
         } catch (err) {

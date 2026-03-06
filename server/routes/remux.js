@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { spawn } = require('child_process');
+const db = require('../db');
 
 /**
  * Remux stream (container conversion only)
@@ -12,23 +13,31 @@ const { spawn } = require('child_process');
  * 
  * Note: This does NOT fix Dolby/AC3 audio issues - use /api/transcode for that.
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     const { url } = req.query;
     if (!url) {
         return res.status(400).json({ error: 'URL parameter is required' });
     }
 
     const ffmpegPath = req.app.locals.ffmpegPath || 'ffmpeg';
+
+    // Get User-Agent from settings
+    const settings = await db.settings.get();
+    const userAgent = db.getUserAgent(settings);
+
     console.log(`[Remux] Starting remux for: ${url}`);
+    console.log(`[Remux] Using User-Agent: ${settings.userAgentPreset}`);
 
     // FFmpeg arguments for pure remux (no encoding)
     // Very lightweight - just changes container from TS to fragmented MP4
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
-        // Low-latency startup: reduce probe/analyze time for faster first bytes
-        '-probesize', '32768',
-        '-analyzeduration', '500000', // 0.5 seconds - enough to detect audio
+        '-user_agent', userAgent,
+        '-user_agent', userAgent,
+        // Standard probe size to handle complex containers (MKV) correctly
+        '-probesize', '5000000',
+        '-analyzeduration', '5000000',
         // Error resilience: discard corrupt packets, generate timestamps, ignore DTS, no buffering
         '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
         // Ignore errors in stream and continue
@@ -39,11 +48,19 @@ router.get('/', (req, res) => {
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '5',
+        // Prevent Range/HEAD requests that some providers reject with 405
+        '-seekable', '0',
         '-i', url,
-        // Map all streams explicitly
-        '-map', '0',
-        // Copy ALL streams without re-encoding
+        // STRICT MAPPING: Only map video and audio, ignore subtitles/data/attachments
+        // This prevents remux failure when source container has incompatible subtitle tracks (e.g. MKV -> MP4)
+        '-map', '0:v',
+        '-map', '0:a',
+        // Drop subtitles (-sn) and data (-dn) explicitly
+        '-sn', '-dn',
+        // Copy streams without re-encoding
         '-c', 'copy',
+        // Ensure extradata is correctly extracted/converted (fixes Annex B -> AVCC issues in Firefox)
+        '-bsf:v', 'dump_extra',
         // NOTE: We intentionally do NOT use -bsf:a aac_adtstoasc here
         // That filter only works for AAC audio and breaks AC3/EAC3/MP3.
         // If AAC audio from MPEG-TS fails in MP4, use /api/transcode instead.

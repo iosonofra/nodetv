@@ -10,16 +10,19 @@ class App {
 
         // Initialize components
         this.player = new VideoPlayer();
+        this.shakaPlayer = new ShakaPlayerEngine();
         this.channelList = new ChannelList();
         this.sourceManager = new SourceManager();
         this.epgGuide = new EpgGuide();
 
         // Initialize page controllers
         this.pages.home = new HomePage(this);
+        this.pages.live = new LivePage(this);
         this.pages.guide = new GuidePage(this);
         this.pages.movies = new MoviesPage(this);
         this.pages.series = new SeriesPage(this);
         this.pages.settings = new SettingsPage(this);
+        this.pages.watch = new WatchPage(this);
 
         this.init();
     }
@@ -81,14 +84,49 @@ class App {
             });
         }
 
+        // Desktop sidebar collapse toggle
+        const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
+        const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
+        const homeLayout = document.querySelector('.home-layout');
+
+        const toggleSidebarCollapse = () => {
+            channelSidebar?.classList.toggle('collapsed');
+            homeLayout?.classList.toggle('sidebar-collapsed');
+
+            // Persist preference
+            const isCollapsed = channelSidebar?.classList.contains('collapsed');
+            localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+        };
+
+        sidebarCollapseBtn?.addEventListener('click', toggleSidebarCollapse);
+        sidebarExpandBtn?.addEventListener('click', toggleSidebarCollapse);
+
+        // Restore sidebar state from localStorage
+        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+            channelSidebar?.classList.add('collapsed');
+            homeLayout?.classList.add('sidebar-collapsed');
+        }
+
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
-                if (link.dataset.page) {
-                    e.preventDefault();
-                    this.navigateTo(link.dataset.page);
-                }
+                e.preventDefault();
+                this.navigateTo(link.dataset.page);
             });
+        });
+
+        // Now Playing indicator
+        const nowPlayingBtn = document.getElementById('now-playing-indicator');
+        if (nowPlayingBtn) {
+            nowPlayingBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.navigateTo('watch');
+            });
+        }
+
+        // Toggle groups button
+        document.getElementById('toggle-groups').addEventListener('click', () => {
+            this.channelList.toggleAllGroups();
         });
 
         // Search clear buttons (global handler for all)
@@ -110,15 +148,24 @@ class App {
             this.navigateTo(page, false); // false = don't add to history
         });
 
-        // Initialize home page
+        // Initialize home page first (it's needed for channel list)
         await this.pages.home.init();
-        this.navigateTo('home', true); // true = replace history (don't add)
 
-        // Background EPG load - start fetching as soon as possible
-        console.log('[App] Starting background EPG load');
+        // Initialize Shaka Player (non-blocking)
+        if (this.shakaPlayer && typeof this.shakaPlayer.init === 'function') {
+            this.shakaPlayer.init().catch(err => console.warn('Shaka init failed:', err));
+        }
+
+        // Preload EPG data in background (non-blocking)
+        // This ensures EPG info is available on Live TV page without visiting Guide first
         this.epgGuide.loadEpg().catch(err => {
-            console.warn('[App] Initial background EPG load failed:', err.message);
+            console.warn('Background EPG load failed:', err.message);
         });
+
+        // Navigate to the page from URL hash, or default to home
+        const hash = window.location.hash.slice(1); // Remove #
+        const initialPage = hash && this.pages[hash] ? hash : 'home';
+        this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         console.log('NodeCast TV initialized');
     }
@@ -146,10 +193,12 @@ class App {
 
             this.currentUser = await response.json();
 
-            // Handle users tab visibility
-            const usersTab = document.getElementById('users-tab');
-            if (usersTab) {
-                usersTab.style.display = this.currentUser.role === 'admin' ? 'block' : 'none';
+            // Hide settings for viewers
+            if (this.currentUser.role === 'viewer') {
+                const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
+                if (settingsLink) {
+                    settingsLink.style.display = 'none';
+                }
             }
 
             // Add logout button to navbar
@@ -229,15 +278,6 @@ class App {
 
         this.currentPage = pageName;
 
-        // Restore sidebar if navigating to home
-        if (pageName === 'home') {
-            const homeLayout = document.querySelector('.home-layout');
-            if (homeLayout) {
-                // Always show sidebar when navigating to home (Live TV)
-                homeLayout.classList.remove('no-sidebar');
-            }
-        }
-
         if (this.pages[pageName]?.show) {
             this.pages[pageName].show();
         }
@@ -247,4 +287,13 @@ class App {
 // Start app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new App();
+
+    // Fetch and display version badge
+    fetch('/api/version')
+        .then(res => res.json())
+        .then(data => {
+            const badge = document.getElementById('version-badge');
+            if (badge && data.version) badge.textContent = `v${data.version}`;
+        })
+        .catch(() => { });
 });

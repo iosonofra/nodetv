@@ -8,9 +8,6 @@ class SettingsPage {
         this.tabs = document.querySelectorAll('.tabs .tab');
         this.tabContents = document.querySelectorAll('.tab-content');
 
-        this.warpSettings = null;
-        this.scraperSettings = null;
-
         this.init();
     }
 
@@ -23,6 +20,9 @@ class SettingsPage {
         // Player settings
         this.initPlayerSettings();
 
+        // Transcoding settings
+        this.initTranscodingSettings();
+
         // User management (admin only)
         this.initUserManagement();
     }
@@ -34,9 +34,6 @@ class SettingsPage {
         const volumeValueDisplay = document.getElementById('volume-value');
         const rememberVolumeToggle = document.getElementById('setting-remember-volume');
         const autoPlayNextToggle = document.getElementById('setting-autoplay-next');
-        const forceProxyToggle = document.getElementById('setting-force-proxy');
-        const forceTranscodeToggle = document.getElementById('setting-force-transcode');
-        const forceRemuxToggle = document.getElementById('setting-force-remux');
 
         // Load current settings
         if (this.app.player?.settings) {
@@ -46,15 +43,6 @@ class SettingsPage {
             volumeValueDisplay.textContent = this.app.player.settings.defaultVolume + '%';
             rememberVolumeToggle.checked = this.app.player.settings.rememberVolume;
             autoPlayNextToggle.checked = this.app.player.settings.autoPlayNextEpisode;
-            if (forceProxyToggle) {
-                forceProxyToggle.checked = this.app.player.settings.forceProxy || false;
-            }
-            if (forceTranscodeToggle) {
-                forceTranscodeToggle.checked = this.app.player.settings.forceTranscode || false;
-            }
-            if (forceRemuxToggle) {
-                forceRemuxToggle.checked = this.app.player.settings.forceRemux || false;
-            }
         }
 
         // Arrow keys toggle
@@ -65,47 +53,27 @@ class SettingsPage {
 
         // Overlay duration
         overlayDurationInput.addEventListener('change', () => {
-            const value = Math.min(30, Math.max(1, parseInt(overlayDurationInput.value) || 5));
-            overlayDurationInput.value = value;
-            this.app.player.settings.overlayDuration = value;
+            this.app.player.settings.overlayDuration = parseInt(overlayDurationInput.value) || 5;
             this.app.player.saveSettings();
         });
 
         // Default volume slider
-        defaultVolumeSlider?.addEventListener('input', () => {
-            const value = parseInt(defaultVolumeSlider.value);
+        defaultVolumeSlider.addEventListener('input', () => {
+            const value = defaultVolumeSlider.value;
             volumeValueDisplay.textContent = value + '%';
-            this.app.player.settings.defaultVolume = value;
+            this.app.player.settings.defaultVolume = parseInt(value);
             this.app.player.saveSettings();
         });
 
         // Remember volume toggle
-        rememberVolumeToggle?.addEventListener('change', () => {
+        rememberVolumeToggle.addEventListener('change', () => {
             this.app.player.settings.rememberVolume = rememberVolumeToggle.checked;
             this.app.player.saveSettings();
         });
 
         // Auto-play next episode toggle
-        autoPlayNextToggle?.addEventListener('change', () => {
+        autoPlayNextToggle.addEventListener('change', () => {
             this.app.player.settings.autoPlayNextEpisode = autoPlayNextToggle.checked;
-            this.app.player.saveSettings();
-        });
-
-        // Force proxy toggle
-        forceProxyToggle?.addEventListener('change', () => {
-            this.app.player.settings.forceProxy = forceProxyToggle.checked;
-            this.app.player.saveSettings();
-        });
-
-        // Force transcode toggle
-        forceTranscodeToggle?.addEventListener('change', () => {
-            this.app.player.settings.forceTranscode = forceTranscodeToggle.checked;
-            this.app.player.saveSettings();
-        });
-
-        // Force remux toggle
-        forceRemuxToggle?.addEventListener('change', () => {
-            this.app.player.settings.forceRemux = forceRemuxToggle.checked;
             this.app.player.saveSettings();
         });
 
@@ -119,24 +87,225 @@ class SettingsPage {
             epgRefreshSelect.addEventListener('change', () => {
                 this.app.player.settings.epgRefreshInterval = epgRefreshSelect.value;
                 this.app.player.saveSettings();
-                // Server-side sync timer is restarted automatically via settings API
             });
         }
 
         // Update last refreshed display
         this.updateEpgLastRefreshed();
+    }
 
-        // Stream output format
-        const streamFormatSelect = document.getElementById('setting-stream-format');
-        if (streamFormatSelect && this.app.player?.settings) {
-            // Load saved value from player settings
-            streamFormatSelect.value = this.app.player.settings.streamFormat || 'm3u8';
+    async initTranscodingSettings() {
+        // Encoder settings
+        const hwEncoderSelect = document.getElementById('setting-hw-encoder');
+        const maxResolutionSelect = document.getElementById('setting-max-resolution');
+        const qualitySelect = document.getElementById('setting-quality');
 
-            // Save on change
-            streamFormatSelect.addEventListener('change', () => {
-                this.app.player.settings.streamFormat = streamFormatSelect.value;
+        // Stream processing (use -tc suffix IDs from Transcoding tab)
+        const forceProxyToggle = document.getElementById('setting-force-proxy-tc');
+        const autoTranscodeToggle = document.getElementById('setting-auto-transcode-tc');
+        const forceTranscodeToggle = document.getElementById('setting-force-transcode-tc');
+        const forceVideoTranscodeToggle = document.getElementById('setting-force-video-transcode-tc');
+        const forceRemuxToggle = document.getElementById('setting-force-remux-tc');
+        const streamFormatSelect = document.getElementById('setting-stream-format-tc');
+
+        // User-Agent (Transcoding tab versions)
+        const userAgentSelect = document.getElementById('setting-user-agent-tc');
+        const userAgentCustomInput = document.getElementById('setting-user-agent-custom-tc');
+        const customUaContainer = document.getElementById('custom-user-agent-container-tc');
+
+        // Fetch settings directly from API to avoid race condition with VideoPlayer
+        let s;
+        try {
+            s = await API.settings.get();
+        } catch (err) {
+            console.warn('[Settings] Failed to load settings from API, using player defaults:', err);
+            s = this.app.player?.settings || {};
+        }
+
+        if (hwEncoderSelect) hwEncoderSelect.value = s.hwEncoder || 'auto';
+        if (maxResolutionSelect) maxResolutionSelect.value = s.maxResolution || '1080p';
+        if (qualitySelect) qualitySelect.value = s.quality || 'medium';
+        if (forceProxyToggle) forceProxyToggle.checked = s.forceProxy === true;
+        if (autoTranscodeToggle) autoTranscodeToggle.checked = s.autoTranscode !== false;
+        if (forceTranscodeToggle) forceTranscodeToggle.checked = s.forceTranscode === true;
+        if (forceVideoTranscodeToggle) forceVideoTranscodeToggle.checked = s.forceVideoTranscode === true;
+        if (forceRemuxToggle) forceRemuxToggle.checked = s.forceRemux || false;
+        if (streamFormatSelect) streamFormatSelect.value = s.streamFormat || 'm3u8';
+        if (userAgentSelect) userAgentSelect.value = s.userAgentPreset || 'chrome';
+        if (userAgentCustomInput) userAgentCustomInput.value = s.userAgentCustom || '';
+        if (customUaContainer) {
+            customUaContainer.style.display = userAgentSelect?.value === 'custom' ? 'flex' : 'none';
+        }
+
+        // Event listeners for encoder settings
+        hwEncoderSelect?.addEventListener('change', () => {
+            this.app.player.settings.hwEncoder = hwEncoderSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        maxResolutionSelect?.addEventListener('change', () => {
+            this.app.player.settings.maxResolution = maxResolutionSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        qualitySelect?.addEventListener('change', () => {
+            this.app.player.settings.quality = qualitySelect.value;
+            this.app.player.saveSettings();
+        });
+
+        // Audio Mix Preset
+        const audioMixSelect = document.getElementById('setting-audio-mix');
+        if (audioMixSelect) {
+            audioMixSelect.value = s.audioMixPreset || 'auto';
+            audioMixSelect.addEventListener('change', () => {
+                this.app.player.settings.audioMixPreset = audioMixSelect.value;
                 this.app.player.saveSettings();
             });
+        }
+
+        // Upscaling Settings
+        const upscaleEnabledToggle = document.getElementById('setting-upscale-enabled');
+        const upscaleMethodSelect = document.getElementById('setting-upscale-method');
+        const upscaleTargetSelect = document.getElementById('setting-upscale-target');
+        const upscaleMethodContainer = document.getElementById('upscale-method-container');
+        const upscaleTargetContainer = document.getElementById('upscale-target-container');
+
+        // Helper to toggle upscale options visibility
+        const toggleUpscaleOptions = (enabled) => {
+            if (upscaleMethodContainer) upscaleMethodContainer.style.display = enabled ? 'flex' : 'none';
+            if (upscaleTargetContainer) upscaleTargetContainer.style.display = enabled ? 'flex' : 'none';
+        };
+
+        // Load upscaling settings
+        if (upscaleEnabledToggle) {
+            upscaleEnabledToggle.checked = s.upscaleEnabled || false;
+            toggleUpscaleOptions(upscaleEnabledToggle.checked);
+        }
+        if (upscaleMethodSelect) upscaleMethodSelect.value = s.upscaleMethod || 'hardware';
+        if (upscaleTargetSelect) upscaleTargetSelect.value = s.upscaleTarget || '1080p';
+
+        // Upscaling event handlers
+        upscaleEnabledToggle?.addEventListener('change', () => {
+            this.app.player.settings.upscaleEnabled = upscaleEnabledToggle.checked;
+            this.app.player.saveSettings();
+            toggleUpscaleOptions(upscaleEnabledToggle.checked);
+        });
+
+        upscaleMethodSelect?.addEventListener('change', () => {
+            this.app.player.settings.upscaleMethod = upscaleMethodSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        upscaleTargetSelect?.addEventListener('change', () => {
+            this.app.player.settings.upscaleTarget = upscaleTargetSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        // Stream processing toggles
+        forceProxyToggle?.addEventListener('change', () => {
+            this.app.player.settings.forceProxy = forceProxyToggle.checked;
+            this.app.player.saveSettings();
+        });
+
+        autoTranscodeToggle?.addEventListener('change', () => {
+            this.app.player.settings.autoTranscode = autoTranscodeToggle.checked;
+            this.app.player.saveSettings();
+        });
+
+        forceTranscodeToggle?.addEventListener('change', () => {
+            this.app.player.settings.forceTranscode = forceTranscodeToggle.checked;
+            this.app.player.saveSettings();
+        });
+
+        forceVideoTranscodeToggle?.addEventListener('change', () => {
+            this.app.player.settings.forceVideoTranscode = forceVideoTranscodeToggle.checked;
+            this.app.player.saveSettings();
+        });
+
+        forceRemuxToggle?.addEventListener('change', () => {
+            this.app.player.settings.forceRemux = forceRemuxToggle.checked;
+            this.app.player.saveSettings();
+        });
+
+        streamFormatSelect?.addEventListener('change', () => {
+            this.app.player.settings.streamFormat = streamFormatSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        // User-Agent handlers
+        const toggleCustomInput = () => {
+            if (customUaContainer) {
+                customUaContainer.style.display = userAgentSelect?.value === 'custom' ? 'flex' : 'none';
+            }
+        };
+
+        userAgentSelect?.addEventListener('change', () => {
+            this.app.player.settings.userAgentPreset = userAgentSelect.value;
+            this.app.player.saveSettings();
+            toggleCustomInput();
+        });
+
+        userAgentCustomInput?.addEventListener('change', () => {
+            this.app.player.settings.userAgentCustom = userAgentCustomInput.value;
+            this.app.player.saveSettings();
+        });
+    }
+
+    /**
+     * Load and display hardware info in Transcoding tab
+     */
+    async loadHardwareInfo() {
+        const container = document.getElementById('hw-info-container');
+        if (!container) return;
+
+        try {
+            const response = await fetch('/api/settings/hw-info');
+            if (!response.ok) throw new Error('Failed to fetch hardware info');
+            const hwInfo = await response.json();
+
+            const detected = [];
+
+            // Only show detected hardware
+            if (hwInfo.nvidia?.available) {
+                detected.push(`<div class="hw-info-item hw-available">
+                    <span class="hw-badge">✓ NVIDIA</span>
+                    <span class="hw-name">${hwInfo.nvidia.name}</span>
+                </div>`);
+            }
+
+            if (hwInfo.amf?.available) {
+                detected.push(`<div class="hw-info-item hw-available">
+                    <span class="hw-badge">✓ AMD</span>
+                    <span class="hw-name">${hwInfo.amf.name || 'Available'}</span>
+                </div>`);
+            }
+
+            if (hwInfo.qsv?.available) {
+                detected.push(`<div class="hw-info-item hw-available">
+                    <span class="hw-badge">✓ Intel QSV</span>
+                    <span class="hw-name">Available</span>
+                </div>`);
+            }
+
+            if (hwInfo.vaapi?.available) {
+                detected.push(`<div class="hw-info-item hw-available">
+                    <span class="hw-badge">✓ VAAPI</span>
+                    <span class="hw-name">${hwInfo.vaapi.device || 'Available'}</span>
+                </div>`);
+            }
+
+            let html;
+            if (detected.length > 0) {
+                html = `<div class="hw-info-grid">${detected.join('')}</div>`;
+                html += `<p class="hint" style="margin-top: var(--space-sm);">Recommended encoder: <strong>${hwInfo.recommended}</strong></p>`;
+            } else {
+                html = `<p class="hint">No GPU acceleration detected. Using software encoding.</p>`;
+            }
+
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Error loading hardware info:', err);
+            container.innerHTML = '<p class="hint error">Failed to load hardware info</p>';
         }
     }
 
@@ -168,63 +337,169 @@ class SettingsPage {
 
     async loadUsers() {
         const userList = document.getElementById('user-list');
-        if (!userList) {
-            console.error('[Settings] user-list container not found');
-            return;
-        }
+        if (!userList) return;
 
         try {
-            console.log('[Settings] Fetching users list...');
-            userList.innerHTML = '<tr><td colspan="4" class="hint">Loading users...</td></tr>';
-
             const users = await API.users.getAll();
-            console.log('[Settings] Users received:', users);
+            // Store users in memory for easy access during edit
+            this.users = users;
 
-            if (!users || users.length === 0) {
-                userList.innerHTML = '<tr><td colspan="4" class="hint">No users found</td></tr>';
+            if (users.length === 0) {
+                userList.innerHTML = '<tr><td colspan="5" class="hint">No users found</td></tr>';
                 return;
             }
 
-            userList.innerHTML = users.map(user => `
+            userList.innerHTML = users.map(user => {
+                const isSSO = !!user.oidcId;
+                const typeBadge = isSSO
+                    ? '<span class="user-badge user-badge-sso">SSO</span>'
+                    : '<span class="user-badge user-badge-local">Local</span>';
+
+                const roleBadge = user.role === 'admin'
+                    ? '<span class="user-badge user-badge-admin">Admin</span>'
+                    : '<span class="user-badge user-badge-viewer">Viewer</span>';
+
+                return `
                 <tr>
-                    <td>${user.username}</td>
-                    <td><span class="badge badge-${user.role === 'admin' ? 'primary' : 'secondary'}">${user.role}</span></td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <strong>${user.username}</strong>
+                            ${typeBadge}
+                        </div>
+                    </td>
+                    <td>${user.email || '<span class="hint">-</span>'}</td>
+                    <td>${roleBadge}</td>
                     <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
                     <td>
-                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.editUser(${user.id})">Edit</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
                         <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         } catch (err) {
             console.error('Error loading users:', err);
-            userList.innerHTML = '<tr><td colspan="4" class="hint">Error loading users</td></tr>';
+            userList.innerHTML = '<tr><td colspan="5" class="hint">Error loading users</td></tr>';
         }
     }
 
-    async editUser(userId) {
-        const username = prompt('Enter new username (leave blank to keep current):');
-        const password = prompt('Enter new password (leave blank to keep current):');
-        const role = prompt('Enter role (admin or viewer, leave blank to keep current):');
+    openEditUserModal(userId) {
+        console.log('openEditUserModal called with ID:', userId, 'Type:', typeof userId);
+        console.log('Current users list:', this.users);
 
-        const updates = {};
-        if (username) updates.username = username;
-        if (password) updates.password = password;
-        if (role) updates.role = role;
+        const user = this.users.find(u => u.id === userId);
+        if (!user) {
+            console.error('User not found in this.users cache!');
+            console.log('Available IDs:', this.users.map(u => u.id));
+            return;
+        }
+        console.log('User found:', user);
 
-        if (Object.keys(updates).length === 0) {
-            alert('No changes made');
+        const modal = document.getElementById('edit-user-modal');
+        console.log('Modal element:', modal);
+        if (!modal) {
+            console.error('CRITICAL: Modal element #edit-user-modal not found in DOM!');
+            alert('Error: Modal not found. Please refresh the page.');
             return;
         }
 
+        const isSSO = !!user.oidcId;
+        console.log('Is SSO user:', isSSO);
+
+        // Populate form with null checks
         try {
-            await API.users.update(userId, updates);
-            alert('User updated successfully!');
-            this.loadUsers();
+            const editId = document.getElementById('edit-user-id');
+            const editUsername = document.getElementById('edit-username');
+            const editEmail = document.getElementById('edit-email');
+            const editRole = document.getElementById('edit-role');
+            const editPassword = document.getElementById('edit-password');
+
+            console.log('Form elements found:', { editId, editUsername, editEmail, editRole, editPassword });
+
+            if (editId) editId.value = user.id;
+            if (editUsername) editUsername.value = user.username;
+            if (editEmail) editEmail.value = user.email || '';
+            if (editRole) editRole.value = user.role;
+            if (editPassword) editPassword.value = '';
+
+            // Handle SSO specific UI
+            const passwordHint = document.getElementById('edit-password-hint');
+            const oidcGroup = document.getElementById('oidc-info-group');
+            const oidcIdDisplay = document.getElementById('edit-oidc-id');
+
+            if (isSSO) {
+                if (editPassword) {
+                    editPassword.disabled = true;
+                    editPassword.placeholder = "Managed by SSO Provider";
+                }
+                if (passwordHint) passwordHint.textContent = "Password cannot be changed for SSO users.";
+                if (oidcGroup) oidcGroup.classList.remove('hidden');
+                if (oidcIdDisplay) oidcIdDisplay.textContent = user.oidcId;
+            } else {
+                if (editPassword) {
+                    editPassword.disabled = false;
+                    editPassword.placeholder = "Leave blank to keep current";
+                }
+                if (passwordHint) passwordHint.textContent = "Optional. Leave blank to keep unchanged.";
+                if (oidcGroup) oidcGroup.classList.add('hidden');
+            }
+
+            // Show modal
+            console.log('Adding active class to modal...');
+            modal.classList.add('active');
+            console.log('Modal classes after add:', modal.classList.toString());
+
+            // Setup Close/Cancel handlers (once)
+            this.setupModalHandlers(modal);
+            console.log('Modal should now be visible!');
         } catch (err) {
-            alert('Error updating user: ' + err.message);
+            console.error('Error populating modal:', err);
+            alert('Error opening edit modal: ' + err.message);
         }
     }
+
+    setupModalHandlers(modal) {
+        if (this.modalHandlersSetup) return;
+
+        const closeBtn = document.getElementById('edit-user-close');
+        const cancelBtn = document.getElementById('edit-user-cancel');
+        const saveBtn = document.getElementById('edit-user-save');
+
+        const closeModal = () => modal.classList.remove('active');
+
+        closeBtn.onclick = closeModal;
+        cancelBtn.onclick = closeModal;
+
+        // Click outside to close
+        modal.onclick = (e) => {
+            if (e.target === modal) closeModal();
+        };
+
+        // Save Handler
+        saveBtn.onclick = async () => {
+            const userId = document.getElementById('edit-user-id').value;
+            const updates = {
+                username: document.getElementById('edit-username').value,
+                role: document.getElementById('edit-role').value
+            };
+
+            const newPassword = document.getElementById('edit-password').value;
+            if (newPassword && !document.getElementById('edit-password').disabled) {
+                updates.password = newPassword;
+            }
+
+            try {
+                await API.users.update(userId, updates);
+                // alert('User updated successfully!'); // Optional: Replace with toast?
+                closeModal();
+                this.loadUsers();
+            } catch (err) {
+                alert('Error updating user: ' + err.message);
+            }
+        };
+
+        this.modalHandlersSetup = true;
+    }
+
 
     async deleteUser(userId, username) {
         if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
@@ -233,7 +508,6 @@ class SettingsPage {
 
         try {
             await API.users.delete(userId);
-            alert('User deleted successfully!');
             this.loadUsers();
         } catch (err) {
             alert('Error deleting user: ' + err.message);
@@ -249,42 +523,24 @@ class SettingsPage {
             this.app.sourceManager.loadContentSources();
         }
 
-        // Update WARP status when switching to connectivity tab
-        if (tabName === 'connectivity') {
-            if (this.warpSettings) this.warpSettings.updateStatus();
-            if (this.scraperSettings) this.scraperSettings.updateStatus(); // NEW
-        }
-
         // Load users when switching to users tab
         if (tabName === 'users') {
             this.loadUsers();
         }
+
+        // Load hardware info when switching to transcode tab
+        if (tabName === 'transcode') {
+            this.loadHardwareInfo();
+        }
     }
 
     async show() {
-        // Show users/connectivity tabs for admin
+        // Show users tab for admin
         if (this.app.currentUser && this.app.currentUser.role === 'admin') {
-            // Lazy-initialize admin components
-            if (!this.scraperSettings) {
-                this.warpSettings = new WarpSettings(this.app);
-                this.scraperSettings = new ScraperSettings(this.app);
+            const usersTab = document.getElementById('users-tab');
+            if (usersTab) {
+                usersTab.style.display = 'block';
             }
-
-            const usersTab = document.getElementById('users-tab');
-            const connectivityTab = document.getElementById('connectivity-tab');
-            if (usersTab) usersTab.style.display = 'block';
-            if (connectivityTab) connectivityTab.style.display = 'block';
-        } else {
-            const usersTab = document.getElementById('users-tab');
-            const connectivityTab = document.getElementById('connectivity-tab');
-            if (usersTab) usersTab.style.display = 'none';
-            if (connectivityTab) connectivityTab.style.display = 'none';
-        }
-
-        // Ensure the active tab's data is loaded/refreshed
-        const activeTab = document.querySelector('.tabs .tab.active');
-        if (activeTab) {
-            this.switchTab(activeTab.dataset.tab);
         }
 
         // Load sources when page is shown
@@ -304,6 +560,7 @@ class SettingsPage {
             const forceProxyToggle = document.getElementById('setting-force-proxy');
             const forceTranscodeToggle = document.getElementById('setting-force-transcode');
             const forceRemuxToggle = document.getElementById('setting-force-remux');
+            const autoTranscodeToggle = document.getElementById('setting-auto-transcode');
             const epgRefreshSelect = document.getElementById('epg-refresh-interval');
             const streamFormatSelect = document.getElementById('setting-stream-format');
 
@@ -316,8 +573,21 @@ class SettingsPage {
             if (forceProxyToggle) forceProxyToggle.checked = s.forceProxy || false;
             if (forceTranscodeToggle) forceTranscodeToggle.checked = s.forceTranscode || false;
             if (forceRemuxToggle) forceRemuxToggle.checked = s.forceRemux || false;
+            if (autoTranscodeToggle) autoTranscodeToggle.checked = s.autoTranscode || false;
             if (epgRefreshSelect) epgRefreshSelect.value = s.epgRefreshInterval || '24';
             if (streamFormatSelect) streamFormatSelect.value = s.streamFormat || 'm3u8';
+
+            // User-Agent settings
+            const userAgentSelect = document.getElementById('setting-user-agent');
+            const userAgentCustomInput = document.getElementById('setting-user-agent-custom');
+            const customUaContainer = document.getElementById('custom-user-agent-container');
+            if (userAgentSelect) {
+                userAgentSelect.value = s.userAgentPreset || 'chrome';
+                if (customUaContainer) {
+                    customUaContainer.style.display = userAgentSelect.value === 'custom' ? 'flex' : 'none';
+                }
+            }
+            if (userAgentCustomInput) userAgentCustomInput.value = s.userAgentCustom || '';
         }
 
         // Update EPG last refreshed display

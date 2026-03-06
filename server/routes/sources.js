@@ -1,23 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const { sources } = require('../db');
+const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
 const syncService = require('../services/syncService');
+const m3uParser = require('../services/m3uParser');
 const { requireAuth } = require('../auth');
 
+router.use(requireAuth);
+
 // Get all sources
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        let allSources = await sources.getAll();
-
-        // Filter by ownership unless it's admin asking for all
-        if (req.user.role === 'admin' && req.query.all === 'true') {
-            // keep all
-        } else {
-            // Keep user's own sources OR special shared system sources (user_id: 0)
-            allSources = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0);
-        }
-
+        const allSources = await sources.getAll(req.user.id, req.user.role);
         // Don't expose passwords in list view
         const sanitized = allSources.map(s => ({
             ...s,
@@ -46,7 +41,7 @@ router.get('/status', async (req, res) => {
 // Get sources by type
 router.get('/type/:type', async (req, res) => {
     try {
-        const typeSources = await sources.getByType(req.params.type);
+        const typeSources = await sources.getByType(req.params.type, req.user.id, req.user.role);
         res.json(typeSources);
     } catch (err) {
         console.error('Error getting sources by type:', err);
@@ -55,17 +50,12 @@ router.get('/type/:type', async (req, res) => {
 });
 
 // Get single source
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.id);
+        const source = await sources.getById(req.params.id, req.user.id, req.user.role);
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }
-
-        if (source.user_id !== req.user.id && source.user_id !== 0 && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied to this source' });
-        }
-
         res.json(source);
     } catch (err) {
         console.error('Error getting source:', err);
@@ -74,28 +64,19 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // Create source
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', async (req, res) => {
     try {
-        let { type, name, url, username, password, use_warp } = req.body;
+        const { type, name, url, username, password } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
-        }
-
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'http://' + url;
         }
 
         if (!['xtream', 'm3u', 'epg'].includes(type)) {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        let ownerId = req.user.id;
-        if (req.user.role === 'admin' && req.body.user_id) {
-            ownerId = parseInt(req.body.user_id);
-        }
-
-        const source = await sources.create({ type, name, url, username, password, use_warp: !!use_warp, user_id: ownerId });
+        const source = await sources.create({ type, name, url, username, password }, req.user.id);
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -106,36 +87,20 @@ router.post('/', requireAuth, async (req, res) => {
 });
 
 // Update source
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', async (req, res) => {
     try {
-        const existing = await sources.getById(req.params.id);
+        const existing = await sources.getById(req.params.id, req.user.id, req.user.role);
         if (!existing) {
-            return res.status(404).json({ error: 'Source not found' });
+            return res.status(404).json({ error: 'Source not found or unauthorized' });
         }
 
-        if (existing.user_id !== req.user.id && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied to this source' });
-        }
-
-        let { name, url, username, password, use_warp } = req.body;
-
-        if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'http://' + url;
-        }
-
-        const updateData = {
+        const { name, url, username, password } = req.body;
+        const updated = await sources.update(req.params.id, {
             name: name || existing.name,
             url: url || existing.url,
             username: username !== undefined ? username : existing.username,
-            password: password !== undefined ? password : existing.password,
-            use_warp: use_warp !== undefined ? !!use_warp : existing.use_warp
-        };
-
-        if (req.user.role === 'admin' && req.body.user_id) {
-            updateData.user_id = parseInt(req.body.user_id);
-        }
-
-        const updated = await sources.update(req.params.id, updateData);
+            password: password !== undefined ? password : existing.password
+        }, req.user.id, req.user.role);
         // Trigger Sync (if critical fields changed? safely just trigger it)
         syncService.syncSource(parseInt(req.params.id)).catch(console.error);
         res.json(updated);
@@ -146,18 +111,31 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // Delete source
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
-        const existing = await sources.getById(req.params.id);
+        const sourceId = parseInt(req.params.id);
+        const existing = await sources.getById(sourceId, req.user.id, req.user.role);
         if (!existing) {
-            return res.status(404).json({ error: 'Source not found' });
+            return res.status(404).json({ error: 'Source not found or unauthorized' });
         }
 
-        if (existing.user_id !== req.user.id && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied to this source' });
-        }
+        // Cascade delete: Clean up SQLite data for this source
+        const db = getDb();
+        const deleteCategories = db.prepare('DELETE FROM categories WHERE source_id = ?');
+        const deleteItems = db.prepare('DELETE FROM playlist_items WHERE source_id = ?');
+        const deleteEpg = db.prepare('DELETE FROM epg_programs WHERE source_id = ?');
+        const deleteSyncStatus = db.prepare('DELETE FROM sync_status WHERE source_id = ?');
 
-        await sources.delete(req.params.id);
+        const catResult = deleteCategories.run(sourceId);
+        const itemResult = deleteItems.run(sourceId);
+        const epgResult = deleteEpg.run(sourceId);
+        deleteSyncStatus.run(sourceId);
+
+        console.log(`[Source] Cascade delete for source ${sourceId}: ${catResult.changes} categories, ${itemResult.changes} items, ${epgResult.changes} EPG programs`);
+
+        // Delete source config and related hidden items (favorites handled by db.js)
+        await sources.delete(sourceId, req.user.id, req.user.role);
+
         res.json({ success: true });
     } catch (err) {
         console.error('Error deleting source:', err);
@@ -166,21 +144,15 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // Toggle source enabled/disabled
-router.post('/:id/toggle', requireAuth, async (req, res) => {
+router.post('/:id/toggle', async (req, res) => {
     try {
-        const existing = await sources.getById(req.params.id);
-        if (!existing) {
-            return res.status(404).json({ error: 'Source not found' });
+        const updated = await sources.toggleEnabled(req.params.id, req.user.id, req.user.role);
+        if (!updated) {
+            return res.status(404).json({ error: 'Source not found or unauthorized' });
         }
-
-        if (existing.user_id !== req.user.id && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied to this source' });
-        }
-
-        const updated = await sources.toggleEnabled(req.params.id);
 
         // If enabled, trigger sync
-        if (updated && updated.enabled) {
+        if (updated.enabled) {
             syncService.syncSource(parseInt(req.params.id)).catch(console.error);
         }
 
@@ -192,15 +164,11 @@ router.post('/:id/toggle', requireAuth, async (req, res) => {
 });
 
 // Manual Sync
-router.post('/:id/sync', requireAuth, async (req, res) => {
+router.post('/:id/sync', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const source = await sources.getById(id);
-        if (!source) return res.status(404).json({ error: 'Source not found' });
-
-        if (source.user_id !== req.user.id && source.user_id !== 0 && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied to this source' });
-        }
+        const source = await sources.getById(id, req.user.id, req.user.role);
+        if (!source) return res.status(404).json({ error: 'Source not found or unauthorized' });
 
         // Trigger sync (async)
         syncService.syncSource(id).catch(console.error);
@@ -215,9 +183,9 @@ router.post('/:id/sync', requireAuth, async (req, res) => {
 // Test source connection
 router.post('/:id/test', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.id);
+        const source = await sources.getById(req.params.id, req.user.id, req.user.role);
         if (!source) {
-            return res.status(404).json({ error: 'Source not found' });
+            return res.status(404).json({ error: 'Source not found or unauthorized' });
         }
 
         if (source.type === 'xtream') {
@@ -240,9 +208,73 @@ router.post('/:id/test', async (req, res) => {
     }
 });
 
+// Estimate M3U playlist size (for large playlist warning)
+const M3U_LARGE_THRESHOLD = 50000;
+
+// Estimate by URL (for new sources before creation)
+router.post('/estimate', async (req, res) => {
+    try {
+        const { url, type } = req.body;
+
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required' });
+        }
+
+        // Only M3U sources need estimation
+        if (type !== 'm3u') {
+            return res.json({ count: 0, needsWarning: false, threshold: M3U_LARGE_THRESHOLD });
+        }
+
+        console.log(`[Sources] Estimating M3U size for URL...`);
+        const count = await m3uParser.countEntries(url);
+        console.log(`[Sources] M3U estimate: ${count} entries`);
+
+        res.json({
+            count,
+            needsWarning: count > M3U_LARGE_THRESHOLD,
+            threshold: M3U_LARGE_THRESHOLD
+        });
+    } catch (err) {
+        console.error('Error estimating M3U size:', err);
+        res.status(500).json({ error: 'Failed to estimate playlist size', message: err.message });
+    }
+});
+
+// Estimate by source ID (for existing sources)
+router.get('/:id/estimate', async (req, res) => {
+    try {
+        const source = await sources.getById(req.params.id, req.user.id, req.user.role);
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found or unauthorized' });
+        }
+
+        // Only M3U sources need estimation
+        if (source.type !== 'm3u') {
+            return res.json({ count: 0, needsWarning: false, threshold: M3U_LARGE_THRESHOLD });
+        }
+
+        console.log(`[Sources] Estimating M3U size for ${source.name}...`);
+        const count = await m3uParser.countEntries(source.url);
+        console.log(`[Sources] M3U estimate: ${count} entries`);
+
+        res.json({
+            count,
+            needsWarning: count > M3U_LARGE_THRESHOLD,
+            threshold: M3U_LARGE_THRESHOLD
+        });
+    } catch (err) {
+        console.error('Error estimating M3U size:', err);
+        res.status(500).json({ error: 'Failed to estimate playlist size', message: err.message });
+    }
+});
+
 // Global Sync - sync all enabled sources
 router.post('/sync-all', async (req, res) => {
     try {
+        // Admin only for global sync unless we limit to their sources
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Admin only' });
+        }
         // Trigger global sync (async - don't wait for completion)
         syncService.syncAll().catch(console.error);
         res.json({ success: true, message: 'Global sync started' });

@@ -15,6 +15,7 @@ class SourceManager {
         this.hiddenSet = new Set(); // Set of hidden item keys (current state)
         this.originalHiddenSet = new Set(); // Set of hidden item keys (state when loaded)
         this.expandedGroups = new Set(); // Set of expanded group IDs
+        this.searchQuery = ''; // Search filter for content browser
 
         this.init();
     }
@@ -30,6 +31,61 @@ class SourceManager {
 
         // Start polling sync status
         this.pollSyncStatus();
+    }
+
+    /**
+     * Show a styled warning modal with Cancel/Proceed buttons
+     * @param {Object} options - { title, message, details, proceedText, cancelText }
+     * @returns {Promise<boolean>} - Resolves true if user clicks Proceed, false if Cancel
+     */
+    showWarningModal({ title, message, details = '', proceedText = 'Proceed', cancelText = 'Cancel' }) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const modalFooter = document.getElementById('modal-footer');
+
+            modalTitle.textContent = title;
+
+            modalBody.innerHTML = `
+                <div class="warning-modal-content">
+                    <div class="warning-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width: 48px; height: 48px; color: var(--color-warning, #f59e0b);">
+                            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+                        </svg>
+                    </div>
+                    <p class="warning-message" style="font-size: 1rem; margin: var(--space-md) 0; color: var(--color-text-primary);">${message}</p>
+                    ${details ? `<p class="warning-details" style="font-size: 0.875rem; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: var(--space-md); border-radius: var(--radius-md); text-align: left;">${details}</p>` : ''}
+                </div>
+            `;
+
+            modalFooter.innerHTML = `
+                <button class="btn btn-secondary" id="warning-cancel">${cancelText}</button>
+                <button class="btn btn-primary" id="warning-proceed" style="background: var(--color-warning, #f59e0b); border-color: var(--color-warning, #f59e0b);">${proceedText}</button>
+            `;
+
+            modal.classList.add('active');
+
+            const cleanup = () => {
+                modal.classList.remove('active');
+                modal.querySelector('.modal-close').onclick = null;
+            };
+
+            document.getElementById('warning-cancel').onclick = () => {
+                cleanup();
+                resolve(false);
+            };
+
+            document.getElementById('warning-proceed').onclick = () => {
+                cleanup();
+                resolve(true);
+            };
+
+            modal.querySelector('.modal-close').onclick = () => {
+                cleanup();
+                resolve(false);
+            };
+        });
     }
 
     /**
@@ -54,23 +110,7 @@ class SourceManager {
      */
     async loadSources() {
         try {
-            const sources = await API.sources.getAll({ all: true });
-
-            // Map user IDs to usernames if admin
-            if (window.app?.currentUser?.role === 'admin') {
-                try {
-                    const users = await API.users.getAll();
-                    const userMap = {};
-                    users.forEach(u => userMap[u.id] = u.username);
-                    sources.forEach(s => {
-                        if (s.user_id && userMap[s.user_id]) {
-                            s.ownerName = userMap[s.user_id];
-                        }
-                    });
-                } catch (err) {
-                    console.error('Error fetching users for mapping:', err);
-                }
-            }
+            const sources = await API.sources.getAll();
 
             this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
             this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
@@ -95,11 +135,7 @@ class SourceManager {
       <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
-          <div class="source-name">
-            ${source.name} 
-            ${source.ownerName ? `<span class="badge" title="Owner">${source.ownerName}</span>` :
-                source.user_id ? `<span class="badge">User ${source.user_id}</span>` : ''}
-          </div>
+          <div class="source-name">${source.name}</div>
           <div class="source-url">${source.url}</div>
         </div>
         <div class="source-actions">
@@ -129,7 +165,7 @@ class SourceManager {
     /**
      * Show add source modal
      */
-    async showAddModal(type) {
+    showAddModal(type) {
         const modal = document.getElementById('modal');
         const title = document.getElementById('modal-title');
         const body = document.getElementById('modal-body');
@@ -138,27 +174,7 @@ class SourceManager {
         const titles = { xtream: 'Add Xtream Connection', m3u: 'Add M3U Playlist', epg: 'Add EPG Source' };
         title.textContent = titles[type];
 
-        let userOptionsHtml = '';
-        if (window.app?.currentUser?.role === 'admin') {
-            try {
-                const users = await API.users.getAll();
-                const options = users.map(u =>
-                    `<option value="${u.id}" ${u.id === window.app.currentUser.id ? 'selected' : ''}>${u.username}</option>`
-                ).join('');
-                userOptionsHtml = `
-                    <div class="form-group">
-                        <label for="source-user">Owner (Admin Only)</label>
-                        <select id="source-user" class="form-input">
-                            ${options}
-                        </select>
-                    </div>
-                `;
-            } catch (err) {
-                console.error('Error fetching users:', err);
-            }
-        }
-
-        body.innerHTML = this.getSourceForm(type, {}, userOptionsHtml);
+        body.innerHTML = this.getSourceForm(type);
 
         footer.innerHTML = `
       <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -186,28 +202,7 @@ class SourceManager {
             const footer = document.getElementById('modal-footer');
 
             title.textContent = `Edit ${type.toUpperCase()} Source`;
-
-            let userOptionsHtml = '';
-            if (window.app?.currentUser?.role === 'admin') {
-                try {
-                    const users = await API.users.getAll();
-                    const options = users.map(u =>
-                        `<option value="${u.id}" ${u.id === source.user_id ? 'selected' : ''}>${u.username}</option>`
-                    ).join('');
-                    userOptionsHtml = `
-                        <div class="form-group">
-                            <label for="source-user">Owner (Admin Only)</label>
-                            <select id="source-user" class="form-input">
-                                ${options}
-                            </select>
-                        </div>
-                    `;
-                } catch (err) {
-                    console.error('Error fetching users:', err);
-                }
-            }
-
-            body.innerHTML = this.getSourceForm(type, source, userOptionsHtml);
+            body.innerHTML = this.getSourceForm(type, source);
 
             footer.innerHTML = `
         <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
@@ -227,7 +222,7 @@ class SourceManager {
     /**
      * Get source form HTML
      */
-    getSourceForm(type, source = {}, userOptionsHtml = '') {
+    getSourceForm(type, source = {}) {
         const nameField = `
       <div class="form-group">
         <label for="source-name">Name</label>
@@ -244,10 +239,10 @@ class SourceManager {
       </div>
     `;
 
-        let formHtml = userOptionsHtml + nameField + urlField;
-
         if (type === 'xtream') {
-            formHtml += `
+            return `
+        ${nameField}
+        ${urlField}
         <div class="form-group">
           <label for="source-username">Username</label>
           <input type="text" id="source-username" class="form-input" value="${source.username || ''}">
@@ -260,17 +255,7 @@ class SourceManager {
       `;
         }
 
-        formHtml += `
-      <div class="form-group row-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="source-use-warp" ${source.use_warp ? 'checked' : ''}>
-          <span>Route through Cloudflare WARP (Selective VPN)</span>
-        </label>
-        <p class="hint">Use this for streams that are geo-blocked or restricted to Cloudflare networks. Requires WARP setup in Connectivity settings.</p>
-      </div>
-    `;
-
-        return formHtml;
+        return nameField + urlField;
     }
 
     /**
@@ -278,27 +263,39 @@ class SourceManager {
      */
     async saveNewSource(type) {
         const name = document.getElementById('source-name').value.trim();
-        let url = document.getElementById('source-url').value.trim();
+        const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim() || null;
         const password = document.getElementById('source-password')?.value.trim() || null;
-        const useWarp = document.getElementById('source-use-warp')?.checked || false;
-        const userId = document.getElementById('source-user')?.value || null;
 
         if (!name || !url) {
             alert('Name and URL are required');
             return;
         }
 
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'http://' + url;
-        }
-
         try {
-            const data = { type, name, url, username, password, use_warp: useWarp };
-            if (userId) {
-                data.user_id = parseInt(userId);
+            // Check M3U size before creating (large playlist warning)
+            if (type === 'm3u') {
+                try {
+                    const estimate = await API.sources.estimateByUrl(url, type);
+                    if (estimate.needsWarning) {
+                        const proceed = await this.showWarningModal({
+                            title: '⚠️ Large Playlist Warning',
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
+                            details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
+                            proceedText: 'Proceed Anyway',
+                            cancelText: 'Cancel'
+                        });
+                        if (!proceed) {
+                            return; // Don't create the source
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[SourceManager] Could not estimate M3U size:', err.message);
+                    // Continue with creation anyway
+                }
             }
-            await API.sources.create(data);
+
+            await API.sources.create({ type, name, url, username, password });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
 
@@ -317,26 +314,17 @@ class SourceManager {
      */
     async updateSource(id, type) {
         const name = document.getElementById('source-name').value.trim();
-        let url = document.getElementById('source-url').value.trim();
+        const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim();
         const password = document.getElementById('source-password')?.value.trim();
-        const useWarp = document.getElementById('source-use-warp')?.checked || false;
-        const userId = document.getElementById('source-user')?.value || null;
 
         if (!name || !url) {
             alert('Name and URL are required');
             return;
         }
 
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'http://' + url;
-        }
-
         try {
-            const data = { name, url, use_warp: useWarp };
-            if (userId) {
-                data.user_id = parseInt(userId);
-            }
+            const data = { name, url };
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;
@@ -407,6 +395,34 @@ class SourceManager {
                 btn.disabled = true;
                 const icon = btn.querySelector('.icon');
                 if (icon) icon.classList.add('spin');
+            }
+
+            // Check M3U size before syncing (large playlist warning)
+            if (type === 'm3u') {
+                try {
+                    const estimate = await API.sources.estimate(id);
+                    if (estimate.needsWarning) {
+                        const proceed = await this.showWarningModal({
+                            title: '⚠️ Large Playlist Warning',
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
+                            details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
+                            proceedText: 'Proceed Anyway',
+                            cancelText: 'Cancel'
+                        });
+                        if (!proceed) {
+                            // Reset button state
+                            if (btn) {
+                                btn.disabled = false;
+                                const icon = btn.querySelector('.icon');
+                                if (icon) icon.classList.remove('spin');
+                            }
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[SourceManager] Could not estimate M3U size:', err.message);
+                    // Continue with sync anyway
+                }
             }
 
             // 1. Trigger Backend Sync
@@ -516,6 +532,23 @@ class SourceManager {
 
         // Save Changes button
         document.getElementById('content-save')?.addEventListener('click', () => this.saveContentChanges());
+
+        // Search input
+        const searchInput = document.getElementById('content-search');
+        const searchClear = searchInput?.parentElement?.querySelector('.search-clear');
+
+        searchInput?.addEventListener('input', (e) => {
+            this.searchQuery = e.target.value.toLowerCase().trim();
+            this.renderTree();
+        });
+
+        searchClear?.addEventListener('click', () => {
+            if (searchInput) {
+                searchInput.value = '';
+                this.searchQuery = '';
+                this.renderTree();
+            }
+        });
     }
 
     /**
@@ -544,7 +577,7 @@ class SourceManager {
      */
     async loadContentSources() {
         try {
-            const sources = await API.sources.getAll({ all: true });
+            const sources = await API.sources.getAll();
             const select = document.getElementById('content-source-select');
             if (!select) return;
 
@@ -579,8 +612,8 @@ class SourceManager {
 
             let categoryMap = {};
 
-            if (source.type === 'xtream') {
-                // Run sequentially to avoid overwhelming the provider
+            if (source.type === 'xtream' || source.type === 'm3u') {
+                // Use unified Xtream API endpoints - backend supports both source types
                 // Use includeHidden to show ALL items in the content manager
                 const categories = await API.proxy.xtream.liveCategories(sourceId, { includeHidden: true });
                 const streams = await API.proxy.xtream.liveStreams(sourceId, null, { includeHidden: true });
@@ -589,9 +622,6 @@ class SourceManager {
                 categories.forEach(cat => {
                     categoryMap[cat.category_id] = cat.category_name;
                 });
-            } else if (source.type === 'm3u') {
-                const m3uData = await API.proxy.m3u.get(sourceId, { includeHidden: true });
-                channels = m3uData.channels || [];
             }
 
             // Get currently hidden items
@@ -603,16 +633,14 @@ class SourceManager {
             const groupMap = {}; // key: categoryId, value: { name, categoryId, items }
             channels.forEach(ch => {
                 let groupName = 'Uncategorized';
-                let categoryId = null;
-                if (source.type === 'xtream') {
-                    categoryId = ch.category_id;
-                    if (categoryId && categoryMap[categoryId]) {
-                        groupName = categoryMap[categoryId];
-                    }
-                } else {
-                    // For M3U, category_id might be the group name itself
-                    groupName = ch.category_name || ch.groupTitle || 'Uncategorized';
-                    categoryId = groupName; // M3U uses name as ID
+                let categoryId = ch.category_id;
+
+                // Look up category name from map (works for both Xtream and M3U now)
+                if (categoryId && categoryMap[categoryId]) {
+                    groupName = categoryMap[categoryId];
+                } else if (categoryId) {
+                    // M3U uses category_id as the name itself
+                    groupName = categoryId;
                 }
 
                 const groupKey = categoryId || groupName;
@@ -656,15 +684,44 @@ class SourceManager {
     }
 
     /**
+     * Get groups filtered by search query
+     */
+    getFilteredGroups() {
+        if (!this.treeData?.groups) return [];
+        if (!this.searchQuery) return this.treeData.groups;
+
+        return this.treeData.groups
+            .map(group => {
+                // Check if group name matches
+                const groupMatches = group.name.toLowerCase().includes(this.searchQuery);
+
+                // Filter items that match
+                const matchingItems = group.items.filter(item =>
+                    item.name.toLowerCase().includes(this.searchQuery)
+                );
+
+                // Include group if name matches OR has matching items
+                if (groupMatches || matchingItems.length > 0) {
+                    return { ...group, items: groupMatches ? group.items : matchingItems };
+                }
+                return null;
+            })
+            .filter(Boolean);
+    }
+
+    /**
      * Render the full tree based on current state
      */
     renderTree() {
-        if (!this.treeData || !this.treeData.groups.length) {
-            this.contentTree.innerHTML = '<p class="hint">No content found</p>';
+        const groups = this.getFilteredGroups();
+
+        if (!groups.length) {
+            const msg = this.searchQuery ? 'No matches found' : 'No content found';
+            this.contentTree.innerHTML = `<p class="hint">${msg}</p>`;
             return;
         }
 
-        const html = this.treeData.groups.map(group => this.getGroupHtml(group)).join('');
+        const html = groups.map(group => this.getGroupHtml(group)).join('');
         this.contentTree.innerHTML = html;
 
         // Attach event listeners
@@ -759,10 +816,11 @@ class SourceManager {
             this.expandedGroups.add(groupId);
         }
 
-        // Re-render only this group
+        // Re-render only this group - use filtered groups to respect search
         const groupEl = this.contentTree.querySelector(`.content-group[data-group-id="${CSS.escape(groupId)}"]`);
         if (groupEl) {
-            const group = this.treeData.groups.find(g => g.id === groupId);
+            const filteredGroups = this.getFilteredGroups();
+            const group = filteredGroups.find(g => g.id === groupId);
             if (group) {
                 const newHtml = this.getGroupHtml(group);
                 groupEl.outerHTML = newHtml;

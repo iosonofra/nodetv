@@ -8,19 +8,19 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>NodeCast TV | IPTV Player</title>
+  <title>nodecast-tv | IPTV Player</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="css/main.css?v=5">
-  <link rel="stylesheet" href="css/media.css?v=5">
+  <link rel="stylesheet" href="css/main.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
     rel="stylesheet">
   <!-- HLS.js for video playback -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
-  <!-- Shaka Player for DASH/Widevine/Drm -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/shaka-player.compiled.js"></script>
+  <!-- Shaka Player for DASH/DRM -->
+  <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.16.0/dist/shaka-player.ui.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/shaka-player@4.16.0/dist/controls.css">
 </head>
 
 <body>
@@ -34,6 +34,7 @@
               d="M169.71,87.87c-4.77,0-9.1,1.88-12.31,4.92L35.3,22.3c.35-1.4.56-2.86.56-4.37C35.86,8.03,27.83,0,17.93,0S0,8.03,0,17.93c0,8.44,5.84,15.5,13.69,17.4v140c-7.71,2.01-13.41,8.99-13.41,17.33,0,9.9,8.03,17.93,17.93,17.93s17.93-8.03,17.93-17.93c0-1.56-.22-3.07-.6-4.51l121.21-69.98c3.26,3.42,7.86,5.55,12.95,5.55,9.9,0,17.93-8.03,17.93-17.93s-8.03-17.93-17.93-17.93ZM152.78,99.92c-.14.41-.27.83-.38,1.25h-51.47l-44.18-24.72L30.4,30.8c.33-.32.64-.65.94-.99l121.45,70.12ZM22.17,175.2V35.33c.23-.05.45-.11.67-.17l26.35,45.65-.34,50.04-25.74,44.59c-.31-.09-.63-.17-.95-.24ZM31.52,180.69c-.27-.3-.55-.6-.84-.89l25.48-44.13,44.64-25.78h51.47c.07.32.15.63.24.94L31.52,180.69Z" />
           </svg></span>
         <span class="brand-text">nodecast-tv</span>
+        <span id="version-badge" class="version-badge"></span>
       </div>
       <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">
         <span></span>
@@ -41,7 +42,19 @@
         <span></span>
       </button>
       <div class="navbar-menu" id="navbar-menu">
+        <!-- Now Playing indicator for movies/series -->
+        <a href="#" class="now-playing-indicator hidden" id="now-playing-indicator" data-page="watch">
+          <span class="now-playing-icon">▶</span>
+          <span class="now-playing-text" id="now-playing-text">Now Playing</span>
+        </a>
         <a href="#" class="nav-link active" data-page="home">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+              class="icon">
+              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+            </svg></span>
+          <span>Home</span>
+        </a>
+        <a href="#" class="nav-link" data-page="live">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
               class="icon">
               <path
@@ -80,21 +93,19 @@
             </svg></span>
           <span>Settings</span>
         </a>
-        <a href="/tester.html" target="_blank" class="nav-link">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
-              class="icon">
-              <path
-                d="M19 3H5c-1.103 0-2 .897-2 2v14c0 1.103.897 2 2 2h14c1.103 0 2-.897 2-2V5c0-1.103-.897-2-2-2zM9 11.5v-3l4 1.5-4 1.5zm6 4.5l-2-1.5v-3l2-1.5v6z" />
-            </svg></span>
-          <span>Tester</span>
-        </a>
       </div>
     </nav>
 
     <!-- Main Content Area -->
     <main class="main-content">
-      <!-- Home Page -->
+      <!-- Home (Dashboard) Page -->
       <div id="page-home" class="page active">
+        <!-- Content will be rendered by HomePage.js -->
+        <div class="loading-state">Loading Dashboard...</div>
+      </div>
+
+      <!-- Live TV Page (formerly Home) -->
+      <div id="page-live" class="page">
         <div class="home-layout">
           <!-- Channel Toggle Button (Mobile) -->
           <button class="channel-toggle-btn" id="channel-toggle-btn">
@@ -107,21 +118,27 @@
           <!-- Overlay for drawer -->
           <div class="channel-sidebar-overlay" id="channel-sidebar-overlay"></div>
 
+          <!-- Expand button (visible when sidebar collapsed on desktop) -->
+          <button class="sidebar-expand-btn" id="sidebar-expand-btn" title="Expand sidebar">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+              <path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z" />
+            </svg>
+          </button>
+
           <!-- Channel Sidebar -->
           <aside class="channel-sidebar" id="channel-sidebar">
             <div class="sidebar-header">
-              <div class="sidebar-header-top">
-                <span class="sidebar-title">Channels</span>
-                <button id="btn-hide-sidebar" class="btn-sidebar-toggle" title="Hide Sidebar">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m15 18-6-6 6-6" />
+              <div class="sidebar-header-row">
+                <div class="search-wrapper">
+                  <input type="text" id="channel-search" placeholder="Search channels..." class="search-input">
+                  <button type="button" class="search-clear" title="Clear search">&times;</button>
+                </div>
+                <button id="sidebar-collapse-btn" class="btn btn-sm btn-ghost sidebar-collapse-btn"
+                  title="Collapse sidebar">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
                   </svg>
                 </button>
-              </div>
-              <div class="search-wrapper">
-                <input type="text" id="channel-search" placeholder="Search channels..." class="search-input">
-                <button type="button" class="search-clear" title="Clear search">&times;</button>
               </div>
               <div class="sidebar-controls">
                 <select id="source-select" class="source-select">
@@ -133,6 +150,7 @@
                         d="M12 5.83L15.17 9l1.41-1.41L12 3 7.41 7.59 8.83 9 12 5.83zm0 12.34L8.83 15l-1.41 1.41L12 21l4.59-4.59L15.17 15 12 18.17z" />
                     </svg></span>
                 </button>
+
               </div>
             </div>
             <div id="channel-list" class="channel-list">
@@ -143,126 +161,120 @@
             </div>
           </aside>
 
-          <button id="btn-show-sidebar" class="sidebar-expand-btn" title="Show Channels">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </button>
-
           <!-- Video Player Area -->
           <section class="player-section">
-            <div class="video-container">
-              <!-- Ambient Glow Background -->
-              <div class="ambient-glow-container">
-                <canvas id="ambient-canvas"></canvas>
-              </div>
-
+            <div class="video-container" id="video-container">
               <video id="video-player" playsinline></video>
-              <div id="debug-stats" class="debug-stats hidden"></div>
 
-              <!-- Loading Spinner -->
-              <div id="player-loading-spinner" class="player-loading-spinner hidden">
-                <div class="spinner"></div>
-                <div class="loading-text">Caricamento...</div>
-              </div>
-
-              <!-- Center Play/Pause Feedback -->
-              <div id="player-center-feedback" class="player-center-feedback">
-                <div class="feedback-icon"></div>
-              </div>
-
-              <div class="video-controls-container" id="video-controls-container">
-                <!-- Progress Bar -->
-                <div class="progress-container" id="progress-container">
-                  <div class="progress-bar-bg">
-                    <div class="progress-buffer" id="progress-buffer"></div>
-                    <div class="progress-current" id="progress-current"></div>
-                    <div class="progress-handle" id="progress-handle"></div>
+              <!-- Custom Controls Overlay -->
+              <div class="watch-overlay hidden" id="player-controls-overlay">
+                <!-- Top Bar -->
+                <div class="watch-top-bar live-header">
+                  <h2 class="watch-title-overlay" id="player-channel-name"></h2>
+                  <div class="player-badges">
+                    <div class="transcode-status hidden" id="player-transcode-status">Direct</div>
+                    <div class="quality-badge hidden" id="player-quality-badge"></div>
                   </div>
-                  <div class="progress-time-tooltip" id="progress-time-tooltip">00:00</div>
                 </div>
 
-                <div class="video-controls" id="video-controls">
-                  <div class="controls-left">
-                    <button class="video-control-btn" id="btn-back-10" title="Back 10s">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                        <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
-                      </svg>
-                    </button>
-                    <button class="video-control-btn" id="btn-play" title="Play/Pause">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+
+
+                <!-- Loading Spinner -->
+                <div class="watch-loading" id="player-loading">
+                  <div class="loading-spinner"></div>
+                </div>
+
+                <!-- Bottom Bar: Controls -->
+                <div class="watch-bottom-bar">
+                  <div class="watch-controls">
+                    <button class="watch-btn watch-btn-lg" id="btn-play" title="Play/Pause">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="icon icon-play">
                         <path d="M8 5v14l11-7z" />
                       </svg>
-                    </button>
-                    <button class="video-control-btn" id="btn-forward-10" title="Forward 10s">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                        <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="icon icon-pause hidden">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                       </svg>
                     </button>
-                    <div class="volume-control">
-                      <button class="video-control-btn" id="btn-mute" title="Mute/Unmute">
+
+                    <!-- DVR Seekbar -->
+                    <input type="range" class="player-dvr-seekbar" id="player-dvr-seekbar" min="0" max="100" value="100"
+                      step="0.1">
+                    <button class="player-live-badge live" id="player-live-badge" title="Jump to live">LIVE</button>
+
+                    <button class="watch-btn" id="btn-mute" title="Mute">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="icon icon-vol">
+                        <path
+                          d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                      </svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="icon icon-muted hidden">
+                        <path
+                          d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                      </svg>
+                    </button>
+                    <input type="range" class="watch-volume" id="player-volume" min="0" max="100" value="80">
+
+                    <!-- Captions Button -->
+                    <div class="watch-captions-wrapper">
+                      <button class="watch-btn" id="player-captions-btn" title="Captions">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                           <path
-                            d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                            d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" />
                         </svg>
                       </button>
-                      <div class="volume-slider-popover">
-                        <input type="range" id="control-volume-slider" min="0" max="100" value="80">
+                      <div class="watch-captions-menu hidden" id="player-captions-menu">
+                        <div class="captions-menu-title">Subtitles</div>
+                        <div class="captions-menu-list" id="player-captions-list">
+                          <button class="captions-option active" data-index="-1">Off</button>
+                        </div>
                       </div>
                     </div>
-                    <div class="time-display">
-                      <span id="current-time">0:00</span> / <span id="duration-time">0:00</span>
-                      <span id="live-indicator" class="live-tag hidden">LIVE</span>
-                      <button id="btn-go-live" class="btn-go-live hidden"><span class="live-dot"></span>Go to
-                        Live</button>
-                    </div>
-                  </div>
 
-                  <div class="controls-right">
-                    <button class="video-control-btn" id="btn-info" title="Channel Info">
+                    <button class="watch-btn" id="btn-pip" title="Picture-in-Picture">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                        <path
+                          d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" />
+                      </svg>
+                    </button>
+                    <button class="watch-btn" id="btn-info" title="Now Playing (I)">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                         <path
                           d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
                       </svg>
                     </button>
-                    <div class="audio-menu-container">
-                      <button class="video-control-btn" id="btn-audio" title="Audio Tracks">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                          <path
-                            d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                        </svg>
-                      </button>
-                      <div class="quality-menu hidden" id="audio-menu">
-                        <div class="quality-header">Audio Track</div>
-                        <ul id="audio-list"></ul>
-                      </div>
-                    </div>
-                    <div class="quality-menu-container">
-                      <button class="video-control-btn" id="btn-quality" title="Streaming Quality">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                          <path
-                            d="M15,21H9V19h6V21z M19,17H5V15h14V17z M22,13H2v-2h20V13z M19,9H5V7h14V9z M15,5H9V3h6V5z" />
-                        </svg>
-                      </button>
-                      <div class="quality-menu hidden" id="quality-menu">
-                        <div class="quality-header">Stream Quality</div>
-                        <ul id="quality-list">
-                          <li data-level="-1" class="active">Auto</li>
-                        </ul>
-                      </div>
-                    </div>
-                    <button class="video-control-btn" id="btn-pip" title="Picture in Picture">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
-                        <path
-                          d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z" />
-                      </svg>
-                    </button>
-                    <button class="video-control-btn" id="btn-fullscreen" title="Fullscreen">
+                    <button class="watch-btn" id="btn-fullscreen" title="Fullscreen">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                         <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                       </svg>
                     </button>
+                    <!-- Overflow Menu -->
+                    <div class="player-overflow-wrapper">
+                      <button class="watch-btn" id="btn-overflow" title="More options">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                          <path
+                            d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                        </svg>
+                      </button>
+                      <div class="player-overflow-menu hidden" id="player-overflow-menu">
+                        <button class="overflow-menu-item" id="btn-copy-url">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                            <path
+                              d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                          </svg>
+                          Copy Stream URL
+                        </button>
+                        <button class="overflow-menu-item" id="btn-stats">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                            <path
+                              d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z" />
+                          </svg>
+                          Stats for Nerds
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -272,28 +284,84 @@
                   <p>Select a channel to start watching</p>
                 </div>
               </div>
-              <!-- Now Playing OSD -->
-              <div class="now-playing-overlay hidden" id="now-playing">
-                <div class="osd-content">
-                  <div class="osd-main">
-                    <div class="osd-header">
-                      <span class="osd-tag">Now Playing</span>
-                      <h3 class="channel-name">No channel selected</h3>
-                    </div>
-                    <p class="program-title"></p>
-                    <div class="osd-meta">
-                      <span class="program-time"></span>
-                      <span class="osd-sep">•</span>
-                      <span class="osd-live-badge">LIVE</span>
-                    </div>
+
+              <!-- Stats for Nerds Overlay -->
+              <div class="stats-for-nerds-overlay hidden" id="player-stats-overlay">
+                <button class="stats-close-btn" id="btn-close-stats">&times;</button>
+                <h4>Stats for Nerds</h4>
+                <div class="stats-grid">
+                  <div class="stat-row">
+                    <span class="stat-label">Video ID:</span>
+                    <span class="stat-value" id="stat-video-id">-</span>
                   </div>
-                  <div class="osd-up-next">
-                    <h4>Up Next</h4>
-                    <ul id="up-next-list"></ul>
+                  <div class="stat-row">
+                    <span class="stat-label">Viewport / Frames:</span>
+                    <span class="stat-value" id="stat-viewport-frames">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Current / Optimal Res:</span>
+                    <span class="stat-value" id="stat-resolution">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Frame Rate:</span>
+                    <span class="stat-value" id="stat-fps">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Volume:</span>
+                    <span class="stat-value" id="stat-volume">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Codecs:</span>
+                    <span class="stat-value" id="stat-codecs">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Bandwidth:</span>
+                    <span class="stat-value" id="stat-connection-speed">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Network Activity:</span>
+                    <span class="stat-value" id="stat-network-activity">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Buffer Health:</span>
+                    <span class="stat-value" id="stat-buffer-health">-</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">Live Latency:</span>
+                    <span class="stat-value" id="stat-live-latency">-</span>
                   </div>
                 </div>
               </div>
 
+              <div class="now-playing-overlay hidden" id="now-playing">
+                <div class="now-playing-info">
+                  <h3 class="channel-name">No channel selected</h3>
+                  <p class="program-title"></p>
+                  <p class="program-time"></p>
+                </div>
+                <div class="up-next">
+                  <h4>Up Next</h4>
+                  <ul id="up-next-list"></ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Shaka Player Area (Isolated from HLS.js) -->
+            <div class="video-container" id="shaka-container" style="display: none;">
+              <video id="shaka-video-player" playsinline style="width: 100%; height: 100%;"></video>
+
+              <!-- Now Playing Overlay for Shaka -->
+              <div class="now-playing-overlay hidden" id="shaka-now-playing">
+                <div class="now-playing-info">
+                  <h3 class="channel-name">No channel selected</h3>
+                  <p class="program-title"></p>
+                  <p class="program-time"></p>
+                </div>
+                <div class="up-next">
+                  <h4>Up Next</h4>
+                  <ul id="shaka-up-next-list"></ul>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -377,6 +445,7 @@
             </button>
           </div>
         </div>
+
         <div class="series-content">
           <div id="series-grid" class="series-grid">
             <div class="empty-state">
@@ -407,9 +476,8 @@
           <div class="tabs">
             <button class="tab active" data-tab="sources">Sources</button>
             <button class="tab" data-tab="player">Player</button>
+            <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
-            <button class="tab" data-tab="connectivity" id="connectivity-tab"
-              style="display:none;">Connectivity</button>
             <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
           </div>
 
@@ -525,21 +593,137 @@
             </div>
 
             <div class="settings-section">
-              <h3>Streaming</h3>
+              <h3>Keyboard Shortcuts</h3>
+              <div class="shortcuts-grid">
+                <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
+                <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
+                <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
+                <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
+                <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
+                <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
+                <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transcoding Tab -->
+          <div id="tab-transcode" class="tab-content">
+            <div class="settings-section">
+              <h3>Detected Hardware</h3>
+              <div id="hw-info-container" class="hw-info-container">
+                <p class="hint">Loading hardware information...</p>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Encoder Settings</h3>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Hardware Encoder</span>
+                  <span class="setting-hint">Select which GPU encoder to use for transcoding. Auto will use the best
+                    available.</span>
+                </div>
+                <select id="setting-hw-encoder" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="auto">Auto (Recommended)</option>
+                  <option value="nvenc">NVIDIA NVENC</option>
+                  <option value="amf">AMD AMF</option>
+                  <option value="qsv">Intel QuickSync</option>
+                  <option value="vaapi">VAAPI (Linux)</option>
+                  <option value="software">Software (CPU)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Max Resolution</span>
+                  <span class="setting-hint">Limit transcoded output resolution. Lower = faster, more
+                    compatible.</span>
+                </div>
+                <select id="setting-max-resolution" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="4k">4K (2160p)</option>
+                  <option value="1080p" selected>1080p (Full HD)</option>
+                  <option value="720p">720p (HD)</option>
+                  <option value="480p">480p (SD)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Quality Preset</span>
+                  <span class="setting-hint">Higher quality uses more bandwidth and CPU/GPU.</span>
+                </div>
+                <select id="setting-quality" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="high">High</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="low">Low (Fastest)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Audio Mix Preset</span>
+                  <span class="setting-hint">How multi-channel audio (5.1/7.1) is mixed down to stereo for browser
+                    playback.</span>
+                </div>
+                <select id="setting-audio-mix" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="auto">Auto (Smart Copy/ITU)</option>
+                  <option value="itu">ITU-R BS.775 (Balanced)</option>
+                  <option value="night">Night Mode (Dialogue Boost)</option>
+                  <option value="cinematic">Cinematic (Wide)</option>
+                  <option value="passthrough">Passthrough (Copy)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Upscaling</h3>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-proxy">
+                  <input type="checkbox" id="setting-upscale-enabled">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Force Backend Proxy</span>
-                  <span class="setting-hint">Route all streams through the proxy server. Enable if streams don't play
-                    directly.</span>
+                  <span class="setting-label">Enable Upscaling</span>
+                  <span class="setting-hint">Upscale lower-resolution content to a higher resolution during
+                    transcoding.</span>
+                </div>
+              </div>
+              <div class="setting-item" id="upscale-method-container" style="display: none;">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Upscale Method</span>
+                  <span class="setting-hint">Hardware is faster; Software (Lanczos) is higher quality.</span>
+                </div>
+                <select id="setting-upscale-method" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="hardware">Hardware (GPU)</option>
+                  <option value="software">Software (Lanczos)</option>
+                </select>
+              </div>
+              <div class="setting-item" id="upscale-target-container" style="display: none;">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Upscale Target</span>
+                  <span class="setting-hint">Target resolution for upscaled output.</span>
+                </div>
+                <select id="setting-upscale-target" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="720p">720p (HD)</option>
+                  <option value="1080p" selected>1080p (Full HD)</option>
+                  <option value="4k">4K (2160p)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Stream Processing</h3>
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-auto-transcode-tc">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Auto Transcode (Smart)</span>
+                  <span class="setting-hint">Automatically detect stream codecs and only transcode/remux when needed.
+                    Adds ~1-3s probe delay on first play.</span>
                 </div>
               </div>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-transcode">
+                  <input type="checkbox" id="setting-force-transcode-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
@@ -550,13 +734,25 @@
               </div>
               <div class="setting-item">
                 <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-remux">
+                  <input type="checkbox" id="setting-force-video-transcode-tc">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Force Video Transcode</span>
+                  <span class="setting-hint">Force full video transcoding (burn-in subtitles, incompatible video).
+                    Uses
+                    HW encoder.</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-force-remux-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
                   <span class="setting-label">Force Remux</span>
-                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams
-                    from IPTV middleware like m3u-editor or dispatcharr.</span>
+                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams from IPTV
+                    middleware like m3u-editor or dispatcharr.</span>
                 </div>
               </div>
               <div class="setting-item">
@@ -565,7 +761,7 @@
                   <span class="setting-hint">Container format for Xtream streams. Try TS if you experience buffering
                     issues.</span>
                 </div>
-                <select id="setting-stream-format" class="source-select" style="width: auto; min-width: 200px;">
+                <select id="setting-stream-format-tc" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="m3u8">HLS (m3u8) - Recommended</option>
                   <option value="ts">MPEG-TS (ts) - Better buffer</option>
                 </select>
@@ -573,15 +769,42 @@
             </div>
 
             <div class="settings-section">
-              <h3>Keyboard Shortcuts</h3>
-              <div class="shortcuts-grid">
-                <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
-                <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
-                <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
-                <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
-                <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
-                <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
-                <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+              <h3>HTTP Settings</h3>
+              <div class="setting-item">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">User-Agent</span>
+                  <span class="setting-hint">HTTP User-Agent for stream requests. Try VLC if your provider blocks
+                    Chrome.</span>
+                </div>
+                <select id="setting-user-agent-tc" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="chrome">Chrome (Default)</option>
+                  <option value="vlc">VLC</option>
+                  <option value="tivimate">TiviMate</option>
+                  <option value="custom">Custom...</option>
+                </select>
+              </div>
+              <div class="setting-item" id="custom-user-agent-container-tc" style="display: none;">
+                <div class="setting-info" style="flex: 1;">
+                  <span class="setting-label">Custom User-Agent</span>
+                  <span class="setting-hint">Enter your own User-Agent string.</span>
+                </div>
+                <input type="text" id="setting-user-agent-custom-tc" class="search-input" style="width: 300px;"
+                  placeholder="Custom User-Agent string...">
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Network</h3>
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-force-proxy-tc">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Force Backend Proxy</span>
+                  <span class="setting-hint">Route all streams through the server to bypass CORS restrictions. Enable if
+                    streams don't play directly.</span>
+                </div>
               </div>
             </div>
           </div>
@@ -598,6 +821,10 @@
                 <select id="content-source-select" class="source-select">
                   <option value="">Select a source...</option>
                 </select>
+                <div class="search-wrapper">
+                  <input type="text" id="content-search" placeholder="Search groups/channels..." class="search-input">
+                  <button type="button" class="search-clear" title="Clear search">&times;</button>
+                </div>
                 <div class="content-actions">
                   <button class="btn btn-sm btn-secondary" id="content-show-all">Show All</button>
                   <button class="btn btn-sm btn-secondary" id="content-hide-all">Hide All</button>
@@ -609,48 +836,8 @@
                 </div>
               </div>
               <p class="hint" style="margin-bottom: var(--space-sm);">✓ Checked = Visible, ☐ Unchecked = Hidden</p>
-            </div>
-          </div>
-
-          <!-- Connectivity Tab (Admin Only) -->
-          <div id="tab-connectivity" class="tab-content">
-            <div class="settings-section">
-              <h3>Cloudflare WARP Connectivity</h3>
-              <p class="hint">Selective VPN routing for restricted streams (Alpine Linux / wireproxy)</p>
-
-              <div class="warp-status-card">
-                <div class="warp-status-main">
-                  <div class="status-indicator">
-                    <span id="warp-status-dot" class="status-dot status-disconnected"></span>
-                    <span id="warp-status-text">Disconnected</span>
-                  </div>
-                  <div class="warp-actions">
-                    <button id="btn-warp-setup" class="btn btn-secondary">Setup WARP</button>
-                    <button id="btn-warp-toggle" class="btn btn-primary" disabled>Connect</button>
-                  </div>
-                </div>
-
-                <div class="warp-details">
-                  <div class="detail-item">
-                    <span class="detail-label">Registration:</span>
-                    <span id="warp-registered-info" class="detail-value">Checking...</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">SOCKS5 Port:</span>
-                    <span id="warp-port-info" class="detail-value">1080</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="warp-info-box">
-                <h4>How it works</h4>
-                <ul>
-                  <li><strong>Setup:</strong> Registers a free WARP account and generates a configuration.</li>
-                  <li><strong>Connect:</strong> Starts a local SOCKS5 proxy (<code>wireproxy</code>) on Alpine.</li>
-                  <li><strong>Usage:</strong> Go to <strong>Sources</strong> and check "Route through Cloudflare WARP"
-                    for
-                    specific playlists.</li>
-                </ul>
+              <div id="content-tree" class="content-tree">
+                <p class="hint">Select a source to view groups and channels</p>
               </div>
             </div>
           </div>
@@ -666,6 +853,7 @@
                   <thead>
                     <tr>
                       <th>Username</th>
+                      <th>Email</th>
                       <th>Role</th>
                       <th>Created</th>
                       <th>Actions</th>
@@ -704,6 +892,209 @@
           </div>
         </div>
       </div>
+
+      <!-- Watch Page (VOD Player) - Not in navigation -->
+      <div id="page-watch" class="page watch-page">
+        <!-- Video Section (100vh) -->
+        <section class="watch-video-section">
+          <video id="watch-video" playsinline></video>
+
+          <!-- Player Controls Overlay -->
+          <div class="watch-overlay" id="watch-overlay">
+            <!-- Top Bar: Back + Title -->
+            <div class="watch-top-bar vod-header">
+              <button class="watch-back-btn" id="watch-back-btn" title="Back">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                  <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+                </svg>
+              </button>
+              <div class="watch-title-info">
+                <h3 class="watch-title" id="watch-title"></h3>
+                <p class="watch-subtitle" id="watch-subtitle"></p>
+              </div>
+              <div class="player-badges">
+                <div class="transcode-status hidden" id="watch-transcode-status">Direct</div>
+                <div class="quality-badge hidden" id="watch-quality-badge"></div>
+              </div>
+            </div>
+
+            <!-- Center: Large Play Button -->
+            <button class="watch-center-play" id="watch-center-play">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </button>
+
+            <!-- Loading Spinner -->
+            <div class="watch-loading" id="watch-loading">
+              <div class="loading-spinner"></div>
+            </div>
+
+            <!-- Bottom Bar: Controls -->
+            <div class="watch-bottom-bar">
+              <div class="watch-progress-container">
+                <span id="watch-time-current" class="watch-time">0:00</span>
+                <input type="range" class="watch-progress" id="watch-progress" min="0" max="100" value="0" step="0.1">
+              </div>
+              <div class="watch-controls">
+                <button class="watch-btn" id="watch-skip-back" title="Back 10 seconds">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
+                  </svg>
+                  <span class="skip-label">10</span>
+                </button>
+                <button class="watch-btn watch-btn-lg" id="watch-play-pause" title="Play/Pause">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    class="icon icon-play">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    class="icon icon-pause hidden">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                  </svg>
+                </button>
+                <button class="watch-btn" id="watch-skip-fwd" title="Forward 10 seconds">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
+                  </svg>
+                  <span class="skip-label">10</span>
+                </button>
+                <div class="watch-spacer"></div>
+                <button class="watch-btn" id="watch-mute" title="Mute">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon icon-vol">
+                    <path
+                      d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    class="icon icon-muted hidden">
+                    <path
+                      d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+                  </svg>
+                </button>
+                <input type="range" class="watch-volume" id="watch-volume" min="0" max="100" value="80">
+                <!-- Captions Button -->
+                <div class="watch-captions-wrapper">
+                  <button class="watch-btn" id="watch-captions-btn" title="Captions">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                      <path
+                        d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z" />
+                    </svg>
+                  </button>
+                  <div class="watch-captions-menu hidden" id="watch-captions-menu">
+                    <div class="captions-menu-title">Subtitles</div>
+                    <div class="captions-menu-list" id="watch-captions-list">
+                      <button class="captions-option active" data-index="-1">Off</button>
+                    </div>
+                  </div>
+                </div>
+                <button class="watch-btn" id="watch-pip" title="Picture-in-Picture">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path
+                      d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14z" />
+                  </svg>
+                </button>
+                <button class="watch-btn" id="watch-fullscreen" title="Fullscreen">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                  </svg>
+                </button>
+                <!-- Overflow Menu -->
+                <div class="player-overflow-wrapper">
+                  <button class="watch-btn" id="watch-overflow" title="More options">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                      <path
+                        d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                    </svg>
+                  </button>
+                  <div class="player-overflow-menu hidden" id="watch-overflow-menu">
+                    <button class="overflow-menu-item" id="watch-copy-url">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                        <path
+                          d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                      </svg>
+                      Copy Stream URL
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Scroll Indicator -->
+            <div class="watch-scroll-hint" id="watch-scroll-hint">
+              <span>Scroll for details</span>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
+              </svg>
+            </div>
+          </div>
+
+          <!-- Next Episode Panel -->
+          <div class="watch-next-episode hidden" id="watch-next-episode">
+            <div class="next-info">
+              <p class="next-label">Up Next</p>
+              <h4 id="next-episode-title"></h4>
+            </div>
+            <span class="next-countdown" id="next-countdown">10</span>
+            <button class="btn btn-primary btn-sm" id="next-play-now">Play Now</button>
+            <button class="btn btn-ghost btn-sm" id="next-cancel">Cancel</button>
+          </div>
+        </section>
+
+        <!-- Content Details Section (scrollable) -->
+        <section class="watch-details-section" id="watch-details">
+          <!-- Content Info -->
+          <div class="watch-content-info">
+            <img class="watch-poster" id="watch-poster" src="" alt="">
+            <div class="watch-meta">
+              <h2 id="watch-content-title"></h2>
+              <div class="watch-meta-row">
+                <span class="watch-year" id="watch-year"></span>
+                <span class="watch-rating" id="watch-rating"></span>
+                <span class="watch-duration" id="watch-duration"></span>
+              </div>
+              <p class="watch-description" id="watch-description"></p>
+              <div class="watch-actions">
+                <button class="btn btn-primary" id="watch-play-btn">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <span id="watch-play-btn-text">Play</span>
+                </button>
+                <button class="btn btn-ghost" id="watch-favorite-btn">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    class="icon icon-fav-outline">
+                    <path
+                      d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    class="icon icon-fav-filled hidden">
+                    <path
+                      d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                  </svg>
+                  <span>Favorite</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Movies: Recommended Section -->
+          <div class="watch-recommended hidden" id="watch-recommended">
+            <h3>More Like This</h3>
+            <div class="watch-recommended-grid" id="watch-recommended-grid">
+              <!-- Movie cards inserted dynamically -->
+            </div>
+          </div>
+
+          <!-- Series: Seasons & Episodes -->
+          <div class="watch-episodes hidden" id="watch-episodes">
+            <h3>Episodes</h3>
+            <div class="watch-seasons" id="watch-seasons">
+              <!-- Season accordions inserted dynamically -->
+            </div>
+          </div>
+        </section>
+      </div>
+
     </main>
   </div>
 
@@ -732,21 +1123,87 @@
       </svg> Hide</button>
   </div>
 
+  <!-- Edit User Modal -->
+  <div class="modal-overlay" id="edit-user-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit User</h3>
+        <button class="modal-close" id="edit-user-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="edit-user-form">
+          <input type="hidden" id="edit-user-id">
+
+          <div class="modal-form-group">
+            <label for="edit-username">Username</label>
+            <input type="text" id="edit-username" name="username" class="form-input" required>
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-email">Email</label>
+            <input type="text" id="edit-email" class="form-input" readonly disabled placeholder="No email associated">
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-role">Role</label>
+            <select id="edit-role" name="role" class="form-input" required>
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          <div class="modal-form-group">
+            <label for="edit-password">New Password</label>
+            <input type="password" id="edit-password" name="password" class="form-input"
+              placeholder="Leave blank to keep current">
+            <p class="hint" id="edit-password-hint" style="margin-top: 4px;">Optional. Leave blank to keep unchanged.
+            </p>
+          </div>
+
+          <div class="modal-form-group hidden" id="oidc-info-group">
+            <label>OIDC Provider ID</label>
+            <code id="edit-oidc-id"
+              style="font-size: 0.8rem; color: var(--color-text-muted); padding: 4px; background: rgba(0,0,0,0.3); border-radius: 4px; display: block;"></code>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="edit-user-cancel">Cancel</button>
+        <button class="btn btn-primary" id="edit-user-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JavaScript -->
   <script src="/js/icons.js"></script>
-  <script src="/js/api.js?v=11"></script>
-  <script src="/js/components/VideoPlayer.js?v=11"></script>
-  <script src="/js/components/ChannelList.js?v=11"></script>
-  <script src="/js/components/SourceManager.js?v=11"></script>
-  <script src="/js/components/WarpSettings.js?v=11"></script>
-  <script src="/js/components/ScraperSettings.js?v=11"></script>
-  <script src="/js/components/EpgGuide.js?v=11"></script>
-  <script src="/js/pages/Home.js?v=11"></script>
-  <script src="/js/pages/Guide.js?v=11"></script>
-  <script src="/js/pages/MoviesPage.js?v=11"></script>
-  <script src="/js/pages/SeriesPage.js?v=11"></script>
-  <script src="/js/pages/Settings.js?v=11"></script>
-  <script src="/js/app.js?v=11"></script>
+  <script src="/js/api.js?v=2"></script>
+  <script src="/js/components/VideoPlayer.js?v=2"></script>
+  <script src="/js/components/ShakaPlayerEngine.js?v=1"></script>
+  <script src="/js/components/ChannelList.js?v=3"></script>
+  <script src="/js/components/SourceManager.js?v=2"></script>
+  <script src="/js/components/EpgGuide.js?v=2"></script>
+  <script src="/js/pages/HomePage.js?v=2"></script>
+  <script src="/js/pages/LivePage.js?v=2"></script>
+  <script src="/js/pages/Guide.js?v=2"></script>
+  <script src="/js/pages/MoviesPage.js?v=4"></script>
+  <script src="/js/pages/SeriesPage.js?v=1"></script>
+  <script src="/js/pages/Settings.js?v=2"></script>
+  <script src="/js/pages/WatchPage.js?v=1"></script>
+  <script src="/js/app.js?v=4"></script>
+  <script>
+    // Check for SSO token in URL
+    (function () {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get('token');
+      if (token) {
+        console.log('SSO Login successful, saving token...');
+        localStorage.setItem('authToken', token);
+        // Clean URL without reloading
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
+    })();
+  </script>
 </body>
 
 </html>

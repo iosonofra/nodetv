@@ -66,6 +66,14 @@ const Auth = {
         document.getElementById('setup-screen').classList.remove('active');
         document.getElementById('login-screen').classList.remove('active');
         document.getElementById('app').classList.add('active');
+        
+        // Hide settings tab if viewer
+        if (!this.isAdmin()) {
+            const settingsLink = document.querySelector('[data-page="settings"]');
+            if (settingsLink) {
+                settingsLink.parentElement.style.display = 'none';
+            }
+        }
     },
 
     /**

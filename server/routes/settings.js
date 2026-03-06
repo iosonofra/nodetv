@@ -2,13 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { settings, getDefaultSettings } = require('../db');
 const syncService = require('../services/syncService');
-const { requireAuth, requireAdmin } = require('../auth');
 
 /**
  * Get all settings
  * GET /api/settings
  */
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const currentSettings = await settings.get();
         res.json(currentSettings);
@@ -22,7 +21,7 @@ router.get('/', requireAuth, async (req, res) => {
  * Update settings (partial update)
  * PUT /api/settings
  */
-router.put('/', requireAuth, requireAdmin, async (req, res) => {
+router.put('/', async (req, res) => {
     try {
         const updates = req.body;
         const updatedSettings = await settings.update(updates);
@@ -43,7 +42,7 @@ router.put('/', requireAuth, requireAdmin, async (req, res) => {
  * Reset settings to defaults
  * DELETE /api/settings
  */
-router.delete('/', requireAuth, requireAdmin, async (req, res) => {
+router.delete('/', async (req, res) => {
     try {
         const defaultSettings = await settings.reset();
         res.json(defaultSettings);
@@ -57,7 +56,7 @@ router.delete('/', requireAuth, requireAdmin, async (req, res) => {
  * Get default settings (for reference)
  * GET /api/settings/defaults
  */
-router.get('/defaults', requireAuth, (req, res) => {
+router.get('/defaults', (req, res) => {
     res.json(getDefaultSettings());
 });
 
@@ -65,11 +64,47 @@ router.get('/defaults', requireAuth, (req, res) => {
  * Get sync status (last sync time)
  * GET /api/settings/sync-status
  */
-router.get('/sync-status', requireAuth, (req, res) => {
+router.get('/sync-status', (req, res) => {
     const lastSyncTime = syncService.getLastSyncTime();
     res.json({
         lastSyncTime: lastSyncTime ? lastSyncTime.toISOString() : null
     });
+});
+
+/**
+ * Get hardware capabilities (GPU acceleration support)
+ * GET /api/settings/hw-info
+ */
+router.get('/hw-info', async (req, res) => {
+    try {
+        const hwDetect = require('../services/hwDetect');
+        let capabilities = hwDetect.getCapabilities();
+
+        // If not yet detected, run detection now
+        if (!capabilities) {
+            capabilities = await hwDetect.detect();
+        }
+
+        res.json(capabilities);
+    } catch (err) {
+        console.error('Error getting hardware info:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * Refresh hardware detection (re-probe GPUs)
+ * POST /api/settings/hw-info/refresh
+ */
+router.post('/hw-info/refresh', async (req, res) => {
+    try {
+        const hwDetect = require('../services/hwDetect');
+        const capabilities = await hwDetect.refresh();
+        res.json(capabilities);
+    } catch (err) {
+        console.error('Error refreshing hardware info:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 module.exports = router;

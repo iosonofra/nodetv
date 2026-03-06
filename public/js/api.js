@@ -50,10 +50,7 @@ const API = {
 
     // Sources
     sources: {
-        getAll: (options = {}) => {
-            const params = options.all ? '?all=true' : '';
-            return API.request('GET', `/sources${params}`);
-        },
+        getAll: () => API.request('GET', '/sources'),
         getByType: (type) => API.request('GET', `/sources/type/${type}`),
         getById: (id) => API.request('GET', `/sources/${id}`),
         create: (data) => API.request('POST', '/sources', data),
@@ -63,6 +60,8 @@ const API = {
         test: (id) => API.request('POST', `/sources/${id}/test`),
         sync: (id) => API.request('POST', `/sources/${id}/sync`), // Manual sync
         getStatus: () => API.request('GET', '/sources/status'), // Get all statuses
+        estimate: (id) => API.request('GET', `/sources/${id}/estimate`), // Estimate M3U size
+        estimateByUrl: (url, type) => API.request('POST', '/sources/estimate', { url, type }), // Estimate by URL (before creation)
     },
 
     // Channels (hidden items)
@@ -141,16 +140,6 @@ const API = {
                 API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?container=${container}`)
         },
 
-        // M3U
-        m3u: {
-            get: (sourceId, options = {}) => {
-                const params = [];
-                if (options.includeHidden) params.push('includeHidden=true');
-                const query = params.length ? `?${params.join('&')}` : '';
-                return API.request('GET', `/proxy/m3u/${sourceId}${query}`);
-            }
-        },
-
         // EPG
         epg: {
             get: (sourceId) => API.request('GET', `/proxy/epg/${sourceId}`),
@@ -177,19 +166,6 @@ const API = {
         create: (data) => API.request('POST', '/auth/users', data),
         update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
         delete: (id) => API.request('DELETE', `/auth/users/${id}`)
-    },
-
-    // WARP (admin only)
-    warp: {
-        getStatus: () => API.request('GET', '/warp/status'),
-        setup: () => API.request('POST', '/warp/setup'),
-        toggle: (action) => API.request('POST', '/warp/toggle', { action })
-    },
-
-    // Scraper (admin only)
-    scraper: {
-        getStatus: () => API.request('GET', '/scraper/status'),
-        run: () => API.request('POST', '/scraper/run')
     }
 };
 

@@ -4,6 +4,13 @@ const { getDb } = require('../db/sqlite');
 const { sources } = require('../db');
 const { requireAuth } = require('../auth');
 
+router.use(requireAuth);
+
+async function getAllowedSourceIds(req) {
+    const allowedSources = await sources.getAll(req.user.id, req.user.role);
+    return allowedSources.map(s => s.id);
+}
+
 // Helper to map API item types to DB types and tables
 function mapItemType(apiType) {
     switch (apiType) {
@@ -17,29 +24,11 @@ function mapItemType(apiType) {
     }
 }
 
-// Check ownership helper
-async function checkOwnership(req, sourceId) {
-    if (req.user.role === 'admin') return true;
-    const source = await sources.getById(sourceId);
-    return source && (source.user_id === req.user.id || source.user_id === 0);
-}
-
 // Get all hidden items (formatted like db.json for frontend compatibility)
-router.get('/hidden', requireAuth, async (req, res) => {
+router.get('/hidden', async (req, res) => {
     try {
         const { sourceId } = req.query;
         const db = getDb();
-
-        let allowedSourceIds = [];
-        if (req.user.role !== 'admin') {
-            const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
-
-            // If user requested a specific source they don't own, return empty OR if they have no sources
-            if (sourceId && !allowedSourceIds.includes(parseInt(sourceId))) {
-                return res.json([]);
-            }
-        }
 
         let hidden = [];
         const resultFormat = (row, itemType) => ({
@@ -48,21 +37,27 @@ router.get('/hidden', requireAuth, async (req, res) => {
             item_id: itemType.includes('category') || itemType === 'group' ? row.category_id : row.item_id
         });
 
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (allowedSourceIds.length === 0) return res.json([]);
+
         // Query Categories
         let catQuery = `SELECT source_id, category_id, type FROM categories WHERE is_hidden = 1`;
         let itemQuery = `SELECT source_id, item_id, type FROM playlist_items WHERE is_hidden = 1`;
 
-        const params = [];
+        let params = [];
         if (sourceId) {
+            const sid = parseInt(sourceId);
+            if (!allowedSourceIds.includes(sid)) {
+                return res.status(403).json({ error: 'Unauthorized source' });
+            }
             catQuery += ` AND source_id = ?`;
             itemQuery += ` AND source_id = ?`;
-            params.push(parseInt(sourceId));
-        } else if (req.user.role !== 'admin') {
-            if (allowedSourceIds.length === 0) return res.json([]);
+            params.push(sid);
+        } else {
             const placeholders = allowedSourceIds.map(() => '?').join(',');
             catQuery += ` AND source_id IN (${placeholders})`;
             itemQuery += ` AND source_id IN (${placeholders})`;
-            params.push(...allowedSourceIds);
+            params = [...allowedSourceIds];
         }
 
         const hiddenCats = db.prepare(catQuery).all(...params);
@@ -94,19 +89,21 @@ router.get('/hidden', requireAuth, async (req, res) => {
 });
 
 // Hide item
-router.post('/hide', requireAuth, async (req, res) => {
+router.post('/hide', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.body;
-
-        if (!(await checkOwnership(req, sourceId))) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-
         const mapping = mapItemType(itemType);
 
         if (!mapping) return res.status(400).json({ error: 'Invalid item type' });
 
         const db = getDb();
+        const sid = parseInt(sourceId);
+
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (!allowedSourceIds.includes(sid)) {
+            return res.status(403).json({ error: 'Unauthorized source' });
+        }
+
         const idCol = mapping.table === 'categories' ? 'category_id' : 'item_id';
 
         const stmt = db.prepare(`
@@ -125,19 +122,21 @@ router.post('/hide', requireAuth, async (req, res) => {
 });
 
 // Show item
-router.post('/show', requireAuth, async (req, res) => {
+router.post('/show', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.body;
-
-        if (!(await checkOwnership(req, sourceId))) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-
         const mapping = mapItemType(itemType);
 
         if (!mapping) return res.status(400).json({ error: 'Invalid item type' });
 
         const db = getDb();
+        const sid = parseInt(sourceId);
+
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (!allowedSourceIds.includes(sid)) {
+            return res.status(403).json({ error: 'Unauthorized source' });
+        }
+
         const idCol = mapping.table === 'categories' ? 'category_id' : 'item_id';
 
         const stmt = db.prepare(`
@@ -156,16 +155,17 @@ router.post('/show', requireAuth, async (req, res) => {
 });
 
 // Check hidden status
-router.get('/hidden/check', requireAuth, async (req, res) => {
+router.get('/hidden/check', async (req, res) => {
     try {
         const { sourceId, itemType, itemId } = req.query;
-
-        if (!(await checkOwnership(req, sourceId))) {
-            return res.json({ hidden: false });
-        }
-
         const mapping = mapItemType(itemType);
         if (!mapping) return res.json({ hidden: false });
+
+        const sid = parseInt(sourceId);
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (!allowedSourceIds.includes(sid)) {
+            return res.status(403).json({ error: 'Unauthorized source' });
+        }
 
         const db = getDb();
         const idCol = mapping.table === 'categories' ? 'category_id' : 'item_id';
@@ -173,7 +173,7 @@ router.get('/hidden/check', requireAuth, async (req, res) => {
         const row = db.prepare(`
             SELECT is_hidden FROM ${mapping.table} 
             WHERE source_id = ? AND type = ? AND ${idCol} = ?
-        `).get(sourceId, mapping.type, itemId);
+        `).get(sid, mapping.type, itemId);
 
         res.json({ hidden: !!(row && row.is_hidden) });
     } catch (err) {
@@ -183,19 +183,13 @@ router.get('/hidden/check', requireAuth, async (req, res) => {
 });
 
 // Bulk Hide
-router.post('/hide/bulk', requireAuth, async (req, res) => {
+router.post('/hide/bulk', async (req, res) => {
     try {
         const { items } = req.body;
         if (!Array.isArray(items)) return res.status(400).json({ error: 'items array required' });
 
+        const allowedSourceIds = await getAllowedSourceIds(req);
         const db = getDb();
-
-        // Ownership verified inside the loop to ensure clean items array, or we can pre-filter
-        let allowedSourceIds = null;
-        if (req.user.role !== 'admin') {
-            const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
-        }
 
         // Prepare statements once
         const hideCat = db.prepare('UPDATE categories SET is_hidden = 1 WHERE source_id = ? AND type = ? AND category_id = ?');
@@ -206,7 +200,8 @@ router.post('/hide/bulk', requireAuth, async (req, res) => {
 
         const runBulk = db.transaction((list) => {
             for (const item of list) {
-                if (allowedSourceIds && !allowedSourceIds.includes(parseInt(item.sourceId))) continue;
+                const sid = parseInt(item.sourceId);
+                if (!allowedSourceIds.includes(sid)) continue; // skip unauthorized
 
                 const mapping = mapItemType(item.itemType);
                 if (mapping) {
@@ -235,18 +230,13 @@ router.post('/hide/bulk', requireAuth, async (req, res) => {
 });
 
 // Bulk Show
-router.post('/show/bulk', requireAuth, async (req, res) => {
+router.post('/show/bulk', async (req, res) => {
     try {
         const { items } = req.body;
         if (!Array.isArray(items)) return res.status(400).json({ error: 'items array required' });
 
+        const allowedSourceIds = await getAllowedSourceIds(req);
         const db = getDb();
-
-        let allowedSourceIds = null;
-        if (req.user.role !== 'admin') {
-            const allSources = await sources.getAll();
-            allowedSourceIds = allSources.filter(s => s.user_id === req.user.id || s.user_id === 0).map(s => s.id);
-        }
 
         // Prepare statements once
         const showCat = db.prepare('UPDATE categories SET is_hidden = 0 WHERE source_id = ? AND type = ? AND category_id = ?');
@@ -257,7 +247,8 @@ router.post('/show/bulk', requireAuth, async (req, res) => {
 
         const runBulk = db.transaction((list) => {
             for (const item of list) {
-                if (allowedSourceIds && !allowedSourceIds.includes(parseInt(item.sourceId))) continue;
+                const sid = parseInt(item.sourceId);
+                if (!allowedSourceIds.includes(sid)) continue; // skip unauthorized
 
                 const mapping = mapItemType(item.itemType);
                 if (mapping) {
@@ -286,13 +277,15 @@ router.post('/show/bulk', requireAuth, async (req, res) => {
 });
 
 // Show ALL items for a source (single SQL statement - much faster than bulk)
-router.post('/show/all', requireAuth, async (req, res) => {
+router.post('/show/all', async (req, res) => {
     try {
         const { sourceId, contentType } = req.body;
         if (!sourceId) return res.status(400).json({ error: 'sourceId required' });
 
-        if (!(await checkOwnership(req, sourceId))) {
-            return res.status(403).json({ error: 'Access denied' });
+        const sid = parseInt(sourceId);
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (!allowedSourceIds.includes(sid)) {
+            return res.status(403).json({ error: 'Unauthorized source' });
         }
 
         const db = getDb();
@@ -320,13 +313,15 @@ router.post('/show/all', requireAuth, async (req, res) => {
 });
 
 // Hide ALL items for a source (single SQL statement - much faster than bulk)
-router.post('/hide/all', requireAuth, async (req, res) => {
+router.post('/hide/all', async (req, res) => {
     try {
         const { sourceId, contentType } = req.body;
         if (!sourceId) return res.status(400).json({ error: 'sourceId required' });
 
-        if (!(await checkOwnership(req, sourceId))) {
-            return res.status(403).json({ error: 'Access denied' });
+        const sid = parseInt(sourceId);
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (!allowedSourceIds.includes(sid)) {
+            return res.status(403).json({ error: 'Unauthorized source' });
         }
 
         const db = getDb();
@@ -350,6 +345,49 @@ router.post('/hide/all', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('Error hide all:', err);
         res.status(500).json({ error: 'Failed to hide all' });
+    }
+});
+
+// Get recent movies or series
+router.get('/recent', async (req, res) => {
+    try {
+        const { type, limit = 12 } = req.query;
+        if (!type || (type !== 'movie' && type !== 'series')) {
+            return res.status(400).json({ error: 'Valid type (movie or series) is required' });
+        }
+
+        const allowedSourceIds = await getAllowedSourceIds(req);
+        if (allowedSourceIds.length === 0) return res.json([]);
+
+        const placeholders = allowedSourceIds.map(() => '?').join(',');
+
+        const db = getDb();
+        const recentItems = db.prepare(`
+            SELECT * FROM playlist_items p
+            WHERE p.type = ? 
+              AND p.source_id IN (${placeholders})
+              AND p.is_hidden = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM categories c 
+                  WHERE c.source_id = p.source_id 
+                    AND c.category_id = p.category_id 
+                    AND c.type = p.type 
+                    AND c.is_hidden = 1
+              )
+            ORDER BY p.added_at DESC
+            LIMIT ?
+        `).all(type, ...allowedSourceIds, parseInt(limit));
+
+        // Parse JSON data for each item
+        const formatted = recentItems.map(item => ({
+            ...item,
+            data: JSON.parse(item.data)
+        }));
+
+        res.json(formatted);
+    } catch (err) {
+        console.error(`Error getting recent ${req.query.type}:`, err);
+        res.status(500).json({ error: 'Failed to get recent items' });
     }
 });
 

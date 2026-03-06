@@ -1,10 +1,8 @@
 const express = require('express');
+require('dotenv').config();
 const path = require('path');
 const passport = require('passport');
 const syncService = require('./services/syncService');
-const warpRoutes = require('./routes/warp');
-const scraperRoutes = require('./routes/scraper');
-const scraperService = require('./services/ScraperService');
 
 // Initialize database
 require('./db');
@@ -20,7 +18,14 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '50mb' }));
 
 // Initialize Passport
+const session = require('express-session');
+app.use(session({
+    secret: process.env.JWT_SECRET || 'keyboard cat',
+    resave: false,
+    saveUninitialized: true
+}));
 app.use(passport.initialize());
+app.use(passport.session());
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -55,19 +60,52 @@ function findFFmpeg() {
     }
 }
 
+function findFFprobe() {
+    // Try system ffprobe first
+    try {
+        execSync('ffprobe -version', { stdio: 'ignore' });
+        console.log('FFprobe binary configured at: ffprobe (system)');
+        return 'ffprobe';
+    } catch (e) {
+        // Not found in system
+    }
+
+    // Try @ffprobe-installer/ffprobe package
+    try {
+        const ffprobePath = require('@ffprobe-installer/ffprobe').path;
+        if (ffprobePath) {
+            console.log('FFprobe binary configured at:', ffprobePath);
+            return ffprobePath;
+        }
+    } catch (err) {
+        // Package not available
+    }
+
+    console.warn('FFprobe not available - auto transcode will fallback to always transcode');
+    return null;
+}
+
 app.locals.ffmpegPath = findFFmpeg();
+app.locals.ffprobePath = findFFprobe();
 
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/warp', warpRoutes);
-app.use('/api/scraper', scraperRoutes);
 app.use('/api/sources', require('./routes/sources'));
 app.use('/api/proxy', require('./routes/proxy'));
 app.use('/api/channels', require('./routes/channels'));
 app.use('/api/favorites', require('./routes/favorites'));
 app.use('/api/transcode', require('./routes/transcode'));
 app.use('/api/remux', require('./routes/remux'));
+app.use('/api/probe', require('./routes/probe'));
+app.use('/api/subtitle', require('./routes/subtitle'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/history', require('./routes/history'));
+
+// Version endpoint
+app.get('/api/version', (req, res) => {
+    const pkg = require('../package.json');
+    res.json({ version: pkg.version });
+});
 
 // SPA fallback - serve index.html for all non-API routes
 app.get('*', (req, res) => {
@@ -85,11 +123,16 @@ app.listen(PORT, async () => {
 
     // Trigger background sync with delay to allow server to settle
     setTimeout(async () => {
-        // Initialize scrapers
-        await scraperService.init().catch(console.error);
-
         await syncService.syncAll().catch(console.error);
         // Start the server-side sync timer after initial sync
         await syncService.startSyncTimer().catch(console.error);
+
+        // Detect hardware acceleration capabilities
+        try {
+            const hwDetect = require('./services/hwDetect');
+            await hwDetect.detect();
+        } catch (err) {
+            console.warn('Hardware detection failed:', err.message);
+        }
     }, 5000);
 });

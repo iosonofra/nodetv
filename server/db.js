@@ -17,21 +17,7 @@ async function loadDb() {
     try {
       const fileContent = await fs.readFile(dbPath, 'utf-8');
       const data = JSON.parse(fileContent);
-      // Migration: backfill user_id for existing sources and fix partial urls
-      if (data.sources) {
-        data.sources.forEach(source => {
-          if (source.user_id === undefined || source.user_id === null) source.user_id = 1; // Default to first user (admin)
-          if (source.url && !source.url.startsWith('http://') && !source.url.startsWith('https://') && !source.url.startsWith('file://')) {
-            source.url = 'http://' + source.url;
-          }
-          // Cleanup corrupted local URLs from previous migration bug
-          if (source.url && source.url.startsWith('http://file://')) {
-            source.url = source.url.replace('http://', '');
-          }
-          if (source.use_warp === undefined) source.use_warp = false; // Migration: add use_warp field
-        });
-      }
-      return {
+      const parsedData = {
         sources: data.sources || [],
         hiddenItems: data.hiddenItems || [],
         favorites: data.favorites || [],
@@ -39,6 +25,31 @@ async function loadDb() {
         users: data.users || [],
         nextId: data.nextId || 1
       };
+
+      // MIGRATION: Ensure all sources have a user_id
+      let needsSave = false;
+      let firstAdminId = 1; // Default
+      if (parsedData.users && parsedData.users.length > 0) {
+        const admin = parsedData.users.find(u => u.role === 'admin');
+        if (admin) firstAdminId = admin.id;
+      }
+
+      parsedData.sources.forEach(source => {
+        if (!source.user_id) {
+          source.user_id = firstAdminId;
+          needsSave = true;
+        }
+      });
+
+      if (needsSave) {
+        try {
+          saveDb(parsedData).catch(e => console.error('Migration async save error:', e));
+        } catch (e) {
+          console.error('Migration start error:', e);
+        }
+      }
+
+      return parsedData;
     } catch (error) {
       if (error.code === 'ENOENT') {
         // File doesn't exist, return default
@@ -77,11 +88,42 @@ function getDefaultSettings() {
     lastVolume: 80,
     autoPlayNextEpisode: false,
     forceProxy: false,
-    forceTranscode: false,
+    forceTranscode: false, // Force Audio Transcode
+    forceVideoTranscode: false, // Force Video Transcode
     forceRemux: false,
+    autoTranscode: true,
     streamFormat: 'm3u8',
-    epgRefreshInterval: '24'
+    epgRefreshInterval: '24',
+    // User-Agent settings
+    userAgentPreset: 'chrome',    // chrome | vlc | tivimate | custom
+    userAgentCustom: '',          // Custom UA string when preset is 'custom'
+    // Transcoding settings
+    hwEncoder: 'auto',            // auto | nvenc | amf | qsv | vaapi | software
+    maxResolution: '1080p',       // 4k | 1080p | 720p | 480p
+    quality: 'medium',            // high | medium | low
+    audioMixPreset: 'auto',       // auto | itu | night | cinematic | passthrough
+    // Probe cache settings  
+    probeCacheTTL: 300,           // 5 minutes for URL probe cache
+    seriesProbeCacheDays: 7,       // 7 days for series episode probe cache
+    // Upscaling settings
+    upscaleEnabled: false,
+    upscaleMethod: 'hardware',    // hardware | software
+    upscaleTarget: '1080p'        // 1080p | 4k | 720p
   };
+}
+
+// User-Agent presets
+const USER_AGENT_PRESETS = {
+  chrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  vlc: 'VLC/3.0.20 LibVLC/3.0.20',
+  tivimate: 'TiviMate/4.7.0',
+};
+
+function getUserAgent(settings) {
+  if (settings.userAgentPreset === 'custom' && settings.userAgentCustom) {
+    return settings.userAgentCustom;
+  }
+  return USER_AGENT_PRESETS[settings.userAgentPreset] || USER_AGENT_PRESETS.chrome;
 }
 
 // Write lock to prevent concurrent writes from corrupting db.json
@@ -112,28 +154,34 @@ async function saveDb(data) {
 
 // Source CRUD operations
 const sources = {
-  async getAll() {
+  async getAll(userId = null, role = 'admin') {
     const db = await loadDb();
-    return db.sources;
+    if (role === 'admin' || !userId) return db.sources;
+    return db.sources.filter(s => s.user_id === userId);
   },
 
-  async getById(id) {
+  async getById(id, userId = null, role = 'admin') {
     const db = await loadDb();
-    return db.sources.find(s => s.id === parseInt(id));
+    const source = db.sources.find(s => s.id === parseInt(id));
+    if (!source) return null;
+    if (role !== 'admin' && userId && source.user_id !== userId) return null;
+    return source;
   },
 
-  async getByType(type) {
+  async getByType(type, userId = null, role = 'admin') {
     const db = await loadDb();
-    return db.sources.filter(s => s.type === type && s.enabled);
+    const filtered = db.sources.filter(s => s.type === type && s.enabled);
+    if (role === 'admin' || !userId) return filtered;
+    return filtered.filter(s => s.user_id === userId);
   },
 
-  async create(source) {
+  async create(source, userId) {
+    if (!userId) throw new Error('user_id is required to create a source');
     const db = await loadDb();
     const newSource = {
       id: db.nextId++,
-      user_id: source.user_id,
       ...source,
-      use_warp: source.use_warp || false,
+      user_id: userId,
       enabled: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -143,13 +191,16 @@ const sources = {
     return newSource;
   },
 
-  async update(id, updates) {
+  async update(id, updates, userId = null, role = 'admin') {
     const db = await loadDb();
     const index = db.sources.findIndex(s => s.id === parseInt(id));
     if (index === -1) return null;
 
+    const source = db.sources[index];
+    if (role !== 'admin' && userId && source.user_id !== userId) return null;
+
     db.sources[index] = {
-      ...db.sources[index],
+      ...source,
       ...updates,
       updated_at: new Date().toISOString()
     };
@@ -157,22 +208,31 @@ const sources = {
     return db.sources[index];
   },
 
-  async delete(id) {
-    const db = await loadDb();
-    db.sources = db.sources.filter(s => s.id !== parseInt(id));
-    // Also delete related hidden items
-    db.hiddenItems = db.hiddenItems.filter(h => h.source_id !== parseInt(id));
-    await saveDb(db);
-  },
-
-  async toggleEnabled(id) {
+  async delete(id, userId = null, role = 'admin') {
     const db = await loadDb();
     const source = db.sources.find(s => s.id === parseInt(id));
-    if (source) {
-      source.enabled = !source.enabled;
-      source.updated_at = new Date().toISOString();
-      await saveDb(db);
-    }
+    if (!source) return false;
+
+    if (role !== 'admin' && userId && source.user_id !== userId) return false;
+
+    db.sources = db.sources.filter(s => s.id !== parseInt(id));
+    // Also delete related hidden items and favorites
+    db.hiddenItems = db.hiddenItems.filter(h => h.source_id !== parseInt(id));
+    db.favorites = db.favorites.filter(f => f.source_id !== parseInt(id));
+    await saveDb(db);
+    return true;
+  },
+
+  async toggleEnabled(id, userId = null, role = 'admin') {
+    const db = await loadDb();
+    const source = db.sources.find(s => s.id === parseInt(id));
+    if (!source) return null;
+
+    if (role !== 'admin' && userId && source.user_id !== userId) return null;
+
+    source.enabled = !source.enabled;
+    source.updated_at = new Date().toISOString();
+    await saveDb(db);
     return source;
   }
 };
@@ -353,6 +413,16 @@ const users = {
     return db.users?.find(u => u.username === username);
   },
 
+  async getByOidcId(oidcId) {
+    const db = await loadDb();
+    return db.users?.find(u => u.oidcId === oidcId);
+  },
+
+  async getByEmail(email) {
+    const db = await loadDb();
+    return db.users?.find(u => u.email === email);
+  },
+
   async create(userData) {
     const db = await loadDb();
     if (!db.users) {
@@ -367,8 +437,11 @@ const users = {
     const newUser = {
       id: db.nextId++,
       username: userData.username,
-      passwordHash: userData.passwordHash,
+      // For OIDC users, passwordHash is optional
+      passwordHash: userData.passwordHash || null,
       role: userData.role || 'viewer',
+      oidcId: userData.oidcId || null,
+      email: userData.email || null,
       createdAt: new Date().toISOString()
     };
 
@@ -436,4 +509,4 @@ const users = {
   }
 };
 
-module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings };
+module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings, getUserAgent, USER_AGENT_PRESETS };

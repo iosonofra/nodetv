@@ -12,9 +12,8 @@
         body {
             margin: 0;
             padding: 0;
-            background: #04040a;
+            background: var(--color-bg-primary);
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            overflow: hidden;
         }
 
         .login-container {
@@ -24,138 +23,101 @@
             justify-content: center;
             min-height: 100vh;
             padding: 20px;
-            background-image: linear-gradient(rgba(4, 4, 10, 0.4), #04040a), url('img/login_bg.png');
-            background-size: cover;
-            background-position: center;
-            position: relative;
-        }
-
-        .login-container::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: radial-gradient(circle at center, transparent 0%, rgba(4, 4, 10, 0.4) 100%);
-            pointer-events: none;
         }
 
         .login-box {
-            background: var(--glass-bg);
+            background: var(--color-bg-secondary);
             padding: var(--space-2xl);
-            border-radius: var(--radius-xl);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            box-shadow: var(--glass-shadow), var(--glass-inner-glow);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
             width: 100%;
-            max-width: 440px;
-            border: 1px solid var(--glass-border);
-            z-index: 10;
-            animation: boxFadeIn var(--transition-slow) forwards;
-        }
-
-        @keyframes boxFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            max-width: 420px;
+            border: 1px solid var(--color-border);
         }
 
         .login-logo {
             text-align: center;
-            margin-bottom: var(--space-xl);
+            margin-bottom: var(--space-2xl);
         }
 
         .login-logo .logo-icon {
-            width: 80px;
-            height: 80px;
+            width: 64px;
+            height: 64px;
             margin: 0 auto var(--space-md);
             color: var(--color-accent);
-            filter: drop-shadow(0 0 15px var(--color-accent-glow));
         }
 
         .login-logo h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 36px;
-            font-weight: 800;
-            letter-spacing: -0.04em;
-            background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-family: 'Century Gothic', sans-serif;
+            font-size: 28px;
+            font-weight: 500;
+            color: var(--color-text-primary);
             margin: 0;
+        }
+
+        .login-logo .brand-accent {
+            color: var(--color-accent);
         }
 
         .login-logo p {
             color: var(--color-text-secondary);
             margin: var(--space-sm) 0 0 0;
-            font-size: 16px;
-            font-weight: 500;
+            font-size: 14px;
         }
 
         .form-group {
-            margin-bottom: var(--space-xl);
+            margin-bottom: var(--space-lg);
         }
 
         .form-group label {
             display: block;
             margin-bottom: var(--space-sm);
-            color: var(--color-text-secondary);
-            font-weight: 600;
+            color: var(--color-text-primary);
+            font-weight: 500;
             font-size: 14px;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
         }
 
         .form-group input {
             width: 100%;
-            padding: 16px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--glass-border);
+            padding: 12px 16px;
+            background: var(--color-bg-tertiary);
+            border: 1px solid var(--color-border);
             border-radius: var(--radius-md);
             color: var(--color-text-primary);
-            font-size: 16px;
-            font-family: 'Inter', sans-serif;
-            transition: all var(--transition-fast);
+            font-size: 15px;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.2s;
             box-sizing: border-box;
-            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .form-group input:focus {
             outline: none;
             border-color: var(--color-accent);
-            background: rgba(255, 255, 255, 0.08);
-            box-shadow: 0 0 0 4px var(--color-accent-dim);
+            background: var(--color-bg-hover);
         }
 
         .form-group input::placeholder {
             color: var(--color-text-muted);
-            opacity: 0.5;
         }
 
         .btn-login {
             width: 100%;
-            padding: 16px;
-            background: var(--color-accent-gradient);
+            padding: 14px;
+            background: var(--color-accent);
             color: white;
             border: none;
             border-radius: var(--radius-md);
-            font-size: 18px;
-            font-weight: 700;
+            font-size: 16px;
+            font-weight: 600;
             font-family: 'Outfit', sans-serif;
             cursor: pointer;
-            transition: all var(--transition-normal);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s;
         }
 
         .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 24px var(--color-accent-glow);
-            filter: brightness(1.1);
+            background: var(--color-accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
         }
 
         .btn-login:active {
@@ -170,39 +132,13 @@
 
         .error-message {
             background: rgba(239, 68, 68, 0.1);
-            color: #ff4d4d;
-            padding: 16px;
+            color: var(--color-error);
+            padding: 12px 16px;
             border-radius: var(--radius-md);
-            margin-bottom: var(--space-xl);
+            margin-bottom: var(--space-lg);
             border: 1px solid rgba(239, 68, 68, 0.2);
             font-size: 14px;
-            font-weight: 500;
             display: none;
-            animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
-        }
-
-        @keyframes shake {
-
-            10%,
-            90% {
-                transform: translate3d(-1px, 0, 0);
-            }
-
-            20%,
-            80% {
-                transform: translate3d(2px, 0, 0);
-            }
-
-            30%,
-            50%,
-            70% {
-                transform: translate3d(-4px, 0, 0);
-            }
-
-            40%,
-            60% {
-                transform: translate3d(4px, 0, 0);
-            }
         }
 
         .error-message.show {
@@ -210,14 +146,13 @@
         }
 
         .setup-message {
-            background: var(--color-accent-dim);
+            background: rgba(99, 102, 241, 0.1);
             color: var(--color-accent);
-            padding: 16px;
+            padding: 12px 16px;
             border-radius: var(--radius-md);
-            margin-bottom: var(--space-xl);
-            border: 1px solid var(--color-accent);
+            margin-bottom: var(--space-lg);
+            border: 1px solid var(--color-accent-dim);
             font-size: 14px;
-            font-weight: 500;
             display: none;
         }
 
@@ -260,10 +195,53 @@
 
                 <button type="submit" class="btn-login" id="submit-btn">Sign In</button>
             </form>
+
+            <div class="sso-divider" style="text-align: center; margin: 20px 0; position: relative;">
+                <span
+                    style="background: var(--color-bg-secondary); padding: 0 10px; color: var(--color-text-secondary); font-size: 14px; position: relative; z-index: 1;">OR</span>
+                <div
+                    style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: var(--color-border); z-index: 0;">
+                </div>
+            </div>
+
+            <button id="btn-sso-login" class="btn-login"
+                style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text-primary); display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                    style="width: 20px; height: 20px;">
+                    <path
+                        d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
+                </svg>
+                Sign in with SSO
+            </button>
+
+            <style>
+                #btn-sso-login:hover {
+                    background: var(--color-bg-tertiary) !important;
+                    border-color: var(--color-accent) !important;
+                    color: var(--color-accent) !important;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                }
+            </style>
         </div>
     </div>
 
     <script>
+        // Start SSO Login
+        document.getElementById('btn-sso-login').addEventListener('click', () => {
+            window.location.href = '/api/auth/oidc/login';
+        });
+
+        // Check for URL Error params
+        const urlParams = new URLSearchParams(window.location.search);
+        const error = urlParams.get('error');
+        if (error) {
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.textContent = error;
+            errorMessage.classList.add('show');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         // Check if setup is required
         let isSetupMode = false;
 
@@ -278,6 +256,9 @@
                     document.getElementById('submit-btn').textContent = 'Create Account';
                     document.getElementById('setup-message').classList.add('show');
                     document.getElementById('password').placeholder = 'Minimum 6 characters';
+                    // Hide SSO in setup mode
+                    document.querySelector('.sso-divider').style.display = 'none';
+                    document.getElementById('btn-sso-login').style.display = 'none';
                 }
             } catch (err) {
                 console.error('Error checking setup status:', err);

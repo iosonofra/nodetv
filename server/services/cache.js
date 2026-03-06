@@ -9,14 +9,9 @@ const path = require('path');
 // Cache directory
 const cacheDir = path.join(__dirname, '..', '..', 'data', 'cache');
 
-// Sanitize string for filesystem
-function safeName(name) {
-    return String(name || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
 // Ensure cache directories exist
 function ensureCacheDir(type, sourceId) {
-    const dir = path.join(cacheDir, safeName(type), safeName(sourceId));
+    const dir = path.join(cacheDir, type, String(sourceId));
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -26,7 +21,9 @@ function ensureCacheDir(type, sourceId) {
 // Get cache file path
 function getCachePath(type, sourceId, key) {
     const dir = ensureCacheDir(type, sourceId);
-    return path.join(dir, `${safeName(key)}.json`);
+    // Sanitize key for filename
+    const safeKey = String(key || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(dir, `${safeKey}.json`);
 }
 
 /**

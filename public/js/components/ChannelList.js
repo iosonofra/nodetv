@@ -11,14 +11,12 @@ class ChannelList {
         this.showHiddenCheckbox = document.getElementById('show-hidden');
         this.toggleGroupsBtn = document.getElementById('toggle-groups');
         this.contextMenu = document.getElementById('context-menu');
-        this.hideSidebarBtn = document.getElementById('btn-hide-sidebar');
-        this.showSidebarBtn = document.getElementById('btn-show-sidebar');
-        this.sidebar = document.getElementById('channel-sidebar');
 
         this.channels = [];
         this.groups = [];
         this.hiddenItems = new Set(); // Set<"type:sourceId:itemId">
         this.collapsedGroups = new Set(); // Track collapsed groups
+        this._userExpandedGroups = new Set(); // Track groups user has explicitly expanded
         this.favorites = []; // Array of favorite objects
         this.visibleFavorites = new Set(); // Set<"sourceId:channelId">
         this.currentChannel = null;
@@ -27,7 +25,6 @@ class ChannelList {
         this.renderedChannels = [];
 
         this.loadCollapsedState();
-        this.loadSidebarState();
         this.init();
     }
 
@@ -52,9 +49,13 @@ class ChannelList {
             const saved = localStorage.getItem('nodecast_tv_collapsed_groups');
             if (saved) {
                 this.collapsedGroups = new Set(JSON.parse(saved));
+                this._hasCollapsedState = true;
+            } else {
+                this._hasCollapsedState = false; // First load - will collapse all by default
             }
         } catch (err) {
             console.error('Error loading collapsed state:', err);
+            this._hasCollapsedState = false;
         }
     }
 
@@ -75,8 +76,12 @@ class ChannelList {
     toggleGroup(groupName) {
         if (this.collapsedGroups.has(groupName)) {
             this.collapsedGroups.delete(groupName);
+            // Track that user explicitly expanded this group
+            this._userExpandedGroups.add(groupName);
         } else {
             this.collapsedGroups.add(groupName);
+            // User collapsed it, remove from expanded tracking
+            this._userExpandedGroups.delete(groupName);
         }
         this.saveCollapsedState();
     }
@@ -85,17 +90,19 @@ class ChannelList {
      * Expand all groups
      */
     expandAll() {
-        // Only remove current groups from collapsed set to avoid affecting other sources
-        if (this.sortedGroups) {
-            this.sortedGroups.forEach(groupName => {
-                this.collapsedGroups.delete(groupName);
-            });
-        }
-
+        this.collapsedGroups.clear();
         this.saveCollapsedState();
 
-        // Update all rendered headers in the DOM
-        this.container.querySelectorAll('.group-header.collapsed').forEach(h => h.classList.remove('collapsed'));
+        // Expand all and render channels for empty containers
+        this.container.querySelectorAll('.group-header.collapsed').forEach(h => {
+            h.classList.remove('collapsed');
+            const groupName = h.dataset.group;
+            const groupEl = h.closest('.channel-group');
+            const channelsContainer = groupEl?.querySelector('.group-channels');
+            if (channelsContainer && channelsContainer.children.length === 0) {
+                this.renderGroupChannels(groupName, channelsContainer);
+            }
+        });
 
         // Update toggle button
         if (this.toggleGroupsBtn) {
@@ -105,63 +112,14 @@ class ChannelList {
     }
 
     /**
-     * Load sidebar collapsed state from localStorage
-     */
-    loadSidebarState() {
-        try {
-            const isCollapsed = localStorage.getItem('nodecast_tv_sidebar_collapsed') === 'true';
-            if (isCollapsed) {
-                this.toggleSidebar(true, false); // Don't animate on init to avoid flickering
-            }
-        } catch (err) {
-            console.error('Error loading sidebar state:', err);
-        }
-    }
-
-    /**
-     * Toggle sidebar visibility
-     */
-    toggleSidebar(collapsed, save = true) {
-        if (!this.sidebar) return;
-
-        if (collapsed) {
-            this.sidebar.classList.add('collapsed');
-            if (this.showSidebarBtn) this.sidebar.addEventListener('transitionend', () => {
-                if (this.sidebar.classList.contains('collapsed')) {
-                    this.showSidebarBtn.classList.add('show');
-                }
-            }, { once: true });
-
-            // If transition is already over or disabled
-            if (window.getComputedStyle(this.sidebar).transitionDuration === '0s') {
-                if (this.showSidebarBtn) this.showSidebarBtn.classList.add('show');
-            }
-        } else {
-            if (this.showSidebarBtn) this.showSidebarBtn.classList.remove('show');
-            this.sidebar.classList.remove('collapsed');
-        }
-
-        if (save) {
-            localStorage.setItem('nodecast_tv_sidebar_collapsed', collapsed);
-        }
-    }
-
-    /**
      * Collapse all groups
      */
     collapseAll() {
-        // Add ALL known groups to collapsed state, not just those in DOM
-        if (this.sortedGroups) {
-            this.sortedGroups.forEach(groupName => {
-                this.collapsedGroups.add(groupName);
-            });
-        }
-
-        // Update all rendered headers in the DOM
-        this.container.querySelectorAll('.group-header:not(.collapsed)').forEach(h => {
+        this.container.querySelectorAll('.group-header').forEach(h => {
+            const groupName = h.dataset.group;
+            this.collapsedGroups.add(groupName);
             h.classList.add('collapsed');
         });
-
         this.saveCollapsedState();
 
         // Update toggle button
@@ -175,15 +133,13 @@ class ChannelList {
      * Toggle between expand/collapse all
      */
     toggleAllGroups() {
-        // If anything in the CURRENT list is NOT collapsed, then collapse everything.
-        // Otherwise (everything in current list is already collapsed), expand everything.
+        const allHeaders = this.container.querySelectorAll('.group-header');
+        const allCollapsed = [...allHeaders].every(h => h.classList.contains('collapsed'));
 
-        const anyExpanded = this.sortedGroups?.some(groupName => !this.collapsedGroups.has(groupName));
-
-        if (anyExpanded) {
-            this.collapseAll();
-        } else {
+        if (allCollapsed) {
             this.expandAll();
+        } else {
+            this.collapseAll();
         }
     }
 
@@ -203,20 +159,6 @@ class ChannelList {
         // Show hidden toggle
         if (this.showHiddenCheckbox) {
             this.showHiddenCheckbox.addEventListener('change', () => this.render());
-        }
-
-        // Toggle groups
-        if (this.toggleGroupsBtn) {
-            this.toggleGroupsBtn.addEventListener('click', () => this.toggleAllGroups());
-        }
-
-        // Sidebar visibility
-        if (this.hideSidebarBtn) {
-            this.hideSidebarBtn.addEventListener('click', () => this.toggleSidebar(true));
-        }
-
-        if (this.showSidebarBtn) {
-            this.showSidebarBtn.addEventListener('click', () => this.toggleSidebar(false));
         }
 
         // Context menu handlers
@@ -411,6 +353,18 @@ class ChannelList {
         this.groupedChannels = groupedChannels;
         this.showHidden = showHidden;
 
+        // Collapse all groups by default on first load (for large playlists)
+        // This prevents rendering 100K+ channel items on initial load
+        if (!this._hasCollapsedState && this.sortedGroups.length > 0) {
+            this.sortedGroups.forEach(groupName => {
+                if (groupName !== 'Favorites') {
+                    this.collapsedGroups.add(groupName);
+                }
+            });
+            this._hasCollapsedState = true;
+            this.saveCollapsedState();
+        }
+
         // Build rendered channel list for navigation (matches visual order)
         this.renderedChannels = [];
         this.sortedGroups.forEach(groupName => {
@@ -508,6 +462,12 @@ class ChannelList {
             // Skip group if no visible channels (derived visibility)
             if (visibleChannels.length === 0) continue;
 
+            // Default new groups to collapsed (except Favorites)
+            // This handles groups loaded via scroll that weren't in the initial collapse
+            if (!isFavoritesGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
+                this.collapsedGroups.add(groupName);
+            }
+
             html += `
         <div class="channel-group">
           <div class="group-header ${this.collapsedGroups.has(groupName) ? 'collapsed' : ''} ${isFavoritesGroup ? 'favorites-group' : ''}" data-group="${groupName}">
@@ -517,6 +477,13 @@ class ChannelList {
           </div>
           <div class="group-channels">
       `;
+
+            // Skip rendering channel items if group is collapsed (major performance optimization)
+            // Channels will be rendered when user expands the group
+            if (this.collapsedGroups.has(groupName)) {
+                html += '</div></div>';
+                continue;
+            }
 
 
             for (const channel of visibleChannels) {
@@ -530,6 +497,7 @@ class ChannelList {
 
                 const isFavorite = this.isFavorite(channel.sourceId, channel.id);
                 const renderId = this.renderedChannels[renderIndex]?._renderId || '';
+                const renderGroup = this.renderedChannels[renderIndex]?._renderGroup || groupName;
                 renderIndex++;
 
                 html += `
@@ -540,7 +508,7 @@ class ChannelList {
                data-stream-id="${channel.streamId || ''}"
                data-url="${channel.url || ''}"
                data-render-id="${renderId}"
-               style="--item-index: ${Math.min(renderIndex % this.batchSize, 20)}">
+               data-render-group="${renderGroup}">
             <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
                  alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
             <div class="channel-info">
@@ -579,13 +547,98 @@ class ChannelList {
         const header = groupEl.querySelector('.group-header');
         if (header) {
             header.addEventListener('click', () => {
+                const groupName = header.dataset.group;
+                const isCollapsed = header.classList.contains('collapsed');
+
                 header.classList.toggle('collapsed');
-                this.toggleGroup(header.dataset.group);
+                this.toggleGroup(groupName);
+
+                // If expanding, render channels if they weren't rendered initially
+                if (isCollapsed) {
+                    const channelsContainer = groupEl.querySelector('.group-channels');
+                    if (channelsContainer && channelsContainer.children.length === 0) {
+                        // Channels weren't rendered - render them now
+                        this.renderGroupChannels(groupName, channelsContainer);
+                    }
+                }
             });
             header.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'group', header.dataset));
         }
 
         groupEl.querySelectorAll('.channel-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.favorite-btn')) return;
+                this.selectChannel(item.dataset);
+            });
+            item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
+
+            const favBtn = item.querySelector('.favorite-btn');
+            if (favBtn) {
+                favBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
+                });
+            }
+        });
+    }
+
+    /**
+     * Render channels for a specific group (called when expanding a collapsed group)
+     */
+    renderGroupChannels(groupName, container) {
+        const channels = this.groupedChannels[groupName];
+        if (!channels || channels.length === 0) return;
+
+        const isFavoritesGroup = groupName === 'Favorites';
+
+        // Filter visible channels
+        const visibleChannels = channels.filter(channel => {
+            if (isFavoritesGroup) return true;
+            const rawChannelId = channel.streamId || channel.id;
+            const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
+            return !channelHidden || this.showHidden;
+        });
+
+        let html = '';
+        for (const channel of visibleChannels) {
+            const rawChannelId = channel.streamId || channel.id;
+            const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
+            const isActive = this.currentChannel?.id === channel.id;
+            const isFavorite = this.isFavorite(channel.sourceId, channel.id);
+
+            // Find the matching rendered channel to get its unique IDs
+            const renderedChannel = this.renderedChannels.find(rc =>
+                rc.id === channel.id && rc.sourceId === channel.sourceId && rc._renderGroup === groupName
+            );
+            const renderId = renderedChannel?._renderId || '';
+            const renderGroup = renderedChannel?._renderGroup || groupName;
+
+            html += `
+          <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
+               data-channel-id="${channel.id}"
+               data-source-id="${channel.sourceId}"
+               data-source-type="${channel.sourceType}"
+               data-stream-id="${channel.streamId || ''}"
+               data-url="${channel.url || ''}"
+               data-render-id="${renderId}"
+               data-render-group="${renderGroup}">
+            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
+                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <div class="channel-info">
+              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
+            </div>
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+              ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
+            </button>
+          </div>
+        `;
+        }
+
+        container.innerHTML = html;
+
+        // Attach listeners to the new channel items
+        container.querySelectorAll('.channel-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.favorite-btn')) return;
                 this.selectChannel(item.dataset);
@@ -730,10 +783,6 @@ class ChannelList {
         const categories = await API.proxy.xtream.liveCategories(sourceId);
         const streams = await API.proxy.xtream.liveStreams(sourceId);
 
-        // Lookup source's use_warp flag
-        const sourceObj = this.sources?.find(s => s.id === sourceId);
-        const useWarp = sourceObj?.use_warp || false;
-
         // Map categories to groups
         const categoryGroups = categories.map(cat => ({
             id: `xtream_${sourceId}_${cat.category_id}`,
@@ -742,7 +791,7 @@ class ChannelList {
             sourceType: 'xtream'
         }));
 
-        this.groups.push(...categoryGroups);
+        this.groups = this.groups.concat(categoryGroups);
 
         // Map streams to channels
         const channelList = streams.map(stream => ({
@@ -755,8 +804,7 @@ class ChannelList {
             // Use string comparison to handle type mismatches (number vs string category_id)
             groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
             sourceId,
-            sourceType: 'xtream',
-            useWarp
+            sourceType: 'xtream'
         }));
 
         // Deduplicate by name within the same group (Xtream often sends backup streams with same name)
@@ -770,11 +818,12 @@ class ChannelList {
             }
         }
 
-        this.channels.push(...uniqueChannels);
+        this.channels = this.channels.concat(uniqueChannels);
     }
 
     /**
      * Load M3U channels
+     * Now uses unified Xtream-style API endpoints (backend supports both source types)
      */
     async loadM3uChannels(sourceId, append = false) {
         if (!append) {
@@ -782,37 +831,36 @@ class ChannelList {
             this.groups = [];
         }
 
-        const data = await API.proxy.m3u.get(sourceId);
+        // Use Xtream API endpoints - backend now supports M3U sources too
+        const categories = await API.proxy.xtream.liveCategories(sourceId);
+        const streams = await API.proxy.xtream.liveStreams(sourceId);
 
-        // Add groups
-        const m3uGroups = data.groups.map(g => ({
-            ...g,
-            id: `m3u_${sourceId}_${g.id}`,
+        // Map categories to groups (keeping m3u sourceType for downstream compatibility)
+        const m3uGroups = categories.map(cat => ({
+            id: `m3u_${sourceId}_${cat.category_id}`,
+            name: cat.category_name,
             sourceId,
             sourceType: 'm3u'
         }));
 
-        this.groups.push(...m3uGroups);
+        this.groups = this.groups.concat(m3uGroups);
 
-        // Lookup source's use_warp flag
-        const sourceObj = this.sources?.find(s => s.id === sourceId);
-        const useWarp = sourceObj?.use_warp || false;
-
-        // Add channels - use the stable id from the server
-        const channelList = data.channels.map(ch => ({
-            ...ch,
-            // Use the stable id provided by the server (from tvgId or hash)
-            // Prefix with sourceId to ensure global uniqueness across multiple M3U sources
-            id: `m3u_${sourceId}_${ch.id}`,
-            // Keep original ID as streamId if needed (or just use original ID for reference)
-            streamId: ch.id,
-            groupId: `m3u_${sourceId}_group_${data.groups.findIndex(g => g.name === ch.groupTitle)}`,
+        // Map streams to channels
+        const channelList = streams.map(stream => ({
+            id: `m3u_${sourceId}_${stream.stream_id}`,
+            streamId: stream.stream_id,
+            name: stream.name,
+            tvgId: stream.epg_channel_id,
+            tvgLogo: stream.stream_icon,
+            url: stream.stream_url, // M3U has direct URLs
+            groupId: `m3u_${sourceId}_${stream.category_id}`,
+            groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
             sourceId,
             sourceType: 'm3u',
-            useWarp
+            properties: stream.properties || null
         }));
 
-        this.channels.push(...channelList);
+        this.channels = this.channels.concat(channelList);
     }
 
     /**
@@ -1043,6 +1091,7 @@ class ChannelList {
 
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
+        this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from
 
         // Update active state in DOM
         this.container.querySelectorAll('.channel-item.active').forEach(el => {
@@ -1129,8 +1178,21 @@ class ChannelList {
             streamUrl = channel.url;
         }
 
-        // Play channel
-        if (window.app?.player) {
+        // Determine if stream needs Shaka Player (MPD or DRM)
+        const isMpd = streamUrl && streamUrl.toLowerCase().includes('.mpd');
+        const hasDrm = channel.properties && (
+            channel.properties['inputstream.adaptive.license_type'] ||
+            channel.properties['inputstream.adaptive.license_key'] ||
+            channel.properties['inputstream.adaptive.manifest_type'] === 'mpd'
+        );
+
+        // Play channel using appropriate player engine
+        if (window.app?.shakaPlayer && (isMpd || hasDrm)) {
+            // It's a DASH stream or has DRM metadata, use Shaka Player
+            console.log('[ChannelList] Managed adaptive stream detected (MPD/DRM). Using Shaka Player...');
+            window.app.shakaPlayer.play(channel, streamUrl);
+        } else if (window.app?.player) {
+            // Default to HLS Player for .m3u8 and raw .ts
             window.app.player.play(channel, streamUrl);
         }
     }
@@ -1323,11 +1385,20 @@ class ChannelList {
             currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
         }
 
-        // Fallback: Find first matching channel ID (if render ID lost or invalid)
+        // Fallback: Find matching channel ID, prioritizing same render group
         if (currentIndex === -1) {
-            currentIndex = this.renderedChannels.findIndex(c =>
-                c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-            );
+            // First try to find in same group (for Favorites containing duplicates)
+            if (this.currentRenderGroup) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
+                );
+            }
+            // Final fallback: any matching channel
+            if (currentIndex === -1) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
+                );
+            }
         }
 
         if (currentIndex === -1) return;
@@ -1357,10 +1428,20 @@ class ChannelList {
             currentIndex = this.renderedChannels.findIndex(c => c._renderId === this.currentRenderId);
         }
 
+        // Fallback: Find matching channel ID, prioritizing same render group
         if (currentIndex === -1) {
-            currentIndex = this.renderedChannels.findIndex(c =>
-                c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
-            );
+            // First try to find in same group (for Favorites containing duplicates)
+            if (this.currentRenderGroup) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId && c._renderGroup === this.currentRenderGroup
+                );
+            }
+            // Final fallback: any matching channel
+            if (currentIndex === -1) {
+                currentIndex = this.renderedChannels.findIndex(c =>
+                    c.id === this.currentChannel.id && c.sourceId === this.currentChannel.sourceId
+                );
+            }
         }
 
         if (currentIndex === -1) return;

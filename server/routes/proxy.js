@@ -16,7 +16,8 @@ const { requireAuth } = require('../auth');
 
 // Conditional auth middleware: allow public access for streaming/DRM used by video players
 router.use((req, res, next) => {
-    const isPublicStream = req.path === '/stream' || req.path === '/drm' || req.path.startsWith('/stream/');
+    const publicRoutes = ['/stream', '/drm', '/image'];
+    const isPublicStream = publicRoutes.includes(req.path) || req.path.startsWith('/stream/');
     if (isPublicStream) {
         return next();
     }

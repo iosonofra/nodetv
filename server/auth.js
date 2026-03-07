@@ -212,7 +212,7 @@ function configureOidcStrategy(findUserByOidcId, findUserByEmail, createUser) {
 
                     user = await createUser({
                         username: username,
-                        role: 'viewer', // Default role for SSO users
+                        role: process.env.OIDC_DEFAULT_ROLE || 'viewer', // Configurable default role for SSO users
                         oidcId: sub,
                         email: email || null
                     });

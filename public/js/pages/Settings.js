@@ -697,7 +697,12 @@ class SettingsPage {
     }
 
     async show() {
-        const isAdmin = this.app.currentUser && this.app.currentUser.role === 'admin';
+        console.log('[Settings] Showing settings page...');
+        const user = this.app.currentUser;
+        console.log('[Settings] Current user state:', user);
+
+        const isAdmin = user && user.role === 'admin';
+        console.log('[Settings] User role:', user?.role, '| isAdmin:', isAdmin);
 
         // Tab visibility based on role
         const transcodeTab = document.querySelector('.tab[data-tab="transcode"]');
@@ -713,6 +718,9 @@ class SettingsPage {
         if (epgDataSettings && epgDataSettings.querySelector('h3')?.textContent.includes('EPG Data Settings')) {
             epgDataSettings.style.display = isAdmin ? 'block' : 'none';
         }
+
+        // Initialize User Profile section
+        this.initUserProfile(user);
 
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
@@ -781,8 +789,6 @@ class SettingsPage {
 
             if (data.lastSyncTime) {
                 const lastRefreshTime = new Date(data.lastSyncTime);
-
-                // Format as relative time or absolute
                 const now = new Date();
                 const diffMs = now - lastRefreshTime;
                 const diffMins = Math.floor(diffMs / 60000);
@@ -796,12 +802,11 @@ class SettingsPage {
                 } else if (diffHours < 24) {
                     text = `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
                 } else {
-                    // Use absolute time for older refreshes
                     text = lastRefreshTime.toLocaleString();
                 }
 
                 display.textContent = text;
-                display.title = lastRefreshTime.toLocaleString(); // Full timestamp on hover
+                display.title = lastRefreshTime.toLocaleString();
             } else {
                 display.textContent = 'Never';
                 display.title = 'Sync has not run yet since server started';
@@ -810,6 +815,40 @@ class SettingsPage {
             console.error('Error fetching sync status:', err);
             display.textContent = 'Unknown';
             display.title = 'Could not fetch sync status';
+        }
+    }
+
+    /**
+     * Initialize and display User Profile information
+     */
+    initUserProfile(user) {
+        const section = document.getElementById('user-profile-section');
+        const roleDisplay = document.getElementById('user-role-display');
+        const usernameDisplay = document.getElementById('user-username-display');
+
+        if (!section || !user) return;
+
+        section.style.display = 'block';
+
+        if (roleDisplay) {
+            roleDisplay.textContent = `Role: ${user.role || 'unknown'}`;
+            roleDisplay.style.padding = '2px 8px';
+            roleDisplay.style.borderRadius = '4px';
+            roleDisplay.style.fontSize = '0.75rem';
+            roleDisplay.style.fontWeight = 'bold';
+            roleDisplay.style.textTransform = 'uppercase';
+
+            if (user.role === 'admin') {
+                roleDisplay.style.background = 'rgba(16, 185, 129, 0.2)';
+                roleDisplay.style.color = '#10b981';
+            } else {
+                roleDisplay.style.background = 'rgba(245, 158, 11, 0.2)';
+                roleDisplay.style.color = '#f59e0b';
+            }
+        }
+
+        if (usernameDisplay) {
+            usernameDisplay.textContent = user.username || 'Unknown User';
         }
     }
 

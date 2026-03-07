@@ -520,6 +520,9 @@ class SettingsPage {
     initScraperManagement() {
         const runBtn = document.getElementById('run-scraper');
         const clearLogsBtn = document.getElementById('clear-scraper-logs');
+        const saveSettingsBtn = document.getElementById('save-scraper-settings');
+        const autoRunToggle = document.getElementById('setting-scraper-auto-run');
+        const intervalContainer = document.getElementById('scraper-interval-container');
 
         if (runBtn) {
             runBtn.addEventListener('click', () => this.runScraper());
@@ -529,9 +532,43 @@ class SettingsPage {
             clearLogsBtn.addEventListener('click', () => this.clearLogs());
         }
 
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => this.saveScraperSettings());
+        }
+
+        if (autoRunToggle && intervalContainer) {
+            autoRunToggle.addEventListener('change', () => {
+                intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
+            });
+        }
+
         // Start polling status if admin
         if (this.app.currentUser?.role === 'admin') {
             this.startScraperStatusPolling();
+        }
+    }
+
+    async saveScraperSettings() {
+        const autoRunToggle = document.getElementById('setting-scraper-auto-run');
+        const intervalSelect = document.getElementById('setting-scraper-interval');
+        const saveBtn = document.getElementById('save-scraper-settings');
+
+        if (!autoRunToggle || !intervalSelect) return;
+
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            await API.scraper.updateSettings({
+                scraperAutoRun: autoRunToggle.checked,
+                scraperInterval: intervalSelect.value
+            });
+            this.appendLog('Scraper settings updated successfully.');
+            // Refresh status to show updated auto-run info
+            this.loadScraperStatus();
+        } catch (err) {
+            this.appendLog('Error saving scraper settings: ' + err.message);
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
         }
     }
 
@@ -605,24 +642,42 @@ class SettingsPage {
             const cronInfo = document.getElementById('scraper-cron-info');
             if (cronInfo && status.autoRunInfo) {
                 const info = status.autoRunInfo;
+
+                // Update settings UI if not already initialized
+                const autoRunToggle = document.getElementById('setting-scraper-auto-run');
+                const intervalSelect = document.getElementById('setting-scraper-interval');
+                const intervalContainer = document.getElementById('scraper-interval-container');
+
+                if (autoRunToggle && !this._scraperSettingsInitialized) {
+                    autoRunToggle.checked = info.enabled;
+                    if (intervalSelect) intervalSelect.value = String(info.intervalHours);
+                    if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    this._scraperSettingsInitialized = true;
+                }
+
                 if (info.enabled) {
                     const nextRun = info.nextRunExpected ? new Date(info.nextRunExpected).toLocaleString() : 'Pending';
-                    const hours = (info.intervalMs / 3600000).toFixed(0);
+                    const hours = info.intervalHours;
                     cronInfo.innerHTML = `
                         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></span>
+                                <div class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
                                 <span style="color: var(--color-text-secondary);">Auto-run active: every ${hours}h</span>
                             </div>
                             <div style="text-align: right;">
                                 <span class="hint">Next run:</span>
-                                <span style="font-weight: 500; margin-left: 4px;">${nextRun}</span>
+                                <span style="font-weight: 500; margin-left: 4px; color: var(--color-accent);">${nextRun}</span>
                             </div>
                         </div>
                     `;
                     cronInfo.style.display = 'block';
                 } else {
-                    cronInfo.innerHTML = '<span class="hint">Auto-run is disabled.</span>';
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
+                            <div class="status-badge status-offline" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                            <span class="hint">Auto-run is currently disabled.</span>
+                        </div>
+                    `;
                     cronInfo.style.display = 'block';
                 }
             }

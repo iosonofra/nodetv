@@ -848,6 +848,37 @@
               <p class="hint">Automated scraper to extract live event streams and keys. Results are saved to a local M3U
                 playlist and auto-synced.</p>
 
+              <div class="settings-section"
+                style="margin-top: var(--space-md); border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-md);">
+                <div class="setting-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Auto-Run Scraper</span>
+                    <span class="setting-hint">Automatically run the scraper on a scheduled interval.</span>
+                  </div>
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="setting-scraper-auto-run" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-item" id="scraper-interval-container">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Execution Interval</span>
+                    <span class="setting-hint">How often to run the scraper (hours).</span>
+                  </div>
+                  <select id="setting-scraper-interval" class="source-select" style="width: auto; min-width: 150px;">
+                    <option value="1">Every 1 hour</option>
+                    <option value="2">Every 2 hours</option>
+                    <option value="4">Every 4 hours</option>
+                    <option value="6">Every 6 hours</option>
+                    <option value="12">Every 12 hours</option>
+                    <option value="24">Every 24 hours (Daily)</option>
+                  </select>
+                </div>
+                <div style="text-align: right; margin-top: var(--space-sm);">
+                  <button class="btn btn-sm btn-secondary" id="save-scraper-settings">Save Scraper Settings</button>
+                </div>
+              </div>
+
               <div class="scraper-status-container"
                 style="margin-top: var(--space-md); padding: var(--space-md); background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
                 <div class="status-item" style="display: flex; justify-content: space-between; align-items: center;">

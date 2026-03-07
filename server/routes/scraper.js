@@ -6,8 +6,14 @@ const scraperService = require('../services/scraperService');
  * Get scraper status and history
  * GET /api/scraper/status
  */
-router.get('/status', (req, res) => {
-    res.json(scraperService.getStatus());
+router.get('/status', async (req, res) => {
+    try {
+        const status = await scraperService.getStatus();
+        res.json(status);
+    } catch (err) {
+        console.error('Error getting scraper status:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 /**
@@ -50,6 +56,28 @@ router.get('/download', (req, res) => {
         res.download(playlistFile, 'thisnotbusiness.m3u');
     } else {
         res.status(404).json({ error: 'Playlist file not found' });
+    }
+});
+
+/**
+ * Update scraper settings
+ * PUT /api/scraper/settings
+ */
+router.put('/settings', async (req, res) => {
+    try {
+        const { settings: dbSettings } = require('../db');
+        const updates = req.body;
+
+        // Update DB settings
+        await dbSettings.update(updates);
+
+        // Restart scraper auto-run with new settings
+        await scraperService.restartAutoRun();
+
+        res.json({ message: 'Scraper settings updated' });
+    } catch (err) {
+        console.error('Error updating scraper settings:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 

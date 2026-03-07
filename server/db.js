@@ -108,7 +108,10 @@ function getDefaultSettings() {
     // Upscaling settings
     upscaleEnabled: false,
     upscaleMethod: 'hardware',    // hardware | software
-    upscaleTarget: '1080p'        // 1080p | 4k | 720p
+    upscaleTarget: '1080p',       // 1080p | 4k | 720p
+    // Scraper settings
+    scraperAutoRun: true,
+    scraperInterval: '1'          // hours
   };
 }
 

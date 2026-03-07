@@ -81,7 +81,8 @@ const API = {
     scraper: {
         getStatus: () => API.request('GET', '/scraper/status'),
         getLogs: () => API.request('GET', '/scraper/logs'),
-        run: () => API.request('POST', '/scraper/run')
+        run: () => API.request('POST', '/scraper/run'),
+        updateSettings: (data) => API.request('PUT', '/scraper/settings', data)
     },
 
     // Favorites

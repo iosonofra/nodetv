@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { sources, users } = require('../db');
+const { sources, users, settings } = require('../db');
 const syncService = require('./syncService');
 
 class ScraperService {
@@ -12,7 +12,7 @@ class ScraperService {
         this.logs = [];
         this.maxLogs = 500;
         this._autoRunTimer = null;
-        this._autoRunInterval = 60 * 60 * 1000; // 1 hour default
+        this._autoRunInterval = 60 * 60 * 1000; // Legacy default
 
         this.dataDir = path.join(__dirname, '../../data/scraper');
         this.historyFile = path.join(this.dataDir, 'history.json');
@@ -23,7 +23,7 @@ class ScraperService {
         }
     }
 
-    getStatus() {
+    async getStatus() {
         // Check playlist file info
         let fileInfo = null;
         if (fs.existsSync(this.playlistFile)) {
@@ -41,10 +41,23 @@ class ScraperService {
             fileInfo = { exists: false };
         }
 
+        const currentSettings = await settings.get();
+        const intervalHours = parseInt(currentSettings.scraperInterval) || 1;
+        const autoRunEnabled = currentSettings.scraperAutoRun !== false;
+
+        let nextRun = null;
+        if (autoRunEnabled && this.lastRun) {
+            nextRun = new Date(this.lastRun.getTime() + (intervalHours * 3600000));
+        } else if (autoRunEnabled) {
+            // If never run, next run will be relative to server start (or handled by startup logic)
+            // For UI purposes, we'll show "Pending" or similar if we don't have a timer yet
+        }
+
         let autoRunInfo = {
-            enabled: !!this._autoRunTimer,
-            intervalMs: this._autoRunInterval,
-            nextRunExpected: this._autoRunTimer ? new Date(Date.now() + this._autoRunInterval) : null
+            enabled: autoRunEnabled,
+            intervalHours: intervalHours,
+            nextRunExpected: nextRun,
+            isTimerActive: !!this._autoRunTimer
         };
 
         return {
@@ -71,19 +84,20 @@ class ScraperService {
         return [];
     }
 
-    async run() {
+    async run(runType = null) {
         if (this.isRunning) {
             throw new Error('Scraper is already running');
         }
 
         this.isRunning = true;
         this.logs = [];
-        this.addLog('[*] Starting scraper execution...');
-
-        const scriptPath = path.join(__dirname, '../scraper/thisnotbusiness.js');
 
         const startTime = Date.now();
-        const runType = process.env.SCRAPER_RUN_TYPE || 'manual';
+        if (!runType) runType = process.env.SCRAPER_RUN_TYPE || 'manual';
+
+        this.addLog(`[*] Starting scraper execution (${runType})...`);
+
+        const scriptPath = path.join(__dirname, '../scraper/thisnotbusiness.js');
 
         // Use the current node executable
         this.currentProcess = spawn(process.execPath, [scriptPath], {
@@ -223,25 +237,61 @@ class ScraperService {
         }
     }
 
-    startAutoRun(intervalMs = null) {
-        if (intervalMs) this._autoRunInterval = intervalMs;
+    async startAutoRun() {
+        // Get settings from DB
+        const currentSettings = await settings.get();
+        const intervalHours = parseInt(currentSettings.scraperInterval) || 1;
+        const enabled = currentSettings.scraperAutoRun !== false;
+
+        if (!enabled) {
+            console.log('[Scraper] Auto-run is disabled in settings');
+            this.stopAutoRun();
+            return;
+        }
+
+        const intervalMs = intervalHours * 60 * 60 * 1000;
+        this._autoRunInterval = intervalMs;
 
         if (this._autoRunTimer) {
             clearInterval(this._autoRunTimer);
         }
 
-        console.log(`[Scraper] Starting auto-run every ${this._autoRunInterval / 3600000} hours`);
+        console.log(`[Scraper] Starting auto-run every ${intervalHours} hours`);
+
+        // Check if we should run immediately (if never run or last run was long ago)
+        const lastHistory = this.getHistory()[0];
+        if (lastHistory) {
+            this.lastRun = new Date(lastHistory.timestamp);
+        }
+
+        const now = Date.now();
+        const lastRunTime = this.lastRun ? this.lastRun.getTime() : 0;
+        const timeSinceLastRun = now - lastRunTime;
+
+        if (timeSinceLastRun >= intervalMs) {
+            console.log('[Scraper] Triggering immediate run on startup (interval passed)');
+            this.run('auto').catch(err => {
+                console.error('[Scraper] Startup run failed:', err);
+            });
+        } else {
+            const waitTime = intervalMs - timeSinceLastRun;
+            console.log(`[Scraper] Next run scheduled in ${Math.round(waitTime / 60000)} minutes`);
+        }
 
         this._autoRunTimer = setInterval(() => {
             if (!this.isRunning) {
                 console.log('[Scraper] Triggering scheduled run...');
-                this.run().catch(err => {
+                this.run('auto').catch(err => {
                     console.error('[Scraper] Scheduled run failed:', err);
                 });
             } else {
                 console.log('[Scraper] Scheduled run skipped (already running)');
             }
         }, this._autoRunInterval);
+    }
+
+    async restartAutoRun() {
+        await this.startAutoRun();
     }
 
     stopAutoRun() {

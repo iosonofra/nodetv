@@ -164,6 +164,13 @@ class ScraperService {
 
         if (existingSource) {
             this.addLog(`[*] Updating existing source (ID: ${existingSource.id})...`);
+
+            // Ensure auto_sync is false to prevent global sync timer from interfering
+            if (existingSource.auto_sync === true || existingSource.auto_sync === 1) {
+                await sources.update(existingSource.id, { auto_sync: false });
+                this.addLog('[*] Disabled auto_sync for source to manage it via scraper.');
+            }
+
             // Trigger sync for this source
             await syncService.syncSource(existingSource.id);
             this.addLog('[*] Source sync triggered.');
@@ -184,7 +191,7 @@ class ScraperService {
                 type: 'm3u',
                 // Use absolute path for reliability
                 url: path.resolve(this.playlistFile),
-                auto_sync: true
+                auto_sync: false // Managed by scraper service
             }, admin.id);
 
             this.addLog(`[+] New source created (ID: ${newSource.id}).`);

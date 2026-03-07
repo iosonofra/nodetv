@@ -90,7 +90,7 @@ class SyncService {
         try {
             const allSources = await sources.getAll();
             for (const source of allSources) {
-                if (source.enabled) {
+                if (source.enabled && source.auto_sync !== false) {
                     // Run sequentially to not overload
                     await this.syncSource(source.id);
                 }
@@ -260,11 +260,10 @@ class SyncService {
      * @returns {Set} Set of synced IDs (for external purge if skipPurge was true)
      */
     async saveStreams(sourceId, type, items, options = {}) {
-        if (!items || items.length === 0) return new Set();
-        const db = getDb();
         const { skipPurge = false } = options;
 
-        // Collect all IDs we're syncing
+        console.log(`[Sync] Saving ${items.length || 0} ${type} items for source ${sourceId}...`);
+        const db = getDb();
         const syncedIds = new Set();
 
         const stmt = db.prepare(`
@@ -342,7 +341,7 @@ class SyncService {
         }
 
         // Purge stale entries (skip if doing batch sync like M3U)
-        if (!skipPurge && syncedIds.size > 0) {
+        if (!skipPurge) {
             await this.purgeStaleItems(sourceId, type, syncedIds);
         }
 
@@ -357,9 +356,20 @@ class SyncService {
      * @param {Set} syncedIds - Set of IDs that should be kept
      */
     async purgeStaleItems(sourceId, type, syncedIds) {
-        if (!syncedIds || syncedIds.size === 0) return;
-
         const db = getDb();
+
+        if (!syncedIds || syncedIds.size === 0) {
+            // If no items are synced, delete all items of this type for this source
+            const deleteStmt = db.prepare(`
+                DELETE FROM playlist_items 
+                WHERE source_id = ? AND type = ?
+            `);
+            const deleted = deleteStmt.run(sourceId, type);
+            if (deleted.changes > 0) {
+                console.log(`[Sync] Purged ALL (${deleted.changes}) ${type} items for source ${sourceId}`);
+            }
+            return;
+        }
         db.exec('CREATE TEMP TABLE IF NOT EXISTS synced_ids (id TEXT PRIMARY KEY)');
         db.exec('DELETE FROM synced_ids');
 
@@ -548,9 +558,7 @@ class SyncService {
         logMemory();
 
         // Purge stale items after all batches are complete
-        if (allSyncedIds.size > 0) {
-            await this.purgeStaleItems(source.id, 'live', allSyncedIds);
-        }
+        await this.purgeStaleItems(source.id, 'live', allSyncedIds);
 
         // Save Categories (Groups) at the end
         const categories = Array.from(allGroups).map(name => ({

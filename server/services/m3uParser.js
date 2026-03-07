@@ -5,6 +5,7 @@
 
 const readline = require('readline');
 const { Readable } = require('stream');
+const fs = require('fs');
 
 /**
  * Generate a simple stable ID from name and group
@@ -162,28 +163,44 @@ async function parse(input) {
 }
 
 /**
- * Fetch and parse M3U from URL
- * @param {string} url - M3U playlist URL
+ * Internal helper to get a Readable stream from a URL or local path
+ * @param {string} urlOrPath - M3U playlist URL or file path
+ * @returns {Promise<Readable>}
+ */
+async function getInputStream(urlOrPath) {
+    if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+        const response = await fetch(urlOrPath, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to fetch M3U: ${response.status} ${response.statusText}`);
+        }
+
+        if (response.body && typeof response.body.pipe === 'function') {
+            return response.body;
+        } else if (response.body) {
+            return Readable.fromWeb(response.body);
+        } else {
+            return Readable.from([]);
+        }
+    } else {
+        // Assume local file path
+        if (!fs.existsSync(urlOrPath)) {
+            throw new Error(`File not found: ${urlOrPath}`);
+        }
+        return fs.createReadStream(urlOrPath);
+    }
+}
+
+/**
+ * Fetch and parse M3U from URL or local path
+ * @param {string} urlOrPath - M3U playlist URL or path
  * @returns {Promise<{ channels: Array, groups: Array }>}
  */
-async function fetchAndParse(url) {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch M3U: ${response.status} ${response.statusText}`);
-    }
-
-    // Check if body is a Node.js stream (undici/node-fetch) or web stream
-    let stream;
-    if (response.body && typeof response.body.pipe === 'function') {
-        stream = response.body;
-    } else if (response.body) {
-        // Convert Web Stream to Node Readable for readline
-        stream = Readable.fromWeb(response.body);
-    } else {
-        // Fallback for empty body
-        stream = Readable.from([]);
-    }
-
+async function fetchAndParse(urlOrPath) {
+    const stream = await getInputStream(urlOrPath);
     return parse(stream);
 }
 
@@ -271,54 +288,24 @@ async function* parseStreaming(input, batchSize = 500) {
 }
 
 /**
- * Fetch and parse M3U from URL as streaming async generator (memory-efficient)
- * @param {string} url - M3U playlist URL
+ * Fetch and parse M3U from URL or local path as streaming async generator (memory-efficient)
+ * @param {string} urlOrPath - M3U playlist URL or path
  * @param {number} batchSize - Number of channels per batch
  * @yields {{ channels: Array, groups: Set, isLast: boolean }}
  */
-async function* fetchAndParseStreaming(url, batchSize = 500) {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch M3U: ${response.status} ${response.statusText}`);
-    }
-
-    let stream;
-    if (response.body && typeof response.body.pipe === 'function') {
-        stream = response.body;
-    } else if (response.body) {
-        stream = Readable.fromWeb(response.body);
-    } else {
-        stream = Readable.from([]);
-    }
-
+async function* fetchAndParseStreaming(urlOrPath, batchSize = 500) {
+    const stream = await getInputStream(urlOrPath);
     yield* parseStreaming(stream, batchSize);
 }
 
 /**
  * Fast count of entries in an M3U playlist (for size estimation)
  * Streams the file and counts #EXTINF lines without full parsing
- * @param {string} url - URL of the M3U playlist
+ * @param {string} urlOrPath - URL or local path of the M3U playlist
  * @returns {Promise<number>} Number of entries
  */
-async function countEntries(url) {
-    const response = await fetch(url, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to fetch playlist: ${response.status}`);
-    }
-
-    let stream;
-    if (response.body && typeof response.body.pipe === 'function') {
-        stream = response.body;
-    } else if (response.body) {
-        stream = Readable.fromWeb(response.body);
-    } else {
-        return 0;
-    }
+async function countEntries(urlOrPath) {
+    const stream = await getInputStream(urlOrPath);
 
     return new Promise((resolve, reject) => {
         let count = 0;

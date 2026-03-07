@@ -277,12 +277,12 @@ async function scrape() {
             }
         }
 
-        // Save Playlist
+        // Save Playlist (Always write file, even if empty, to trigger sync purge)
+        fs.writeFileSync(PLAYLIST_FILE, m3uLines.join("\n"), 'utf8');
         if (m3uLines.length > 1) {
-            fs.writeFileSync(PLAYLIST_FILE, m3uLines.join("\n"), 'utf8');
-            console.log(`[*] Successfully saved playlist to: ${PLAYLIST_FILE}`);
+            console.log(`[*] Successfully saved playlist with ${m3uLines.length - 1} entries to: ${PLAYLIST_FILE}`);
         } else {
-            console.log("[!] No channels found, playlist not updated.");
+            console.log(`[*] Saved empty playlist to: ${PLAYLIST_FILE}`);
         }
 
         // Save History

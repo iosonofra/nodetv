@@ -599,7 +599,7 @@ h4 {
 
 .group-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   background: var(--color-bg-tertiary);
@@ -642,7 +642,7 @@ h4 {
 
 .channel-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-sm);
@@ -678,17 +678,15 @@ h4 {
 
 .channel-name {
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .channel-program {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* =====================================================
@@ -1148,7 +1146,7 @@ video::cue {
   width: var(--epg-sidebar-width);
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-sm);
   background: var(--color-bg-secondary);
@@ -1191,9 +1189,8 @@ video::cue {
 .epg-channel-name {
   font-size: 0.875rem;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .epg-programs {
@@ -1222,9 +1219,8 @@ video::cue {
 .epg-program-title {
   font-weight: 500;
   font-size: 0.875rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .epg-program-time {
@@ -1942,9 +1938,8 @@ kbd {
 
 .checkbox-label.channel-item .channel-name {
   max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* Checkbox styling */
@@ -2993,9 +2988,8 @@ kbd {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .movie-meta {
@@ -3127,9 +3121,8 @@ kbd {
 .series-title {
   font-size: 0.9rem;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .series-meta {
@@ -3286,9 +3279,8 @@ kbd {
 
 .episode-title {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .episode-duration {
@@ -3517,18 +3509,16 @@ kbd {
   font-weight: 600;
   color: #fff;
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .watch-subtitle {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.7);
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* Center Play Button */
@@ -4589,9 +4579,8 @@ kbd {
   text-decoration: none;
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
   max-width: 200px;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
@@ -4611,10 +4600,6 @@ kbd {
   font-size: 10px;
 }
 
-.now-playing-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 @keyframes now-playing-pulse {
 

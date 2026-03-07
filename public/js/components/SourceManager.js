@@ -298,6 +298,7 @@ class SourceManager {
             await API.sources.create({ type, name, url, username, password });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
+            await this.loadContentSources();
 
             // Refresh channel list
             if (window.app?.channelList) {
@@ -347,6 +348,7 @@ class SourceManager {
         try {
             await API.sources.delete(id);
             await this.loadSources();
+            await this.loadContentSources();
 
             if (window.app?.channelList) {
                 await window.app.channelList.loadSources();

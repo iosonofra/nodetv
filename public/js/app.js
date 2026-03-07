@@ -110,6 +110,12 @@ class App {
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
+                const href = link.getAttribute('href');
+                if (href && href !== '#') {
+                    // Let external or direct file links work natively
+                    return;
+                }
+
                 e.preventDefault();
                 this.navigateTo(link.dataset.page);
             });
@@ -192,14 +198,6 @@ class App {
             }
 
             this.currentUser = await response.json();
-
-            // Hide settings for viewers
-            if (this.currentUser.role === 'viewer') {
-                const settingsLink = document.querySelector('.nav-link[data-page="settings"]');
-                if (settingsLink) {
-                    settingsLink.style.display = 'none';
-                }
-            }
 
             // Add logout button to navbar
             this.addLogoutButton();

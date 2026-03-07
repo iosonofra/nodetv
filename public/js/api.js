@@ -77,6 +77,13 @@ const API = {
         hideAll: (sourceId, contentType) => API.request('POST', '/channels/hide/all', { sourceId, contentType })
     },
 
+    // Scraper
+    scraper: {
+        getStatus: () => API.request('GET', '/scraper/status'),
+        getLogs: () => API.request('GET', '/scraper/logs'),
+        run: () => API.request('POST', '/scraper/run')
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

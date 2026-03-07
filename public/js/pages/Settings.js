@@ -25,6 +25,9 @@ class SettingsPage {
 
         // User management (admin only)
         this.initUserManagement();
+
+        // Scraper management (admin only)
+        this.initScraperManagement();
     }
 
     initPlayerSettings() {
@@ -514,6 +517,165 @@ class SettingsPage {
         }
     }
 
+    initScraperManagement() {
+        const runBtn = document.getElementById('run-scraper');
+        const clearLogsBtn = document.getElementById('clear-scraper-logs');
+
+        if (runBtn) {
+            runBtn.addEventListener('click', () => this.runScraper());
+        }
+
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => this.clearLogs());
+        }
+
+        // Start polling status if admin
+        if (this.app.currentUser?.role === 'admin') {
+            this.startScraperStatusPolling();
+        }
+    }
+
+    async runScraper() {
+        const runBtn = document.getElementById('run-scraper');
+        if (runBtn) runBtn.disabled = true;
+
+        try {
+            await API.scraper.run();
+            this.appendLog('Scraper started...');
+            this.loadScraperStatus();
+        } catch (err) {
+            this.appendLog('Error starting scraper: ' + err.message);
+            if (runBtn) runBtn.disabled = false;
+        }
+    }
+
+    async loadScraperStatus() {
+        try {
+            const status = await API.scraper.getStatus();
+            const statusText = document.getElementById('scraper-status-text');
+            const spinner = document.getElementById('scraper-loading-spinner');
+            const runBtn = document.getElementById('run-scraper');
+
+            if (statusText) {
+                statusText.textContent = status.status.charAt(0).toUpperCase() + status.status.slice(1);
+                statusText.style.color = status.status === 'running' ? 'var(--color-accent)' : 'var(--color-text-secondary)';
+            }
+
+            if (spinner) {
+                spinner.style.display = status.status === 'running' ? 'block' : 'none';
+            }
+
+            if (runBtn) {
+                runBtn.disabled = status.status === 'running';
+            }
+
+            // Update history if status changed from running to idle
+            if (this._lastScraperStatus === 'running' && status.status === 'idle') {
+                this.loadScraperHistory();
+                await this.app.sourceManager.loadSources(); // Refresh sources to show new m3u
+            }
+
+            this._lastScraperStatus = status.status;
+        } catch (err) {
+            console.warn('Failed to load scraper status:', err);
+        }
+    }
+
+    async loadScraperLogs() {
+        try {
+            const data = await API.scraper.getLogs();
+            if (data.logs) {
+                const logsContainer = document.getElementById('scraper-logs');
+                if (logsContainer) {
+                    // Update logs only if changed
+                    if (this._lastLogsLength !== data.logs.length) {
+                        logsContainer.innerHTML = data.logs.map(log =>
+                            `<div class="log-entry">${this.escapeHtml(log)}</div>`
+                        ).join('');
+                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                        this._lastLogsLength = data.logs.length;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to load scraper logs:', err);
+        }
+    }
+
+    async loadScraperHistory() {
+        const historyList = document.getElementById('scraper-history-list');
+        if (!historyList) return;
+
+        try {
+            const data = await API.scraper.getStatus();
+            const history = data.history || [];
+
+            if (history.length === 0) {
+                historyList.innerHTML = '<p class="hint">No history available yet.</p>';
+                return;
+            }
+
+            historyList.innerHTML = history.slice(0, 10).map(item => `
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 500;">${new Date(item.timestamp).toLocaleString()}</div>
+                            <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration}s | Channels: ${item.channelsCount || 0}</div>
+                        </div>
+                        <span class="status-badge ${item.success ? 'status-online' : 'status-offline'}">
+                            ${item.success ? 'Success' : 'Failed'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Error loading scraper history:', err);
+        }
+    }
+
+    startScraperStatusPolling() {
+        if (this._scraperPolling) return;
+
+        // Poll every 2 seconds
+        this._scraperPolling = setInterval(() => {
+            const isActive = document.getElementById('tab-scraper')?.classList.contains('active');
+            if (isActive) {
+                this.loadScraperStatus();
+                this.loadScraperLogs();
+            } else {
+                // Background poll less frequently just for status
+                this.loadScraperStatus();
+            }
+        }, 2000);
+    }
+
+    appendLog(message) {
+        const logsContainer = document.getElementById('scraper-logs');
+        if (!logsContainer) return;
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsContainer.appendChild(entry);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    clearLogs() {
+        const logsContainer = document.getElementById('scraper-logs');
+        if (logsContainer) {
+            logsContainer.innerHTML = '<div class="log-entry" style="color: var(--color-text-muted);">Logs cleared.</div>';
+        }
+    }
+
+    escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     switchTab(tabName) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
@@ -535,16 +697,26 @@ class SettingsPage {
     }
 
     async show() {
-        // Show users tab for admin
-        if (this.app.currentUser && this.app.currentUser.role === 'admin') {
-            const usersTab = document.getElementById('users-tab');
-            if (usersTab) {
-                usersTab.style.display = 'block';
-            }
+        const isAdmin = this.app.currentUser && this.app.currentUser.role === 'admin';
+
+        // Tab visibility based on role
+        const transcodeTab = document.querySelector('.tab[data-tab="transcode"]');
+        const usersTab = document.getElementById('users-tab');
+        const scraperTab = document.getElementById('scraper-tab');
+
+        if (usersTab) usersTab.style.display = isAdmin ? 'block' : 'none';
+        if (transcodeTab) transcodeTab.style.display = 'block';
+        if (scraperTab) scraperTab.style.display = isAdmin ? 'block' : 'none';
+
+        // Hide global EPG settings for non-admins (it's the last source-section in tab-sources)
+        const epgDataSettings = document.querySelector('#tab-sources .source-section:last-child');
+        if (epgDataSettings && epgDataSettings.querySelector('h3')?.textContent.includes('EPG Data Settings')) {
+            epgDataSettings.style.display = isAdmin ? 'block' : 'none';
         }
 
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
+        await this.app.sourceManager.loadContentSources();
 
         // Refresh ALL player settings from server
         if (this.app.player?.settings) {

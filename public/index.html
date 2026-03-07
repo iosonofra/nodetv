@@ -86,6 +86,14 @@
             </svg></span>
           <span>Series</span>
         </a>
+        <a href="/tester.html" class="nav-link">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+              class="icon">
+              <path
+                d="M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12.5,17h-1v-4h1V17z M12.5,11h-1V7h1V11z" />
+            </svg></span>
+          <span>Stream Tester</span>
+        </a>
         <a href="#" class="nav-link" data-page="settings">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
               class="icon">
@@ -151,6 +159,11 @@
                         d="M12 5.83L15.17 9l1.41-1.41L12 3 7.41 7.59 8.83 9 12 5.83zm0 12.34L8.83 15l-1.41 1.41L12 21l4.59-4.59L15.17 15 12 18.17z" />
                     </svg></span>
                 </button>
+                <div class="sidebar-toggle-group" title="Show Hidden Channels"
+                  style="margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--color-text-muted);">
+                  <input type="checkbox" id="show-hidden" style="width: 12px; height: 12px; cursor: pointer;">
+                  <label for="show-hidden" style="cursor: pointer;">Show Hidden</label>
+                </div>
 
               </div>
             </div>
@@ -479,6 +492,7 @@
             <button class="tab" data-tab="player">Player</button>
             <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
+            <button class="tab" data-tab="scraper" id="scraper-tab" style="display:none;">Scraper</button>
             <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
           </div>
 
@@ -805,6 +819,59 @@
                   <span class="setting-label">Force Backend Proxy</span>
                   <span class="setting-hint">Route all streams through the server to bypass CORS restrictions. Enable if
                     streams don't play directly.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scraper Tab -->
+          <div id="tab-scraper" class="tab-content">
+            <div class="settings-section">
+              <div class="section-header">
+                <h3>thisnot.business Events Scraper</h3>
+                <button class="btn btn-primary" id="run-scraper">Run Scraper</button>
+              </div>
+              <p class="hint">Automated scraper to extract live event streams and keys. Results are saved to a local M3U
+                playlist and auto-synced.</p>
+
+              <div class="scraper-status-container"
+                style="margin-top: var(--space-md); padding: var(--space-md); background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
+                <div class="status-item" style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <span class="status-label" style="font-weight: 500; color: var(--color-text-secondary);">Current
+                      Status:</span>
+                    <span id="scraper-status-text" class="status-value"
+                      style="margin-left: var(--space-xs); font-weight: 600; color: var(--color-accent);">Idle</span>
+                  </div>
+                  <div id="scraper-loading-spinner" style="display: none;">
+                    <svg class="animate-spin" style="width: 1.25rem; height: 1.25rem; color: var(--color-accent);"
+                      xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                      </circle>
+                      <path style="opacity: 0.75;" fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                      </path>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="scraper-logs-container" style="margin-top: var(--space-lg);">
+                <div
+                  style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-xs);">
+                  <h4 style="margin: 0;">Live Logs</h4>
+                  <button class="btn btn-xs btn-ghost" id="clear-scraper-logs">Clear</button>
+                </div>
+                <div id="scraper-logs"
+                  style="height: 250px; overflow-y: auto; background: #0a0a0a; color: #4ade80; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.75rem; padding: var(--space-sm); border-radius: var(--radius-sm); border: 1px solid var(--color-border); line-height: 1.4;">
+                  <div class="log-entry" style="color: var(--color-text-muted);">Waiting for scraper to start...</div>
+                </div>
+              </div>
+
+              <div class="scraper-history-container" style="margin-top: var(--space-xl);">
+                <h4>Execution History</h4>
+                <div id="scraper-history-list" class="source-list" style="margin-top: var(--space-xs);">
+                  <p class="hint">No history available yet.</p>
                 </div>
               </div>
             </div>
@@ -1205,6 +1272,13 @@
       }
     })();
   </script>
+
+  <!-- Context Menu -->
+  <div id="context-menu" class="context-menu">
+    <div class="context-item" data-action="play">Play Channel</div>
+    <div class="context-item" data-action="epg">Show EPG Info</div>
+    <div class="context-item" data-action="hide">Hide Channel</div>
+  </div>
 </body>
 
 </html>

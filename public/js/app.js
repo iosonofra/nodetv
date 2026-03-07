@@ -173,7 +173,35 @@ class App {
         const initialPage = hash && this.pages[hash] ? hash : 'home';
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
+        // Background scraper status polling
+        this.startScraperStatusPolling();
+
         console.log('NodeCast TV initialized');
+    }
+
+    startScraperStatusPolling() {
+        const badge = document.getElementById('scraper-status-badge');
+        if (!badge) return;
+
+        const pollStatus = async () => {
+            try {
+                const response = await fetch('/api/scraper/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    if (status.isRunning) {
+                        badge.classList.remove('hidden');
+                    } else {
+                        badge.classList.add('hidden');
+                    }
+                }
+            } catch (err) {
+                // Silently ignore polling errors
+            }
+        };
+
+        // Poll every 30 seconds
+        pollStatus();
+        setInterval(pollStatus, 30000);
     }
 
     async checkAuth() {

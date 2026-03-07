@@ -11,6 +11,8 @@ class ScraperService {
         this.currentProcess = null;
         this.logs = [];
         this.maxLogs = 500;
+        this._autoRunTimer = null;
+        this._autoRunInterval = 60 * 60 * 1000; // 1 hour default
 
         this.dataDir = path.join(__dirname, '../../data/scraper');
         this.historyFile = path.join(this.dataDir, 'history.json');
@@ -22,10 +24,28 @@ class ScraperService {
     }
 
     getStatus() {
+        // Check playlist file info
+        let fileInfo = null;
+        if (fs.existsSync(this.playlistFile)) {
+            try {
+                const stats = fs.statSync(this.playlistFile);
+                fileInfo = {
+                    exists: true,
+                    size: stats.size,
+                    mtime: stats.mtime
+                };
+            } catch (e) {
+                fileInfo = { exists: true, error: e.message };
+            }
+        } else {
+            fileInfo = { exists: false };
+        }
+
         return {
             isRunning: this.isRunning,
             lastRun: this.lastRun,
-            history: this.getHistory()
+            history: this.getHistory(),
+            fileInfo
         };
     }
 
@@ -88,6 +108,18 @@ class ScraperService {
 
                 if (code === 0) {
                     this.addLog('[*] Scraper finished successfully.');
+
+                    // Verify output file
+                    if (fs.existsSync(this.playlistFile)) {
+                        const stats = fs.statSync(this.playlistFile);
+                        if (stats.size < 100) {
+                            this.addLog(`[WARNING] Playlist file is very small (${stats.size} bytes). Scrape might have failed.`);
+                        } else {
+                            this.addLog(`[v] Playlist file verified (${stats.size} bytes).`);
+                        }
+                    } else {
+                        this.addLog('[ERROR] Playlist file not found after successful run!');
+                    }
 
                     // Auto-register or update source
                     try {
@@ -160,6 +192,35 @@ class ScraperService {
             // Trigger initial sync
             await syncService.syncSource(newSource.id);
             this.addLog('[*] Initial sync triggered.');
+        }
+    }
+
+    startAutoRun(intervalMs = null) {
+        if (intervalMs) this._autoRunInterval = intervalMs;
+
+        if (this._autoRunTimer) {
+            clearInterval(this._autoRunTimer);
+        }
+
+        console.log(`[Scraper] Starting auto-run every ${this._autoRunInterval / 3600000} hours`);
+
+        this._autoRunTimer = setInterval(() => {
+            if (!this.isRunning) {
+                console.log('[Scraper] Triggering scheduled run...');
+                this.run().catch(err => {
+                    console.error('[Scraper] Scheduled run failed:', err);
+                });
+            } else {
+                console.log('[Scraper] Scheduled run skipped (already running)');
+            }
+        }, this._autoRunInterval);
+    }
+
+    stopAutoRun() {
+        if (this._autoRunTimer) {
+            clearInterval(this._autoRunTimer);
+            this._autoRunTimer = null;
+            console.log('[Scraper] Auto-run disabled');
         }
     }
 }

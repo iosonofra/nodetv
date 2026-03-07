@@ -555,27 +555,59 @@ class SettingsPage {
             const statusText = document.getElementById('scraper-status-text');
             const spinner = document.getElementById('scraper-loading-spinner');
             const runBtn = document.getElementById('run-scraper');
+            const fileInfoContainer = document.getElementById('scraper-file-info');
 
             if (statusText) {
-                statusText.textContent = status.status.charAt(0).toUpperCase() + status.status.slice(1);
-                statusText.style.color = status.status === 'running' ? 'var(--color-accent)' : 'var(--color-text-secondary)';
+                statusText.textContent = status.isRunning ? 'Running' : 'Idle';
+                statusText.style.color = status.isRunning ? 'var(--color-accent)' : 'var(--color-text-secondary)';
             }
 
             if (spinner) {
-                spinner.style.display = status.status === 'running' ? 'block' : 'none';
+                spinner.style.display = status.isRunning ? 'block' : 'none';
             }
 
             if (runBtn) {
-                runBtn.disabled = status.status === 'running';
+                runBtn.disabled = status.isRunning;
+            }
+
+            // Display file info
+            if (fileInfoContainer && status.fileInfo) {
+                if (status.fileInfo.exists) {
+                    const sizeKB = (status.fileInfo.size / 1024).toFixed(1);
+                    const lastUpdated = new Date(status.fileInfo.mtime).toLocaleString();
+                    fileInfoContainer.innerHTML = `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Output File:</span>
+                                <span style="font-weight: 500; font-family: monospace;">thisnotbusiness.m3u</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">File Size:</span>
+                                <span style="font-weight: 500;">${sizeKB} KB</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Last Modified:</span>
+                                <span style="font-weight: 500;">${lastUpdated}</span>
+                            </div>
+                        </div>
+                    `;
+                    fileInfoContainer.style.display = 'block';
+                } else {
+                    fileInfoContainer.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
+                    fileInfoContainer.style.display = 'block';
+                }
             }
 
             // Update history if status changed from running to idle
-            if (this._lastScraperStatus === 'running' && status.status === 'idle') {
+            const statusString = status.isRunning ? 'running' : 'idle';
+            if (this._lastScraperStatus === 'running' && statusString === 'idle') {
                 this.loadScraperHistory();
-                await this.app.sourceManager.loadSources(); // Refresh sources to show new m3u
+                if (this.app.sourceManager) {
+                    this.app.sourceManager.loadSources();
+                }
             }
 
-            this._lastScraperStatus = status.status;
+            this._lastScraperStatus = statusString;
         } catch (err) {
             console.warn('Failed to load scraper status:', err);
         }
@@ -616,15 +648,21 @@ class SettingsPage {
             }
 
             historyList.innerHTML = history.slice(0, 10).map(item => `
-                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border);">
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
-                            <div style="font-weight: 500;">${new Date(item.timestamp).toLocaleString()}</div>
+                            <div style="font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                ${new Date(item.timestamp).toLocaleString()}
+                                ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-text-muted); font-size: 0.6rem;">AUTO</span>' : ''}
+                            </div>
                             <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration}s | Channels: ${item.channelsCount || 0}</div>
                         </div>
-                        <span class="status-badge ${item.success ? 'status-online' : 'status-offline'}">
-                            ${item.success ? 'Success' : 'Failed'}
-                        </span>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                            <span class="status-badge ${item.success ? 'status-online' : 'status-offline'}">
+                                ${item.success ? 'Success' : 'Failed'}
+                            </span>
+                            ${item.error ? `<div class="hint" style="font-size: 0.65rem; color: var(--color-error); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(item.error)}">${this.escapeHtml(item.error)}</div>` : ''}
+                        </div>
                     </div>
                 </div>
             `).join('');

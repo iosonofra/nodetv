@@ -128,6 +128,10 @@ app.listen(PORT, async () => {
         // Start the server-side sync timer after initial sync
         await syncService.startSyncTimer().catch(console.error);
 
+        // Start the scraper auto-run (1 hour default)
+        const scraperService = require('./services/scraperService');
+        scraperService.startAutoRun();
+
         // Detect hardware acceleration capabilities
         try {
             const hwDetect = require('./services/hwDetect');

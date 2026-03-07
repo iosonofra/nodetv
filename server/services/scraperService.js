@@ -41,11 +41,18 @@ class ScraperService {
             fileInfo = { exists: false };
         }
 
+        let autoRunInfo = {
+            enabled: !!this._autoRunTimer,
+            intervalMs: this._autoRunInterval,
+            nextRunExpected: this._autoRunTimer ? new Date(Date.now() + this._autoRunInterval) : null
+        };
+
         return {
             isRunning: this.isRunning,
             lastRun: this.lastRun,
             history: this.getHistory(),
-            fileInfo
+            fileInfo,
+            autoRunInfo
         };
     }
 
@@ -75,9 +82,16 @@ class ScraperService {
 
         const scriptPath = path.join(__dirname, '../scraper/thisnotbusiness.js');
 
+        const startTime = Date.now();
+        const runType = process.env.SCRAPER_RUN_TYPE || 'manual';
+
         // Use the current node executable
         this.currentProcess = spawn(process.execPath, [scriptPath], {
-            env: { ...process.env, PORT: process.env.PORT || 3000 }
+            env: {
+                ...process.env,
+                PORT: process.env.PORT || 3000,
+                SCRAPER_RUN_TYPE: runType
+            }
         });
 
         this.currentProcess.stdout.on('data', (data) => {
@@ -171,6 +185,12 @@ class ScraperService {
                 this.addLog('[*] Disabled auto_sync for source to manage it via scraper.');
             }
 
+            // Ensure is_public is true for scraper source
+            if (existingSource.is_public !== true) {
+                await sources.update(existingSource.id, { is_public: true });
+                this.addLog('[*] Marked source as public.');
+            }
+
             // Trigger sync for this source
             await syncService.syncSource(existingSource.id);
             this.addLog('[*] Source sync triggered.');
@@ -191,7 +211,8 @@ class ScraperService {
                 type: 'm3u',
                 // Use absolute path for reliability
                 url: path.resolve(this.playlistFile),
-                auto_sync: false // Managed by scraper service
+                auto_sync: false, // Managed by scraper service
+                is_public: true
             }, admin.id);
 
             this.addLog(`[+] New source created (ID: ${newSource.id}).`);

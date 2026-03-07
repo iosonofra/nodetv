@@ -29,7 +29,9 @@ const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 
 async function scrape() {
-    console.log("[*] Starting thisnot.business Scraper...");
+    const startTime = Date.now();
+    const runType = process.env.SCRAPER_RUN_TYPE || 'manual';
+    console.log(`[*] Starting thisnot.business Scraper (${runType})...`);
 
     let browser;
     try {
@@ -286,28 +288,31 @@ async function scrape() {
         }
 
         // Save History
-        const runData = {
-            timestamp: new Date().toISOString(),
-            status: "Success",
-            count: m3uLines.length > 1 ? Math.floor((m3uLines.length - 1) / (m3uLines.some(l => l.includes('#KODIPROP')) ? 4 : 2)) : 0, // Approx count
-            message: `Successfully finished with ${m3uLines.length > 1 ? 'channels' : 'no channels'}`
-        };
-
-        // Real count
+        const duration = Math.floor((Date.now() - startTime) / 1000);
         let count = 0;
         for (const line of m3uLines) if (line.startsWith('#EXTINF')) count++;
-        runData.count = count;
-        runData.message = `Generated ${count} channels.`;
+
+        const runData = {
+            timestamp: new Date().toISOString(),
+            success: true,
+            type: runType,
+            duration: duration,
+            channelsCount: count,
+            message: `Generated ${count} channels.`
+        };
 
         updateHistory(runData);
 
     } catch (err) {
         console.error(`[!] Critical Error: ${err.message}`);
+        const duration = Math.floor((Date.now() - startTime) / 1000);
         updateHistory({
             timestamp: new Date().toISOString(),
-            status: "Error",
-            count: 0,
-            message: err.message
+            success: false,
+            type: runType,
+            duration: duration,
+            channelsCount: 0,
+            error: err.message
         });
         process.exit(1);
     } finally {

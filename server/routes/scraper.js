@@ -40,4 +40,17 @@ router.post('/run', async (req, res) => {
     }
 });
 
+/**
+ * Download scraper playlist
+ * GET /api/scraper/download
+ */
+router.get('/download', (req, res) => {
+    const playlistFile = scraperService.playlistFile;
+    if (require('fs').existsSync(playlistFile)) {
+        res.download(playlistFile, 'thisnotbusiness.m3u');
+    } else {
+        res.status(404).json({ error: 'Playlist file not found' });
+    }
+});
+
 module.exports = router;

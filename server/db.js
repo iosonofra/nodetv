@@ -157,7 +157,7 @@ const sources = {
   async getAll(userId = null, role = 'admin') {
     const db = await loadDb();
     if (role === 'admin' || !userId) return db.sources;
-    return db.sources.filter(s => s.user_id === userId);
+    return db.sources.filter(s => s.user_id === userId || s.is_public === true);
   },
 
   async getById(id, userId = null, role = 'admin') {

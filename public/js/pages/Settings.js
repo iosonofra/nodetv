@@ -571,11 +571,12 @@ class SettingsPage {
             }
 
             // Display file info
-            if (fileInfoContainer && status.fileInfo) {
+            const fileDetails = document.getElementById('scraper-file-details');
+            if (fileDetails && status.fileInfo) {
                 if (status.fileInfo.exists) {
                     const sizeKB = (status.fileInfo.size / 1024).toFixed(1);
                     const lastUpdated = new Date(status.fileInfo.mtime).toLocaleString();
-                    fileInfoContainer.innerHTML = `
+                    fileDetails.innerHTML = `
                         <div style="display: flex; flex-direction: column; gap: 4px;">
                             <div style="display: flex; justify-content: space-between;">
                                 <span class="hint">Output File:</span>
@@ -593,8 +594,36 @@ class SettingsPage {
                     `;
                     fileInfoContainer.style.display = 'block';
                 } else {
-                    fileInfoContainer.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
+                    fileDetails.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
                     fileInfoContainer.style.display = 'block';
+                    const actions = document.getElementById('scraper-file-actions');
+                    if (actions) actions.style.display = 'none';
+                }
+            }
+
+            // Display Cron/Auto-run info
+            const cronInfo = document.getElementById('scraper-cron-info');
+            if (cronInfo && status.autoRunInfo) {
+                const info = status.autoRunInfo;
+                if (info.enabled) {
+                    const nextRun = info.nextRunExpected ? new Date(info.nextRunExpected).toLocaleString() : 'Pending';
+                    const hours = (info.intervalMs / 3600000).toFixed(0);
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></span>
+                                <span style="color: var(--color-text-secondary);">Auto-run active: every ${hours}h</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="hint">Next run:</span>
+                                <span style="font-weight: 500; margin-left: 4px;">${nextRun}</span>
+                            </div>
+                        </div>
+                    `;
+                    cronInfo.style.display = 'block';
+                } else {
+                    cronInfo.innerHTML = '<span class="hint">Auto-run is disabled.</span>';
+                    cronInfo.style.display = 'block';
                 }
             }
 
@@ -648,18 +677,18 @@ class SettingsPage {
             }
 
             historyList.innerHTML = history.slice(0, 10).map(item => `
-                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success !== false ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <div style="font-weight: 500; display: flex; align-items: center; gap: 8px;">
                                 ${new Date(item.timestamp).toLocaleString()}
-                                ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-text-muted); font-size: 0.6rem;">AUTO</span>' : ''}
+                                ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
                             </div>
-                            <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration}s | Channels: ${item.channelsCount || 0}</div>
+                            <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                            <span class="status-badge ${item.success ? 'status-online' : 'status-offline'}">
-                                ${item.success ? 'Success' : 'Failed'}
+                            <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">
+                                ${item.success !== false ? 'Success' : 'Failed'}
                             </span>
                             ${item.error ? `<div class="hint" style="font-size: 0.65rem; color: var(--color-error); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(item.error)}">${this.escapeHtml(item.error)}</div>` : ''}
                         </div>

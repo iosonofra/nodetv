@@ -26,7 +26,7 @@ const PLAYLIST_FILE = path.join(DATA_DIR, "thisnotbusiness.m3u");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
 // Optional custom Chromium path (useful for Linux/Docker)
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "";
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 
 async function scrape() {
     console.log("[*] Starting thisnot.business Scraper...");
@@ -38,9 +38,12 @@ async function scrape() {
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         };
 
-        if (CHROMIUM_PATH && fs.existsSync(CHROMIUM_PATH)) {
+        if (fs.existsSync(CHROMIUM_PATH)) {
             launchOptions.executablePath = CHROMIUM_PATH;
             console.log(`[*] Using Chromium at: ${CHROMIUM_PATH}`);
+        } else if (CHROMIUM_PATH === "/usr/bin/chromium-browser") {
+            console.warn(`[!] Typical Alpine Chromium path (${CHROMIUM_PATH}) not found.`);
+            console.warn(`    If you are on Alpine, please install chromium: 'apk add chromium'`);
         }
 
         browser = await puppeteer.launch(launchOptions);

@@ -167,7 +167,7 @@ const sources = {
     const db = await loadDb();
     const source = db.sources.find(s => s.id === parseInt(id));
     if (!source) return null;
-    if (role !== 'admin' && userId && source.user_id !== userId) return null;
+    if (role !== 'admin' && userId && source.user_id !== userId && source.is_public !== true) return null;
     return source;
   },
 
@@ -175,7 +175,7 @@ const sources = {
     const db = await loadDb();
     const filtered = db.sources.filter(s => s.type === type && s.enabled);
     if (role === 'admin' || !userId) return filtered;
-    return filtered.filter(s => s.user_id === userId);
+    return filtered.filter(s => s.user_id === userId || s.is_public === true);
   },
 
   async create(source, userId) {

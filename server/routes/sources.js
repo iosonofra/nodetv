@@ -56,6 +56,18 @@ router.get('/:id', async (req, res) => {
         if (!source) {
             return res.status(404).json({ error: 'Source not found' });
         }
+
+        // Sanitize sensitive info for non-admins/non-owners
+        const isOwner = source.user_id === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+
+        if (!isAdmin && !isOwner) {
+            return res.json({
+                ...source,
+                password: source.password ? '••••••••' : null
+            });
+        }
+
         res.json(source);
     } catch (err) {
         console.error('Error getting source:', err);

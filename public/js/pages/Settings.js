@@ -541,11 +541,6 @@ class SettingsPage {
                 intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
             });
         }
-
-        // Start polling status if admin
-        if (this.app.currentUser?.role === 'admin') {
-            this.startScraperStatusPolling();
-        }
     }
 
     async saveScraperSettings() {
@@ -756,19 +751,23 @@ class SettingsPage {
     }
 
     startScraperStatusPolling() {
-        if (this._scraperPolling) return;
+        if (this._scraperInterval) return;
 
-        // Poll every 2 seconds
-        this._scraperPolling = setInterval(() => {
-            const isActive = document.getElementById('tab-scraper')?.classList.contains('active');
-            if (isActive) {
-                this.loadScraperStatus();
-                this.loadScraperLogs();
-            } else {
-                // Background poll less frequently just for status
-                this.loadScraperStatus();
-            }
-        }, 2000);
+        this.loadScraperStatus();
+        this.loadScraperHistory();
+        this.loadScraperLogs();
+
+        this._scraperInterval = setInterval(() => {
+            this.loadScraperStatus();
+            this.loadScraperLogs();
+        }, 5000);
+    }
+
+    stopScraperStatusPolling() {
+        if (this._scraperInterval) {
+            clearInterval(this._scraperInterval);
+            this._scraperInterval = null;
+        }
     }
 
     appendLog(message) {
@@ -847,6 +846,11 @@ class SettingsPage {
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
         await this.app.sourceManager.loadContentSources();
+
+        // Start scraper status polling if admin
+        if (isAdmin) {
+            this.startScraperStatusPolling();
+        }
 
         // Refresh ALL player settings from server
         if (this.app.player?.settings) {
@@ -975,7 +979,10 @@ class SettingsPage {
     }
 
     hide() {
-        // Page is hidden
+        // Stop scraper status polling
+        this.stopScraperStatusPolling();
+        // Reset initialization flag so settings are re-loaded next time
+        this._scraperSettingsInitialized = false;
     }
 }
 

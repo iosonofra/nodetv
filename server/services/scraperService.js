@@ -129,13 +129,26 @@ class ScraperService {
         });
 
         return new Promise((resolve, reject) => {
-            this.currentProcess.on('close', async (code) => {
+            // Add execution timeout (90 minutes) to prevent permanent lock if Puppeteer hangs
+            const TIMEOUT_MS = 90 * 60 * 1000;
+            const executionTimeout = setTimeout(() => {
+                if (this.currentProcess && this.isRunning) {
+                    this.addLog('[CRITICAL] Scraper execution timed out (90m). Killing process to prevent lock.');
+                    this.currentProcess.kill('SIGKILL');
+                    this.isRunning = false;
+                    this.currentProcess = null;
+                    reject(new Error('Scraper execution timeout'));
+                }
+            }, TIMEOUT_MS);
+
+            this.currentProcess.on('exit', async (code) => {
+                clearTimeout(executionTimeout);
                 this.isRunning = false;
                 this.currentProcess = null;
                 this.lastRun = new Date();
 
                 if (code === 0) {
-                    this.addLog('[*] Scraper finished successfully.');
+                    this.addLog('[v] Scraper completed successfully.');
 
                     // Verify output file
                     if (fs.existsSync(this.playlistFile)) {
@@ -273,21 +286,39 @@ class ScraperService {
             this.run('auto').catch(err => {
                 console.error('[Scraper] Startup run failed:', err);
             });
+
+            // Start the regular interval
+            this._autoRunTimer = setInterval(() => {
+                this._triggerScheduledRun();
+            }, intervalMs);
         } else {
             const waitTime = intervalMs - timeSinceLastRun;
             console.log(`[Scraper] Next run scheduled in ${Math.round(waitTime / 60000)} minutes`);
-        }
 
-        this._autoRunTimer = setInterval(() => {
-            if (!this.isRunning) {
-                console.log('[Scraper] Triggering scheduled run...');
-                this.run('auto').catch(err => {
-                    console.error('[Scraper] Scheduled run failed:', err);
-                });
-            } else {
-                console.log('[Scraper] Scheduled run skipped (already running)');
-            }
-        }, this._autoRunInterval);
+            // Schedule the first run after the remaining wait time
+            this._autoRunTimer = setTimeout(() => {
+                this._triggerScheduledRun();
+                // Then start the regular interval
+                this._autoRunTimer = setInterval(() => {
+                    this._triggerScheduledRun();
+                }, intervalMs);
+            }, waitTime);
+        }
+    }
+
+    /**
+     * Helper to trigger a scheduled run with logging
+     * @private
+     */
+    _triggerScheduledRun() {
+        if (!this.isRunning) {
+            console.log('[Scraper] Triggering scheduled run...');
+            this.run('auto').catch(err => {
+                console.error('[Scraper] Scheduled run failed:', err);
+            });
+        } else {
+            console.log('[Scraper] Scheduled run skipped (already running)');
+        }
     }
 
     async restartAutoRun() {

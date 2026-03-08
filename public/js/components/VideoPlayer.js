@@ -1163,7 +1163,6 @@ class VideoPlayer {
             const isPageHttps = window.location.protocol === 'https:';
             const isUrlHttp = streamUrl.startsWith('http:');
             const needsProxy = this.settings.forceProxy ||
-                (isPageHttps && isUrlHttp) ||
                 (channel && channel.useWarp) ||
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 

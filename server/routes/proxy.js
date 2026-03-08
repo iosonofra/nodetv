@@ -730,6 +730,22 @@ router.get('/stream', async (req, res) => {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            let { url, sourceId } = req.query;
+            if (!url) {
+                return res.status(400).json({ error: 'URL required' });
+            }
+
+            // Check if this source requires Warp proxy
+            let proxyAgent = null;
+            if (sourceId) {
+                const source = await sources.getById(sourceId);
+                const settingsData = await require('../db').settings.get();
+                if (source && source.useWarp && settingsData.warpProxyUrl) {
+                    console.log(`[Proxy] Using Warp proxy for source ${sourceId}: ${settingsData.warpProxyUrl}`);
+                    proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);
+                }
+            }
+
             // 1. Handle Kodi-style headers in the URL (URL|Header1=Value1&Header2=Value2)
             let finalUrl = url;
             let customHeaders = {};

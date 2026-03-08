@@ -172,10 +172,17 @@ class ShakaPlayerEngine {
         // Auto-detect Mixed Content (HTTPS page, HTTP stream)
         const isPageHttps = window.location.protocol === 'https:';
         const isUrlHttp = streamUrl.startsWith('http:');
+
+        // Only proactively proxy if user has Warp enabled OR if we're on HTTPS and stream is HTTP
+        // However, if the user says "the proxy is active even where not present", 
+        // they might be on HTTPS and we're forcing it.
+        // Let's only force it if it's REALLY needed (retry on error is safer).
+        /*
         if (isPageHttps && isUrlHttp && !forceProxy) {
             console.log('[ShakaPlayer] Mixed Content detected (HTTPS app, HTTP stream). Proactively enabling proxy.');
             forceProxy = true;
         }
+        */
 
         this.isUsingProxy = forceProxy; // Track if we're currently forcing the proxy
 
@@ -258,8 +265,20 @@ class ShakaPlayerEngine {
                                 this.currentDrmHeaders = headersObj;
                             }
 
+                            keyData = keyData.trim();
                             if (keyData.startsWith('{')) {
-                                clearKeysConfig = JSON.parse(keyData);
+                                try {
+                                    // Try to extract JSON if there's trailing junk not caught by pipe
+                                    let jsonStr = keyData;
+                                    const lastBrace = jsonStr.lastIndexOf('}');
+                                    if (lastBrace !== -1) {
+                                        jsonStr = jsonStr.substring(0, lastBrace + 1);
+                                    }
+                                    clearKeysConfig = JSON.parse(jsonStr);
+                                } catch (e) {
+                                    console.error('[ShakaPlayer] JSON.parse failed even after cleaning:', e);
+                                    throw e;
+                                }
                             } else {
                                 // Helper to decode Base64Url to Hex
                                 const base64ToHex = (str) => {
@@ -280,7 +299,7 @@ class ShakaPlayerEngine {
                                 const isHex = (str) => /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
 
                                 // Can be multiple keys separated by comma
-                                const keyPairs = licenseKey.split(',');
+                                const keyPairs = keyData.split(',');
                                 for (const pair of keyPairs) {
                                     // Format: kid:key (strip quotes and spaces)
                                     let [kid, key] = pair.trim().replace(/['"]/g, '').split(':');
@@ -353,6 +372,8 @@ class ShakaPlayerEngine {
             // 1001 = RESTRICTED_CROSS_ORIGIN (CORS), 1002 = BAD_HTTP_STATUS (e.g. 403 Forbidden)
             if ((e.code === 1001 || e.code === 1002) && !this.isUsingProxy) {
                 console.log(`[ShakaPlayer] Network Error ${e.code} detected. Retrying with backend proxy...`);
+                // Unload previous attempt to prevent Error 7000 (LOAD_INTERRUPTED)
+                await this.player.unload();
                 return this.play(channel, streamUrl, true);
             }
             this.onError(e);

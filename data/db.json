@@ -1,0 +1,91 @@
+{
+  "sources": [
+    {
+      "id": 2,
+      "type": "xtream",
+      "name": "IPTV",
+      "url": "http://8yr1cw.hhkys.com/",
+      "username": "itaa_nus7hn",
+      "password": "8fbapqe8",
+      "user_id": 1,
+      "enabled": true,
+      "created_at": "2026-03-06T21:45:15.076Z",
+      "updated_at": "2026-03-06T21:45:15.076Z"
+    },
+    {
+      "id": 6,
+      "type": "m3u",
+      "name": "IPTV",
+      "url": "http://link.stremio.dpdns.org/all.m3u",
+      "username": null,
+      "password": null,
+      "user_id": 5,
+      "enabled": true,
+      "created_at": "2026-03-06T23:20:02.942Z",
+      "updated_at": "2026-03-06T23:20:02.942Z"
+    },
+    {
+      "id": 7,
+      "name": "thisnot.business Events",
+      "type": "m3u",
+      "url": "C:\\Users\\franc\\.gemini\\antigravity\\scratch\\nodecast-tv-2.1.1\\data\\scraper\\thisnotbusiness.m3u",
+      "auto_sync": false,
+      "is_public": true,
+      "user_id": 1,
+      "enabled": true,
+      "created_at": "2026-03-07T08:03:08.084Z",
+      "updated_at": "2026-03-07T08:03:08.084Z"
+    }
+  ],
+  "hiddenItems": [],
+  "favorites": [],
+  "settings": {
+    "arrowKeysChangeChannel": true,
+    "overlayDuration": 5,
+    "defaultVolume": 80,
+    "rememberVolume": true,
+    "lastVolume": 80,
+    "autoPlayNextEpisode": false,
+    "forceProxy": false,
+    "forceTranscode": false,
+    "forceVideoTranscode": false,
+    "forceRemux": false,
+    "autoTranscode": false,
+    "streamFormat": "m3u8",
+    "epgRefreshInterval": "24",
+    "userAgentPreset": "chrome",
+    "userAgentCustom": "",
+    "hwEncoder": "auto",
+    "maxResolution": "1080p",
+    "quality": "medium",
+    "audioMixPreset": "auto",
+    "probeCacheTTL": 300,
+    "seriesProbeCacheDays": 7,
+    "upscaleEnabled": false,
+    "upscaleMethod": "hardware",
+    "upscaleTarget": "1080p",
+    "scraperAutoRun": true,
+    "scraperInterval": "1"
+  },
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "passwordHash": "$2b$10$GKSvpYLzd4gT.FiCmcIICOglqTVdTQijVNIvYqB1f7M5yL3ri5r7G",
+      "role": "admin",
+      "oidcId": null,
+      "email": null,
+      "createdAt": "2026-03-06T21:43:14.182Z"
+    },
+    {
+      "id": 5,
+      "username": "bender",
+      "passwordHash": "$2b$10$eb8bn13GBofU.p24.wsDJOWfLYlklvY/tSmMmJm3hIcNcaoToI7em",
+      "role": "viewer",
+      "oidcId": null,
+      "email": null,
+      "createdAt": "2026-03-06T23:10:57.530Z"
+    }
+  ],
+  "nextId": 8
+}

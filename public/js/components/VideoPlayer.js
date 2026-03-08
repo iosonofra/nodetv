@@ -45,7 +45,7 @@ class VideoPlayer {
             forceProxy: false,
             forceTranscode: false,
             forceRemux: false,
-            autoTranscode: true,
+            autoTranscode: false,
             streamFormat: 'm3u8',
             epgRefreshInterval: '24'
         };
@@ -1164,6 +1164,7 @@ class VideoPlayer {
             const isUrlHttp = streamUrl.startsWith('http:');
             const needsProxy = this.settings.forceProxy ||
                 (isPageHttps && isUrlHttp) ||
+                (channel && channel.useWarp) ||
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;

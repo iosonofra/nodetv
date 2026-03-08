@@ -793,10 +793,15 @@ class ChannelList {
 
         this.groups = this.groups.concat(categoryGroups);
 
+        // Find source to check warp setting
+        const source = this.sources.find(s => s.id === sourceId);
+        const useWarp = source?.useWarp || false;
+
         // Map streams to channels
         const channelList = streams.map(stream => ({
             id: `xtream_${sourceId}_${stream.stream_id}`,
             streamId: stream.stream_id,
+            useWarp,
             name: stream.name,
             tvgId: stream.epg_channel_id,
             tvgLogo: stream.stream_icon,
@@ -845,10 +850,15 @@ class ChannelList {
 
         this.groups = this.groups.concat(m3uGroups);
 
+        // Find source to check warp setting
+        const source = this.sources.find(s => s.id === sourceId);
+        const useWarp = source?.useWarp || false;
+
         // Map streams to channels
         const channelList = streams.map(stream => ({
             id: `m3u_${sourceId}_${stream.stream_id}`,
             streamId: stream.stream_id,
+            useWarp,
             name: stream.name,
             tvgId: stream.epg_channel_id,
             tvgLogo: stream.stream_icon,

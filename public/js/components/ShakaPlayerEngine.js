@@ -135,13 +135,19 @@ class ShakaPlayerEngine {
             }
         }
 
-        // Exact 1.0.0 behavior: ONLY proxy if channel explicitly uses WARP
-        if (this.currentChannel && this.currentChannel.useWarp) {
-            if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST ||
-                type === shaka.net.NetworkingEngine.RequestType.SEGMENT) {
+        // Proxy if channel explicitly uses WARP OR if we're forcing proxy for Mixed Content / CORS
+        const shouldProxy = (this.currentChannel && this.currentChannel.useWarp) || this.isUsingProxy;
+
+        if (shouldProxy) {
+            const RequestType = shaka.net.NetworkingEngine.RequestType;
+            if (type === RequestType.MANIFEST ||
+                type === RequestType.SEGMENT ||
+                type === RequestType.LICENSE) {
                 const originalUrl = request.uris[0];
-                if (originalUrl && !originalUrl.startsWith('/api/')) {
-                    request.uris[0] = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${this.currentChannel.sourceId}`;
+                // Don't proxy internal APIs or data URIs
+                if (originalUrl && !originalUrl.startsWith('/api/') && !originalUrl.startsWith('data:')) {
+                    const sourceId = this.currentChannel ? this.currentChannel.sourceId : '';
+                    request.uris[0] = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId}`;
                 }
             }
         }

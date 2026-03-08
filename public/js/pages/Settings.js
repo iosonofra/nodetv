@@ -136,7 +136,7 @@ class SettingsPage {
         if (maxResolutionSelect) maxResolutionSelect.value = s.maxResolution || '1080p';
         if (qualitySelect) qualitySelect.value = s.quality || 'medium';
         if (forceProxyToggle) forceProxyToggle.checked = s.forceProxy === true;
-        if (autoTranscodeToggle) autoTranscodeToggle.checked = s.autoTranscode !== false;
+        if (autoTranscodeToggle) autoTranscodeToggle.checked = s.autoTranscode === true;
         if (forceTranscodeToggle) forceTranscodeToggle.checked = s.forceTranscode === true;
         if (forceVideoTranscodeToggle) forceVideoTranscodeToggle.checked = s.forceVideoTranscode === true;
         if (forceRemuxToggle) forceRemuxToggle.checked = s.forceRemux || false;

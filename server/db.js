@@ -91,7 +91,7 @@ function getDefaultSettings() {
     forceTranscode: false, // Force Audio Transcode
     forceVideoTranscode: false, // Force Video Transcode
     forceRemux: false,
-    autoTranscode: true,
+    autoTranscode: false,
     streamFormat: 'm3u8',
     epgRefreshInterval: '24',
     // User-Agent settings

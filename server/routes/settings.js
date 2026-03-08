@@ -105,33 +105,38 @@ router.post('/test-warp', async (req, res) => {
         const { proxyUrl } = req.body;
         if (!proxyUrl) return res.status(400).json({ error: 'Proxy URL required' });
 
+        const fetch = require('node-fetch');
         const { SocksProxyAgent } = require('socks-proxy-agent');
-        const https = require('https');
         const agent = new SocksProxyAgent(proxyUrl);
 
-        // Try to fetch Cloudflare trace
         const startTime = Date.now();
+        // Use icanhazip.com to get the public IP of the proxy
+        const testUrl = 'https://icanhazip.com';
 
-        const testUrl = 'https://www.google.com'; // Simple test
-
-        const request = https.get(testUrl, { agent, timeout: 5000 }, (testRes) => {
-            const duration = Date.now() - startTime;
-            if (testRes.statusCode >= 200 && testRes.statusCode < 400) {
-                res.json({ success: true, duration, status: testRes.statusCode });
-            } else {
-                res.json({ success: false, error: `Proxy returned status ${testRes.statusCode}`, status: testRes.statusCode });
-            }
+        const response = await fetch(testUrl, {
+            agent,
+            timeout: 5000,
+            headers: { 'User-Agent': 'curl/7.68.0' }
         });
 
-        request.on('error', (err) => {
-            console.error('Warp test request error:', err);
-            res.json({ success: false, error: err.message });
-        });
+        const duration = Date.now() - startTime;
 
-        request.on('timeout', () => {
-            request.destroy();
-            res.json({ success: false, error: 'Connection timed out (5s)' });
-        });
+        if (response.ok) {
+            const ip = (await response.text()).trim();
+            res.json({
+                success: true,
+                duration,
+                status: response.status,
+                ip: ip,
+                message: `Connection successful! Proxy IP: ${ip}`
+            });
+        } else {
+            res.json({
+                success: false,
+                error: `Proxy returned status ${response.status}`,
+                status: response.status
+            });
+        }
 
     } catch (err) {
         console.error('Warp test failed:', err);
@@ -152,32 +157,79 @@ router.get('/warp-status', async (req, res) => {
         // 1. Check if warp-cli exists
         try {
             await execPromise('warp-cli --version');
+
+            // 2. Get status and settings
+            const [statusRes, settingsRes] = await Promise.all([
+                execPromise('warp-cli status'),
+                execPromise('warp-cli settings')
+            ]);
+
+            const statusLabel = statusRes.stdout.match(/Status update: (.*)/)?.[1] ||
+                statusRes.stdout.match(/Status: (.*)/)?.[1] ||
+                statusRes.stdout.trim();
+
+            const proxyMode = settingsRes.stdout.includes('Mode: Proxy') || settingsRes.stdout.includes('Proxy Mode');
+            const proxyPort = settingsRes.stdout.match(/Proxy port: (\d+)/)?.[1] || '40001';
+
+            return res.json({
+                installed: true,
+                method: 'warp-cli',
+                status: statusLabel,
+                mode: proxyMode ? 'Proxy' : 'Warp',
+                port: proxyPort
+            });
         } catch (e) {
-            return res.json({ installed: false, error: 'warp-cli not found' });
+            // warp-cli failed, try Docker
+            try {
+                const { stdout: dockerInspect } = await execPromise('docker inspect warp-proxy');
+                const info = JSON.parse(dockerInspect)[0];
+                const isRunning = info.State.Running;
+
+                // Try to get port from config if possible, fallback to 40001
+                const portMap = info.HostConfig.PortBindings;
+                let port = '40001';
+                if (portMap) {
+                    const firstKey = Object.keys(portMap)[0];
+                    if (firstKey) port = portMap[firstKey][0].HostPort;
+                }
+
+                return res.json({
+                    installed: true,
+                    method: 'docker',
+                    status: isRunning ? 'Connected (Docker)' : 'Stopped (Docker)',
+                    mode: 'Proxy',
+                    port: port
+                });
+            } catch (dockerErr) {
+                return res.json({ installed: false, error: 'warp-cli not found and warp-proxy container not found' });
+            }
         }
-
-        // 2. Get status and settings
-        const [statusRes, settingsRes] = await Promise.all([
-            execPromise('warp-cli status'),
-            execPromise('warp-cli settings')
-        ]);
-
-        const statusLabel = statusRes.stdout.match(/Status update: (.*)/)?.[1] ||
-            statusRes.stdout.match(/Status: (.*)/)?.[1] ||
-            statusRes.stdout.trim();
-
-        const proxyMode = settingsRes.stdout.includes('Mode: Proxy') || settingsRes.stdout.includes('Proxy Mode');
-        const proxyPort = settingsRes.stdout.match(/Proxy port: (\d+)/)?.[1] || '40001';
-
-        res.json({
-            installed: true,
-            status: statusLabel,
-            mode: proxyMode ? 'Proxy' : 'Warp',
-            port: proxyPort
-        });
     } catch (err) {
         console.error('Error getting Warp status:', err);
         res.status(500).json({ installed: true, error: err.message });
+    }
+});
+
+/**
+ * Get Warp / Docker logs
+ * GET /api/settings/warp-logs
+ */
+router.get('/warp-logs', async (req, res) => {
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+
+    try {
+        // Try Docker first as it's the current solution
+        try {
+            const { stdout } = await execPromise('docker logs --tail 100 warp-proxy');
+            return res.json({ logs: stdout });
+        } catch (e) {
+            // Fallback to searching for logs elsewhere or error
+            res.json({ logs: 'No Docker logs found for warp-proxy container.' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

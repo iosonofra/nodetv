@@ -631,7 +631,7 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
         let proxyAgent = null;
         if (sourceId) {
             const source = await sources.getById(sourceId);
-            const settingsData = await require('../db').getSettings();
+            const settingsData = await require('../db').settings.get();
             if (source && source.useWarp && settingsData.warpProxyUrl) {
                 console.log(`[Proxy] Using Warp proxy for DRM request for source ${sourceId}`);
                 proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);
@@ -711,7 +711,7 @@ router.get('/stream', async (req, res) => {
             let proxyAgent = null;
             if (sourceId) {
                 const source = await sources.getById(sourceId);
-                const settings = await require('../db').getSettings();
+                const settings = await require('../db').settings.get();
                 if (source && source.useWarp && settings.warpProxyUrl) {
                     console.log(`[Proxy] Using Warp proxy for source ${sourceId}: ${settings.warpProxyUrl}`);
                     proxyAgent = new SocksProxyAgent(settings.warpProxyUrl);

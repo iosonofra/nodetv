@@ -113,6 +113,10 @@ class SettingsPage {
         const warpProxyUrlInput = document.getElementById('setting-warp-proxy-url');
         const testWarpBtn = document.getElementById('test-warp-btn');
         const setupWarpBtn = document.getElementById('setup-warp-btn');
+        const viewWarpLogsBtn = document.getElementById('view-warp-logs-btn');
+        const closeWarpLogsBtn = document.getElementById('close-warp-logs');
+        const warpLogsWrapper = document.getElementById('warp-logs-wrapper');
+        const warpLogsContainer = document.getElementById('warp-logs');
 
         // User-Agent (Transcoding tab versions)
         const userAgentSelect = document.getElementById('setting-user-agent-tc');
@@ -300,6 +304,28 @@ class SettingsPage {
             }
         });
 
+        viewWarpLogsBtn?.addEventListener('click', async () => {
+            if (warpLogsWrapper) {
+                warpLogsWrapper.style.display = 'block';
+                if (warpLogsContainer) warpLogsContainer.textContent = 'Fetching logs...';
+
+                try {
+                    const result = await API.settings.getWarpLogs();
+                    if (warpLogsContainer) {
+                        warpLogsContainer.textContent = result.logs || 'No logs available.';
+                        // Scroll to bottom
+                        warpLogsContainer.scrollTop = warpLogsContainer.scrollHeight;
+                    }
+                } catch (err) {
+                    if (warpLogsContainer) warpLogsContainer.textContent = 'Error fetching logs: ' + err.message;
+                }
+            }
+        });
+
+        closeWarpLogsBtn?.addEventListener('click', () => {
+            if (warpLogsWrapper) warpLogsWrapper.style.display = 'none';
+        });
+
         // Initialize status check
         this.updateWarpStatus();
 
@@ -337,15 +363,16 @@ class SettingsPage {
             container.style.display = 'flex';
 
             if (!status.installed) {
-                text.textContent = 'warp-cli not found on this server.';
-                badge.textContent = 'NOT INSTALLED';
+                text.textContent = 'Warp not detected (neither CLI nor Docker).';
+                badge.textContent = 'NOT FOUND';
                 badge.className = 'badge badge-error';
                 return;
             }
 
-            text.textContent = `Mode: ${status.mode} | Port: ${status.port} | Status: ${status.status}`;
+            const methodStr = status.method === 'docker' ? '[Docker]' : '[CLI]';
+            text.textContent = `${methodStr} Mode: ${status.mode} | Port: ${status.port} | Status: ${status.status}`;
 
-            const isOk = status.status.includes('Connected') && status.mode === 'Proxy';
+            const isOk = status.status.includes('Connected') || status.status.includes('Running');
             badge.textContent = status.status.toUpperCase();
             badge.className = isOk ? 'badge badge-success' : 'badge badge-warning';
 

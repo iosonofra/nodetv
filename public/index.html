@@ -845,8 +845,19 @@
                   <input type="text" id="setting-warp-proxy-url" class="form-input"
                     placeholder="socks5://127.0.0.1:40001" style="width: 250px;">
                   <button class="btn btn-secondary" id="test-warp-btn" title="Test Warp Connection">Test</button>
+                  <button class="btn btn-ghost" id="view-warp-logs-btn">View Logs</button>
                   <button class="btn btn-primary" id="setup-warp-btn" title="Auto-Configure Warp for Proxy Mode">Setup /
                     Fix Warp</button>
+                </div>
+              </div>
+              <div id="warp-logs-wrapper" style="display: none; margin-top: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                  <span class="hint">Warp Logs (Last 100 lines)</span>
+                  <button class="btn btn-xs btn-ghost" id="close-warp-logs">Close</button>
+                </div>
+                <div id="warp-logs"
+                  style="height: 200px; overflow-y: auto; background: #0a0a0a; color: #4ade80; font-family: monospace; font-size: 0.7rem; padding: 10px; border-radius: 4px; border: 1px solid var(--color-border); white-space: pre-wrap;">
+                  Loading logs...
                 </div>
               </div>
               <div class="setting-item" id="warp-status-container"

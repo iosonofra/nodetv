@@ -80,7 +80,7 @@ router.get('/:id', async (req, res) => {
 // Create source
 router.post('/', async (req, res) => {
     try {
-        const { type, name, url, username, password } = req.body;
+        const { type, name, url, username, password, useWarp } = req.body;
 
         if (!type || !name || !url) {
             return res.status(400).json({ error: 'Type, name, and URL are required' });
@@ -90,7 +90,18 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Invalid source type' });
         }
 
-        const source = await sources.create({ type, name, url, username, password }, req.user.id);
+        // Sanitize path if it looks like an absolute Windows path
+        let sanitizedUrl = url;
+        if (sanitizedUrl && sanitizedUrl.includes('\\') && sanitizedUrl.includes('data')) {
+            const parts = sanitizedUrl.split(/[\\/]/);
+            const dataIndex = parts.indexOf('data');
+            if (dataIndex !== -1) {
+                sanitizedUrl = parts.slice(dataIndex).join('/');
+                console.log(`[Sources] Sanitized absolute path to: ${sanitizedUrl}`);
+            }
+        }
+
+        const source = await sources.create({ type, name, url: sanitizedUrl, username, password, useWarp: !!useWarp }, req.user.id);
         // Trigger Sync
         syncService.syncSource(source.id).catch(console.error);
         res.status(201).json(source);
@@ -108,13 +119,28 @@ router.put('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Source not found or unauthorized' });
         }
 
-        const { name, url, username, password } = req.body;
-        const updated = await sources.update(req.params.id, {
+        const { name, url, username, password, useWarp } = req.body;
+
+        // Sanitize path if it looks like an absolute Windows path
+        let sanitizedUrl = url;
+        if (sanitizedUrl && sanitizedUrl.includes('\\') && sanitizedUrl.includes('data')) {
+            const parts = sanitizedUrl.split(/[\\/]/);
+            const dataIndex = parts.indexOf('data');
+            if (dataIndex !== -1) {
+                sanitizedUrl = parts.slice(dataIndex).join('/');
+                console.log(`[Sources] Sanitized absolute path during update to: ${sanitizedUrl}`);
+            }
+        }
+
+        const updatedData = {
             name: name || existing.name,
-            url: url || existing.url,
+            url: sanitizedUrl || existing.url,
             username: username !== undefined ? username : existing.username,
-            password: password !== undefined ? password : existing.password
-        }, req.user.id, req.user.role);
+            password: password !== undefined ? password : existing.password,
+            useWarp: useWarp !== undefined ? !!useWarp : existing.useWarp
+        };
+
+        const updated = await sources.update(req.params.id, updatedData, req.user.id, req.user.role);
         // Trigger Sync (if critical fields changed? safely just trigger it)
         syncService.syncSource(parseInt(req.params.id)).catch(console.error);
         res.json(updated);

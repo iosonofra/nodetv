@@ -139,5 +139,75 @@ router.post('/test-warp', async (req, res) => {
     }
 });
 
+/**
+ * Get Warp CLI status
+ * GET /api/settings/warp-status
+ */
+router.get('/warp-status', async (req, res) => {
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+
+    try {
+        // 1. Check if warp-cli exists
+        try {
+            await execPromise('warp-cli --version');
+        } catch (e) {
+            return res.json({ installed: false, error: 'warp-cli not found' });
+        }
+
+        // 2. Get status and settings
+        const [statusRes, settingsRes] = await Promise.all([
+            execPromise('warp-cli status'),
+            execPromise('warp-cli settings')
+        ]);
+
+        const statusLabel = statusRes.stdout.match(/Status update: (.*)/)?.[1] ||
+            statusRes.stdout.match(/Status: (.*)/)?.[1] ||
+            statusRes.stdout.trim();
+
+        const proxyMode = settingsRes.stdout.includes('Mode: Proxy') || settingsRes.stdout.includes('Proxy Mode');
+        const proxyPort = settingsRes.stdout.match(/Proxy port: (\d+)/)?.[1] || '40001';
+
+        res.json({
+            installed: true,
+            status: statusLabel,
+            mode: proxyMode ? 'Proxy' : 'Warp',
+            port: proxyPort
+        });
+    } catch (err) {
+        console.error('Error getting Warp status:', err);
+        res.status(500).json({ installed: true, error: err.message });
+    }
+});
+
+/**
+ * Configure Warp for Proxy Mode
+ * POST /api/settings/warp-setup
+ */
+router.post('/warp-setup', async (req, res) => {
+    const { exec } = require('child_process');
+    const util = require('util');
+    const execPromise = util.promisify(exec);
+
+    try {
+        console.log('[WarpSetup] Configuring Warp...');
+
+        // 1. Set mode to proxy
+        await execPromise('warp-cli set-mode proxy');
+
+        // 2. Set proxy port to 40001
+        await execPromise('warp-cli set-proxy-port 40001');
+
+        // 3. Connect
+        await execPromise('warp-cli connect');
+
+        res.json({ success: true, message: 'Warp configured for proxy mode on port 40001' });
+    } catch (err) {
+        console.error('Error during Warp setup:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;
 

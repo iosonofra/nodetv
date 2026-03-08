@@ -26,6 +26,7 @@
         "puppeteer-extra-plugin-stealth": "^2.11.2",
         "sax": "^1.4.3",
         "socks-proxy-agent": "^8.0.5",
+        "whatwg-url": "^16.0.1",
         "xml2js": "^0.6.2"
     },
     "optionalDependencies": {

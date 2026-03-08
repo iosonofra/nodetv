@@ -204,18 +204,29 @@ class ScraperService {
         const existingSource = allSources.find(s => s.name === 'thisnot.business Events');
 
         if (existingSource) {
-            this.addLog(`[*] Updating existing source (ID: ${existingSource.id})...`);
+            const expectedUrl = 'data/scraper/thisnotbusiness.m3u';
+            const updates = {};
+
+            // Update URL if it's an absolute path or different (portable fix)
+            if (existingSource.url !== expectedUrl) {
+                updates.url = expectedUrl;
+                this.addLog(`[*] Updating source URL to relative path: ${expectedUrl}`);
+            }
 
             // Ensure auto_sync is false to prevent global sync timer from interfering
             if (existingSource.auto_sync === true || existingSource.auto_sync === 1) {
-                await sources.update(existingSource.id, { auto_sync: false });
+                updates.auto_sync = false;
                 this.addLog('[*] Disabled auto_sync for source to manage it via scraper.');
             }
 
             // Ensure is_public is true for scraper source
             if (existingSource.is_public !== true) {
-                await sources.update(existingSource.id, { is_public: true });
+                updates.is_public = true;
                 this.addLog('[*] Marked source as public.');
+            }
+
+            if (Object.keys(updates).length > 0) {
+                await sources.update(existingSource.id, updates);
             }
 
             // Trigger sync for this source
@@ -236,8 +247,8 @@ class ScraperService {
             const newSource = await sources.create({
                 name: 'thisnot.business Events',
                 type: 'm3u',
-                // Use absolute path for reliability
-                url: path.resolve(this.playlistFile),
+                // Use relative path for portability between Windows/Linux
+                url: 'data/scraper/thisnotbusiness.m3u',
                 auto_sync: false, // Managed by scraper service
                 is_public: true
             }, admin.id);

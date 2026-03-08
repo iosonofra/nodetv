@@ -836,15 +836,27 @@
                 </div>
               </div>
               <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
+                <div class="setting-info">
                   <span class="setting-label">Global Warp Proxy URL</span>
                   <span class="setting-hint">SOCKS5 proxy address for Cloudflare Warp (e.g.
                     socks5://127.0.0.1:40001).</span>
                 </div>
-                <div class="setting-action" style="display: flex; gap: 8px; align-items: center;">
+                <div class="setting-action" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                   <input type="text" id="setting-warp-proxy-url" class="form-input"
                     placeholder="socks5://127.0.0.1:40001" style="width: 250px;">
                   <button class="btn btn-secondary" id="test-warp-btn" title="Test Warp Connection">Test</button>
+                  <button class="btn btn-primary" id="setup-warp-btn" title="Auto-Configure Warp for Proxy Mode">Setup /
+                    Fix Warp</button>
+                </div>
+              </div>
+              <div class="setting-item" id="warp-status-container"
+                style="display: none; border-top: 1px dashed var(--color-border); padding-top: 12px; margin-top: 4px;">
+                <div class="setting-info">
+                  <span class="setting-label">Local Warp Service Status</span>
+                  <span id="warp-status-text" class="setting-hint">Checking...</span>
+                </div>
+                <div class="setting-action">
+                  <span id="warp-status-badge" class="badge">N/A</span>
                 </div>
               </div>
             </div>

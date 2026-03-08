@@ -166,7 +166,9 @@ const API = {
         update: (data) => API.request('PUT', '/settings', data),
         reset: () => API.request('DELETE', '/settings'),
         getDefaults: () => API.request('GET', '/settings/defaults'),
-        testWarp: (proxyUrl) => API.request('POST', '/settings/test-warp', { proxyUrl })
+        testWarp: (proxyUrl) => API.request('POST', '/settings/test-warp', { proxyUrl }),
+        getWarpStatus: () => API.request('GET', '/settings/warp-status'),
+        setupWarp: () => API.request('POST', '/settings/warp-setup')
     },
 
     // Users (admin only)

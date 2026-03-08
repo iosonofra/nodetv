@@ -112,6 +112,7 @@ class SettingsPage {
         const streamFormatSelect = document.getElementById('setting-stream-format-tc');
         const warpProxyUrlInput = document.getElementById('setting-warp-proxy-url');
         const testWarpBtn = document.getElementById('test-warp-btn');
+        const setupWarpBtn = document.getElementById('setup-warp-btn');
 
         // User-Agent (Transcoding tab versions)
         const userAgentSelect = document.getElementById('setting-user-agent-tc');
@@ -265,8 +266,42 @@ class SettingsPage {
             } finally {
                 testWarpBtn.disabled = false;
                 testWarpBtn.textContent = 'Test';
+                this.updateWarpStatus();
             }
         });
+
+        setupWarpBtn?.addEventListener('click', async () => {
+            if (!confirm('This will attempt to configure Warp for Proxy Mode on port 40001. Proceed?')) {
+                return;
+            }
+
+            setupWarpBtn.disabled = true;
+            setupWarpBtn.textContent = 'Configuring...';
+
+            try {
+                const result = await API.settings.setupWarp();
+                if (result.success) {
+                    alert('Warp setup successful!\n\n' + result.message);
+                    // Update the URL input if it was empty
+                    if (!warpProxyUrlInput.value) {
+                        warpProxyUrlInput.value = 'socks5://127.0.0.1:40001';
+                        this.app.player.settings.warpProxyUrl = 'socks5://127.0.0.1:40001';
+                        this.app.player.saveSettings();
+                    }
+                } else {
+                    alert('Warp setup failed: ' + result.error);
+                }
+            } catch (err) {
+                alert('Error during Warp setup: ' + err.message);
+            } finally {
+                setupWarpBtn.disabled = false;
+                setupWarpBtn.textContent = 'Setup / Fix Warp';
+                this.updateWarpStatus();
+            }
+        });
+
+        // Initialize status check
+        this.updateWarpStatus();
 
         // User-Agent handlers
         const toggleCustomInput = () => {
@@ -285,6 +320,39 @@ class SettingsPage {
             this.app.player.settings.userAgentCustom = userAgentCustomInput.value;
             this.app.player.saveSettings();
         });
+    }
+
+    /**
+     * Check local Warp service status
+     */
+    async updateWarpStatus() {
+        const container = document.getElementById('warp-status-container');
+        const text = document.getElementById('warp-status-text');
+        const badge = document.getElementById('warp-status-badge');
+
+        if (!container || !text || !badge) return;
+
+        try {
+            const status = await API.settings.getWarpStatus();
+            container.style.display = 'flex';
+
+            if (!status.installed) {
+                text.textContent = 'warp-cli not found on this server.';
+                badge.textContent = 'NOT INSTALLED';
+                badge.className = 'badge badge-error';
+                return;
+            }
+
+            text.textContent = `Mode: ${status.mode} | Port: ${status.port} | Status: ${status.status}`;
+
+            const isOk = status.status.includes('Connected') && status.mode === 'Proxy';
+            badge.textContent = status.status.toUpperCase();
+            badge.className = isOk ? 'badge badge-success' : 'badge badge-warning';
+
+        } catch (err) {
+            console.warn('[Settings] Failed to fetch Warp status:', err);
+            container.style.display = 'none';
+        }
     }
 
     /**

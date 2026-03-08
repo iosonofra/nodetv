@@ -111,7 +111,9 @@ function getDefaultSettings() {
     upscaleTarget: '1080p',       // 1080p | 4k | 720p
     // Scraper settings
     scraperAutoRun: true,
-    scraperInterval: '1'          // hours
+    scraperInterval: '1',          // hours
+    // Warp Settings
+    warpProxyUrl: 'socks5://127.0.0.1:40001'
   };
 }
 
@@ -186,6 +188,7 @@ const sources = {
       ...source,
       user_id: userId,
       enabled: true,
+      useWarp: !!source.useWarp,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };

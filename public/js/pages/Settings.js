@@ -110,6 +110,7 @@ class SettingsPage {
         const forceVideoTranscodeToggle = document.getElementById('setting-force-video-transcode-tc');
         const forceRemuxToggle = document.getElementById('setting-force-remux-tc');
         const streamFormatSelect = document.getElementById('setting-stream-format-tc');
+        const warpProxyUrlInput = document.getElementById('setting-warp-proxy-url');
 
         // User-Agent (Transcoding tab versions)
         const userAgentSelect = document.getElementById('setting-user-agent-tc');
@@ -139,6 +140,7 @@ class SettingsPage {
         if (customUaContainer) {
             customUaContainer.style.display = userAgentSelect?.value === 'custom' ? 'flex' : 'none';
         }
+        if (warpProxyUrlInput) warpProxyUrlInput.value = s.warpProxyUrl || '';
 
         // Event listeners for encoder settings
         hwEncoderSelect?.addEventListener('change', () => {
@@ -232,6 +234,11 @@ class SettingsPage {
 
         streamFormatSelect?.addEventListener('change', () => {
             this.app.player.settings.streamFormat = streamFormatSelect.value;
+            this.app.player.saveSettings();
+        });
+
+        warpProxyUrlInput?.addEventListener('change', () => {
+            this.app.player.settings.warpProxyUrl = warpProxyUrlInput.value;
             this.app.player.saveSettings();
         });
 

@@ -1167,8 +1167,8 @@ class VideoPlayer {
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
-            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
-            console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp });
+            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId) : streamUrl;
+            console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp, sourceId: channel.sourceId });
 
 
             // Detect if this is likely an HLS stream (has .m3u8 in URL)
@@ -1189,7 +1189,7 @@ class VideoPlayer {
                 console.log('[Player] Force Remux enabled. Routing through FFmpeg remux...');
                 console.log('[Player] Stream type:', isRawTs ? 'Raw TS' : 'Extension-less (assumed TS)');
                 this.updateTranscodeStatus('remuxing', 'Remux (Force)');
-                const remuxUrl = this.getRemuxUrl(streamUrl);
+                const remuxUrl = this.getRemuxUrl(streamUrl, channel.sourceId);
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
                     if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
@@ -1246,7 +1246,7 @@ class VideoPlayer {
                         if (isCorsLikely && !this.isUsingProxy && !isLocalApi) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
-                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl));
+                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId));
                             this.hls.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             // Fatal media error - try recovery with cooldown
@@ -1288,7 +1288,7 @@ class VideoPlayer {
                     console.log('Autoplay prevented, trying proxy if CORS error:', e);
                     if (!this.isUsingProxy) {
                         this.isUsingProxy = true;
-                        this.video.src = this.getProxiedUrl(streamUrl);
+                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId);
                         this.video.play().catch(err => {
                             if (err.name !== 'AbortError') console.error('Proxy play failed:', err);
                         });
@@ -1488,23 +1488,29 @@ class VideoPlayer {
     /**
      * Get proxied URL for a stream
      */
-    getProxiedUrl(url) {
-        return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+    getProxiedUrl(url, sourceId) {
+        let proxiedUrl = `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+        if (sourceId) proxiedUrl += `&sourceId=${sourceId}`;
+        return proxiedUrl;
     }
 
     /**
      * Get transcoded URL for a stream (audio transcoding for browser compatibility)
      */
-    getTranscodeUrl(url) {
-        return `/api/transcode?url=${encodeURIComponent(url)}`;
+    getTranscodeUrl(url, sourceId) {
+        let transcodeUrl = `/api/transcode?url=${encodeURIComponent(url)}`;
+        if (sourceId) transcodeUrl += `&sourceId=${sourceId}`;
+        return transcodeUrl;
     }
 
     /**
      * Get remuxed URL for a stream (container conversion only, no re-encoding)
      * Used for raw .ts streams that browsers can't play directly
      */
-    getRemuxUrl(url) {
-        return `/api/remux?url=${encodeURIComponent(url)}`;
+    getRemuxUrl(url, sourceId) {
+        let remuxUrl = `/api/remux?url=${encodeURIComponent(url)}`;
+        if (sourceId) remuxUrl += `&sourceId=${sourceId}`;
+        return remuxUrl;
     }
 
     /**

@@ -1,14 +1,16 @@
 /**
  * Xtream Codes API v2 Client
  * Handles authentication and API calls to Xtream servers
- */
+    */
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 class XtreamApi {
-    constructor(baseUrl, username, password) {
+    constructor(baseUrl, username, password, proxyUrl = null) {
         // Clean up base URL
         this.baseUrl = baseUrl.replace(/\/+$/, '');
         this.username = username;
         this.password = password;
+        this.proxyUrl = proxyUrl;
     }
 
     /**
@@ -34,7 +36,21 @@ class XtreamApi {
      */
     async request(action, params = {}) {
         const url = this.buildApiUrl(action, params);
-        const response = await fetch(url);
+
+        let fetchOptions = {};
+        if (this.proxyUrl) {
+            console.log(`[XtreamApi] Using proxy: ${this.proxyUrl}`);
+            const agent = new SocksProxyAgent(this.proxyUrl);
+            // Note: For native fetch in Node 18, we need to use a library or dispatcher.
+            // However, we can use a simpler approach: node-fetch or axios would be easier,
+            // but we'll use a helper or switch the fetch implementation if needed.
+            // For now, we'll try to use the agent if the fetch implementation supports it
+            // (e.g. if the user has node-fetch installed globally or similar)
+            // or we'll wrap it.
+            fetchOptions.agent = agent;
+        }
+
+        const response = await fetch(url, fetchOptions);
         if (!response.ok) {
             throw new Error(`Xtream API error: ${response.status} ${response.statusText}`);
         }
@@ -146,8 +162,9 @@ class XtreamApi {
 /**
  * Factory function to create API instance from source
  */
-function createFromSource(source) {
-    return new XtreamApi(source.url, source.username, source.password);
+function createFromSource(source, settings = null) {
+    const proxyUrl = (source.useWarp && settings) ? settings.warpProxyUrl : null;
+    return new XtreamApi(source.url, source.username, source.password, proxyUrl);
 }
 
 /**

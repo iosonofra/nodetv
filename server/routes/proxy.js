@@ -13,6 +13,7 @@ const { spawn } = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 // Conditional auth middleware: allow public access for streaming/DRM used by video players
 router.use((req, res, next) => {
@@ -686,9 +687,20 @@ router.get('/stream', async (req, res) => {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            let { url } = req.query;
+            let { url, sourceId } = req.query;
             if (!url) {
                 return res.status(400).json({ error: 'URL required' });
+            }
+
+            // Check if this source requires Warp proxy
+            let proxyAgent = null;
+            if (sourceId) {
+                const source = await sources.getById(sourceId);
+                const settings = await require('../db').getSettings();
+                if (source && source.useWarp && settings.warpProxyUrl) {
+                    console.log(`[Proxy] Using Warp proxy for source ${sourceId}: ${settings.warpProxyUrl}`);
+                    proxyAgent = new SocksProxyAgent(settings.warpProxyUrl);
+                }
             }
 
             // Forward some headers to be more "transparent" back to the origin
@@ -724,7 +736,12 @@ router.get('/stream', async (req, res) => {
                 headers['Range'] = rangeHeader;
             }
 
-            const response = await fetch(url, { headers });
+            const fetchOptions = { headers };
+            if (proxyAgent) {
+                fetchOptions.agent = proxyAgent;
+            }
+
+            const response = await fetch(url, fetchOptions);
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {

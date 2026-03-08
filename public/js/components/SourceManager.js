@@ -135,7 +135,10 @@ class SourceManager {
       <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
-          <div class="source-name">${source.name}</div>
+          <div class="source-name">
+            ${source.name}
+            ${source.useWarp ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-accent); border: 1px solid var(--color-accent-dim); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px; margin-left: 8px;">WARP</span>' : ''}
+          </div>
           <div class="source-url">${source.url}</div>
         </div>
         <div class="source-actions">
@@ -239,6 +242,19 @@ class SourceManager {
       </div>
     `;
 
+        const warpField = `
+      <div class="form-group setting-item">
+        <label class="setting-toggle">
+          <input type="checkbox" id="source-use-warp" ${source.useWarp ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+        <div class="setting-info">
+          <span class="setting-label">Route through Warp</span>
+          <span class="setting-hint">Route API and stream requests for this source through Cloudflare Warp proxy.</span>
+        </div>
+      </div>
+    `;
+
         if (type === 'xtream') {
             return `
         ${nameField}
@@ -252,7 +268,12 @@ class SourceManager {
           <input type="password" id="source-password" class="form-input" 
                  value="${source.password && !source.password.includes('•') ? source.password : ''}">
         </div>
+        ${warpField}
       `;
+        }
+
+        if (type === 'm3u') {
+            return nameField + urlField + warpField;
         }
 
         return nameField + urlField;
@@ -266,6 +287,7 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim() || null;
         const password = document.getElementById('source-password')?.value.trim() || null;
+        const useWarp = document.getElementById('source-use-warp')?.checked || false;
 
         if (!name || !url) {
             alert('Name and URL are required');
@@ -295,7 +317,7 @@ class SourceManager {
                 }
             }
 
-            await API.sources.create({ type, name, url, username, password });
+            await API.sources.create({ type, name, url, username, password, useWarp });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
             await this.loadContentSources();
@@ -318,6 +340,7 @@ class SourceManager {
         const url = document.getElementById('source-url').value.trim();
         const username = document.getElementById('source-username')?.value.trim();
         const password = document.getElementById('source-password')?.value.trim();
+        const useWarp = document.getElementById('source-use-warp')?.checked || false;
 
         if (!name || !url) {
             alert('Name and URL are required');
@@ -325,7 +348,7 @@ class SourceManager {
         }
 
         try {
-            const data = { name, url };
+            const data = { name, url, useWarp };
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;

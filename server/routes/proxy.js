@@ -16,6 +16,9 @@ const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
 
+// Global HTTPS agent to ignore certificate errors for upstream media sources
+const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+
 // Conditional auth middleware: allow public access for streaming/DRM used by video players
 router.use((req, res, next) => {
     const publicRoutes = ['/stream', '/drm', '/image'];
@@ -692,11 +695,9 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
         const fetchOptions = {
             method: 'POST',
             headers: headers,
-            body: req.body // Raw binary payload from Shaka
+            body: req.body, // Raw binary payload from Shaka
+            agent: proxyAgent || globalHttpsAgent
         };
-        if (proxyAgent) {
-            fetchOptions.agent = proxyAgent;
-        }
 
         const response = await fetch(finalUrl, fetchOptions);
 
@@ -742,7 +743,9 @@ router.get('/stream', async (req, res) => {
                 const settingsData = await require('../db').settings.get();
                 if (source && source.useWarp && settingsData.warpProxyUrl) {
                     console.log(`[Proxy] Using Warp proxy for source ${sourceId}: ${settingsData.warpProxyUrl}`);
-                    proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);
+                    proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl, {
+                        tls: { rejectUnauthorized: false }
+                    });
                 }
             }
 
@@ -821,10 +824,10 @@ router.get('/stream', async (req, res) => {
                 headers['Range'] = rangeHeader;
             }
 
-            const fetchOptions = { headers };
-            if (proxyAgent) {
-                fetchOptions.agent = proxyAgent;
-            }
+            const fetchOptions = {
+                headers,
+                agent: proxyAgent || globalHttpsAgent
+            };
 
             const response = await fetch(finalUrl, fetchOptions);
 
@@ -1007,8 +1010,11 @@ router.get('/image', async (req, res) => {
             const source = await sources.getById(sourceId);
             const settingsData = await require('../db').settings.get();
             if (source && source.useWarp && settingsData.warpProxyUrl) {
-                console.log(`[Proxy] Using Warp proxy for DRM request for source ${sourceId}`);
-                proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);
+                console.log(`[Proxy] Using Warp proxy for image request for source ${sourceId}`);
+                // Version 8.x of socks-proxy-agent uses TLS options in constructor
+                proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl, {
+                    tls: { rejectUnauthorized: false }
+                });
             }
         }
 
@@ -1019,10 +1025,10 @@ router.get('/image', async (req, res) => {
             'Referer': origin + '/'
         };
 
-        const fetchOptions = { headers };
-        if (proxyAgent) {
-            fetchOptions.agent = proxyAgent;
-        }
+        const fetchOptions = {
+            headers,
+            agent: proxyAgent || globalHttpsAgent
+        };
 
         const response = await fetch(url, fetchOptions);
 

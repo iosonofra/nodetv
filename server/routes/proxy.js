@@ -16,8 +16,9 @@ const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
 
-// Global HTTPS agent to ignore certificate errors for upstream media sources
+// Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+const globalHttpAgent = new http.Agent();
 
 // Conditional auth middleware: allow public access for streaming/DRM used by video players
 router.use((req, res, next) => {
@@ -696,7 +697,7 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
             method: 'POST',
             headers: headers,
             body: req.body, // Raw binary payload from Shaka
-            agent: proxyAgent || globalHttpsAgent
+            agent: proxyAgent || (url.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
         };
 
         const response = await fetch(finalUrl, fetchOptions);
@@ -826,7 +827,7 @@ router.get('/stream', async (req, res) => {
 
             const fetchOptions = {
                 headers,
-                agent: proxyAgent || globalHttpsAgent
+                agent: proxyAgent || (finalUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
             };
 
             const response = await fetch(finalUrl, fetchOptions);
@@ -1027,7 +1028,7 @@ router.get('/image', async (req, res) => {
 
         const fetchOptions = {
             headers,
-            agent: proxyAgent || globalHttpsAgent
+            agent: proxyAgent || (url.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
         };
 
         const response = await fetch(url, fetchOptions);

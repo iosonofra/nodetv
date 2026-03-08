@@ -85,7 +85,16 @@
       "oidcId": null,
       "email": null,
       "createdAt": "2026-03-06T23:10:57.530Z"
+    },
+    {
+      "id": 8,
+      "username": "testuser2",
+      "passwordHash": "dummy",
+      "role": "viewer",
+      "oidcId": null,
+      "email": null,
+      "createdAt": "2026-03-08T18:24:35.039Z"
     }
   ],
-  "nextId": 8
+  "nextId": 9
 }

@@ -627,24 +627,44 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
 
         console.log(`[Proxy] Forwarding DRM License Request (POST) to: ${url}`);
 
-        // Check if this source requires Warp proxy
-        let proxyAgent = null;
-        if (sourceId) {
-            const source = await sources.getById(sourceId);
-            const settingsData = await require('../db').settings.get();
-            if (source && source.useWarp && settingsData.warpProxyUrl) {
-                console.log(`[Proxy] Using Warp proxy for DRM request for source ${sourceId}`);
-                proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);
+        // 1. Handle Kodi-style headers in the URL (URL|Header1=Value1&Header2=Value2)
+        let finalUrl = url;
+        let customHeaders = {};
+
+        const pipeIndex = finalUrl.indexOf('|');
+        if (pipeIndex !== -1) {
+            const headerStr = finalUrl.substring(pipeIndex + 1);
+            finalUrl = finalUrl.substring(0, pipeIndex);
+
+            headerStr.split('&').forEach(h => {
+                const [k, v] = h.split('=');
+                if (k && v) {
+                    customHeaders[k.trim()] = decodeURIComponent(v.trim());
+                }
+            });
+        }
+
+        // 2. Handle base64 encoded JSON headers in query param or URL
+        const urlObj = new URL(finalUrl);
+        const headersBase64 = req.query.headers || urlObj.searchParams.get('headers');
+        if (headersBase64) {
+            try {
+                const decoded = JSON.parse(Buffer.from(headersBase64, 'base64').toString('utf8'));
+                Object.entries(decoded).forEach(([k, v]) => {
+                    customHeaders[k] = v;
+                });
+            } catch (e) {
+                console.warn('[Proxy] Failed to parse base64 headers:', e.message);
             }
         }
 
-        const isFancode = url.includes('fancode.com');
+        const isFancode = finalUrl.includes('fancode.com');
 
         // Forward standard DRM headers, plus whatever headers Shaka supplied
         const headers = {
-            'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Origin': isFancode ? 'https://fancode.com' : new URL(url).origin,
-            'Referer': isFancode ? 'https://fancode.com/' : new URL(url).origin + '/'
+            'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Origin': customHeaders['Origin'] || customHeaders['origin'] || (isFancode ? 'https://fancode.com' : urlObj.origin),
+            'Referer': customHeaders['Referer'] || customHeaders['referer'] || (isFancode ? 'https://fancode.com/' : urlObj.origin + '/')
         };
 
         // Forward ALL custom headers from the player (Authorization, Tokens, etc.)
@@ -655,6 +675,14 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
                 headers[key] = value;
             }
         }
+
+        // Apply all other custom headers from URL/Query
+        Object.entries(customHeaders).forEach(([k, v]) => {
+            const lowerK = k.toLowerCase();
+            if (!skipHeaders.includes(lowerK)) {
+                headers[k] = v;
+            }
+        });
 
         // Ensure Content-Type is correct for Widevine if not provided by Shaka
         if (!headers['Content-Type'] && !headers['content-type']) {
@@ -670,7 +698,7 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
             fetchOptions.agent = proxyAgent;
         }
 
-        const response = await fetch(url, fetchOptions);
+        const response = await fetch(finalUrl, fetchOptions);
 
         if (!response.ok) {
             console.error(`[Proxy] DRM upstream error: ${response.status} ${response.statusText}`);
@@ -702,48 +730,74 @@ router.get('/stream', async (req, res) => {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            let { url, sourceId } = req.query;
-            if (!url) {
-                return res.status(400).json({ error: 'URL required' });
+            // 1. Handle Kodi-style headers in the URL (URL|Header1=Value1&Header2=Value2)
+            let finalUrl = url;
+            let customHeaders = {};
+
+            const pipeIndex = finalUrl.indexOf('|');
+            if (pipeIndex !== -1) {
+                const headerStr = finalUrl.substring(pipeIndex + 1);
+                finalUrl = finalUrl.substring(0, pipeIndex);
+
+                headerStr.split('&').forEach(h => {
+                    const [k, v] = h.split('=');
+                    if (k && v) {
+                        customHeaders[k.trim()] = decodeURIComponent(v.trim());
+                    }
+                });
             }
 
-            // Check if this source requires Warp proxy
-            let proxyAgent = null;
-            if (sourceId) {
-                const source = await sources.getById(sourceId);
-                const settings = await require('../db').settings.get();
-                if (source && source.useWarp && settings.warpProxyUrl) {
-                    console.log(`[Proxy] Using Warp proxy for source ${sourceId}: ${settings.warpProxyUrl}`);
-                    proxyAgent = new SocksProxyAgent(settings.warpProxyUrl);
+            // 2. Handle base64 encoded JSON headers in query param or URL
+            const urlObj = new URL(finalUrl);
+            const headersBase64 = req.query.headers || urlObj.searchParams.get('headers');
+            if (headersBase64) {
+                try {
+                    const decoded = JSON.parse(Buffer.from(headersBase64, 'base64').toString('utf8'));
+                    Object.entries(decoded).forEach(([k, v]) => {
+                        customHeaders[k] = v;
+                    });
+                } catch (e) {
+                    console.warn('[Proxy] Failed to parse base64 headers:', e.message);
                 }
             }
 
             // Forward some headers to be more "transparent" back to the origin
             // Pluto TV uses multiple domains for content delivery
             const plutoDomains = ['pluto.tv', 'pluto.io', 'plutotv.net', 'siloh.pluto.tv', 'service-stitcher'];
-            const isPluto = plutoDomains.some(domain => url.includes(domain));
-            const isFancode = url.includes('fancode.com');
+            const isPluto = plutoDomains.some(domain => finalUrl.includes(domain));
+            const isFancode = finalUrl.includes('fancode.com');
 
             const getOrigin = () => {
+                if (customHeaders['Origin']) return customHeaders['Origin'];
+                if (customHeaders['origin']) return customHeaders['origin'];
                 if (isPluto) return 'https://pluto.tv';
                 if (isFancode) return 'https://fancode.com';
-                return new URL(url).origin;
+                return urlObj.origin;
             };
 
             const getReferer = () => {
+                if (customHeaders['Referer']) return customHeaders['Referer'];
+                if (customHeaders['referer']) return customHeaders['referer'];
                 if (isPluto) return 'https://pluto.tv/';
                 if (isFancode) return 'https://fancode.com/';
-                return new URL(url).origin + '/';
+                return urlObj.origin + '/';
             };
 
             const headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
-                // Using https and matching the origin of the request
                 'Origin': getOrigin(),
                 'Referer': getReferer()
             };
+
+            // Apply all other custom headers
+            Object.entries(customHeaders).forEach(([k, v]) => {
+                const lowerK = k.toLowerCase();
+                if (lowerK !== 'user-agent' && lowerK !== 'referer' && lowerK !== 'origin' && lowerK !== 'host') {
+                    headers[k] = v;
+                }
+            });
 
             // Forward Range header for video seeking support
             const rangeHeader = req.get('range');
@@ -756,7 +810,7 @@ router.get('/stream', async (req, res) => {
                 fetchOptions.agent = proxyAgent;
             }
 
-            const response = await fetch(url, fetchOptions);
+            const response = await fetch(finalUrl, fetchOptions);
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {
@@ -834,6 +888,7 @@ router.get('/stream', async (req, res) => {
 
                 const finalUrlObj = new URL(finalUrl);
                 const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);
+                const queryStr = finalUrlObj.search;
 
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
@@ -843,8 +898,12 @@ router.get('/stream', async (req, res) => {
                             // Replace both double and single quoted URIs
                             return line.replace(/URI=["']([^"']+)["']/g, (match, p1) => {
                                 try {
-                                    const absoluteUrl = new URL(p1, baseUrl).href;
-                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}"`;
+                                    let absoluteUrl = new URL(p1, baseUrl).href;
+                                    // Append query string if relative and not already present
+                                    if (!p1.includes('?') && queryStr) {
+                                        absoluteUrl += queryStr;
+                                    }
+                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}"`;
                                 } catch (e) {
                                     return match;
                                 }
@@ -860,8 +919,12 @@ router.get('/stream', async (req, res) => {
                             absoluteUrl = trimmed;
                         } else {
                             absoluteUrl = new URL(trimmed, baseUrl).href;
+                            // Append query string if relative and not already present
+                            if (!trimmed.includes('?') && queryStr) {
+                                absoluteUrl += queryStr;
+                            }
                         }
-                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}`;
+                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}`;
                     } catch (e) { return line; }
                 }).join('\n');
 
@@ -925,7 +988,7 @@ router.get('/image', async (req, res) => {
         let proxyAgent = null;
         if (sourceId) {
             const source = await sources.getById(sourceId);
-            const settingsData = await require('../db').getSettings();
+            const settingsData = await require('../db').settings.get();
             if (source && source.useWarp && settingsData.warpProxyUrl) {
                 console.log(`[Proxy] Using Warp proxy for DRM request for source ${sourceId}`);
                 proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl);

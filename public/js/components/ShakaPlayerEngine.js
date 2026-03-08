@@ -147,7 +147,14 @@ class ShakaPlayerEngine {
                 // Don't proxy internal APIs or data URIs
                 if (originalUrl && !originalUrl.startsWith('/api/') && !originalUrl.startsWith('data:')) {
                     const sourceId = this.currentChannel ? this.currentChannel.sourceId : '';
-                    request.uris[0] = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId}`;
+                    if (type === RequestType.LICENSE) {
+                        const proxyUrl = `/api/proxy/drm?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}`;
+                        request.uris = [proxyUrl];
+                        console.log(`[ShakaPlayer] Licensing request proxied: ${proxyUrl}`);
+                    } else {
+                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}`;
+                        request.uris = [proxyUrl];
+                    }
                 }
             }
         }
@@ -234,8 +241,25 @@ class ShakaPlayerEngine {
                             });
                             console.log(`[ShakaPlayer] ClearKey remote server configured: ${licenseKey}`);
                         } else {
-                            if (licenseKey.startsWith('{')) {
-                                clearKeysConfig = JSON.parse(licenseKey);
+                            let keyData = licenseKey;
+                            const pipeIndex = keyData.indexOf('|');
+                            if (pipeIndex !== -1) {
+                                // Extract headers from ClearKey if present (Kodi style)
+                                const headersStr = keyData.substring(pipeIndex + 1);
+                                keyData = keyData.substring(0, pipeIndex);
+
+                                const headersObj = this.currentDrmHeaders || {};
+                                headersStr.split('&').forEach(h => {
+                                    const [k, v] = h.split('=');
+                                    if (k && v) {
+                                        headersObj[k.trim()] = decodeURIComponent(v.trim());
+                                    }
+                                });
+                                this.currentDrmHeaders = headersObj;
+                            }
+
+                            if (keyData.startsWith('{')) {
+                                clearKeysConfig = JSON.parse(keyData);
                             } else {
                                 // Helper to decode Base64Url to Hex
                                 const base64ToHex = (str) => {

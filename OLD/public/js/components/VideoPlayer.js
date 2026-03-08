@@ -1156,20 +1156,13 @@ class VideoPlayer {
 
             // Proactively use proxy for:
             // 1. User enabled "Force Proxy" in settings
-            // 2. Protocol mismatch (Mixed Content): App on HTTPS, Stream on HTTP
-            // 3. Known CORS-restricted domains (like Pluto TV)
+            // 2. Known CORS-restricted domains (like Pluto TV)
             // Note: Xtream sources are NOT auto-proxied because many providers IP-lock streams
             const proxyRequiredDomains = ['pluto.tv'];
-            const isPageHttps = window.location.protocol === 'https:';
-            const isUrlHttp = streamUrl.startsWith('http:');
-            const needsProxy = this.settings.forceProxy ||
-                (isPageHttps && isUrlHttp) ||
-                proxyRequiredDomains.some(domain => streamUrl.includes(domain));
+            const needsProxy = this.settings.forceProxy || proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
-            console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp });
-
 
             // Detect if this is likely an HLS stream (has .m3u8 in URL)
             const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8');

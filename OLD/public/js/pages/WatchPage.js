@@ -489,15 +489,10 @@ class WatchPage {
 
         // Determine if proxy is needed
         const proxyRequiredDomains = ['pluto.tv'];
-        const isPageHttps = window.location.protocol === 'https:';
-        const isUrlHttp = url.startsWith('http:');
-        const needsProxy = settings.forceProxy ||
-            (isPageHttps && isUrlHttp) ||
-            proxyRequiredDomains.some(domain => url.includes(domain));
+        const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
         const finalUrl = needsProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
 
-        console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls, isPageHttps, isUrlHttp });
-
+        console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls });
 
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {

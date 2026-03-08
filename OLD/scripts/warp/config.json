@@ -1,0 +1,8 @@
+{
+  "warpHost": "192.168.1.190",
+  "warpPort": 1080,
+  "proxyRules": [
+    "*.dazn.com",
+    "*.akamaized.net"
+  ]
+}

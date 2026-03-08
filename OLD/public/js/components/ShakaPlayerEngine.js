@@ -155,17 +155,7 @@ class ShakaPlayerEngine {
     async play(channel, streamUrl, forceProxy = false) {
         this.isActive = true;
         this.currentChannel = channel;
-
-        // Auto-detect Mixed Content (HTTPS page, HTTP stream)
-        const isPageHttps = window.location.protocol === 'https:';
-        const isUrlHttp = streamUrl.startsWith('http:');
-        if (isPageHttps && isUrlHttp && !forceProxy) {
-            console.log('[ShakaPlayer] Mixed Content detected (HTTPS app, HTTP stream). Proactively enabling proxy.');
-            forceProxy = true;
-        }
-
         this.isUsingProxy = forceProxy; // Track if we're currently forcing the proxy
-
 
         // Stop the main VideoPlayer if it's running
         if (window.app && window.app.player && typeof window.app.player.stop === 'function') {
@@ -190,30 +180,47 @@ class ShakaPlayerEngine {
         // Configure DRM if properties are present
         if (channel.properties) {
             const licenseType = channel.properties['inputstream.adaptive.license_type'];
-            const licenseKey = channel.properties['inputstream.adaptive.license_key'];
+            let licenseKey = channel.properties['inputstream.adaptive.license_key'];
             const streamHeaders = channel.properties['inputstream.adaptive.stream_headers'];
 
             if (licenseType && licenseKey) {
                 console.log(`[ShakaPlayer] Found DRM configuration: ${licenseType}`);
 
-                // Load custom stream_headers from KODIPROP, exactly like 1.0.0
-                this.currentDrmHeaders = null;
+                // Initialize/Reset headers
+                this.currentDrmHeaders = {};
+
+                // 1. Process stream_headers from KODIPROP
                 if (streamHeaders) {
                     const headersArray = streamHeaders.split('&');
-                    const headersObj = {};
                     headersArray.forEach(h => {
                         const [k, v] = h.split('=');
                         if (k && v) {
-                            headersObj[k.trim()] = decodeURIComponent(v.trim());
+                            this.currentDrmHeaders[k.trim()] = decodeURIComponent(v.trim());
                         }
                     });
-                    this.currentDrmHeaders = headersObj;
-                    console.log('[ShakaPlayer] Loaded custom stream headers:', headersObj);
+                    console.log('[ShakaPlayer] Loaded stream headers:', this.currentDrmHeaders);
+                }
+
+                // 2. Handle '|' separator in license_key (Kodi style)
+                // This can contain additional headers like User-Agent, Referer, etc.
+                const pipeIndex = licenseKey.indexOf('|');
+                if (pipeIndex !== -1) {
+                    const headersPart = licenseKey.substring(pipeIndex + 1);
+                    licenseKey = licenseKey.substring(0, pipeIndex).trim();
+
+                    console.log('[ShakaPlayer] Found extra headers in licenseKey separator');
+                    headersPart.split('&').forEach(h => {
+                        const [k, v] = h.split('=');
+                        if (k && v) {
+                            this.currentDrmHeaders[k.trim()] = decodeURIComponent(v.trim());
+                        }
+                    });
                 }
 
                 const normalizedLicenseType = licenseType.toLowerCase();
+
+                // --- ClearKey Parsing ---
                 if (normalizedLicenseType === 'clearkey' || normalizedLicenseType === 'org.w3.clearkey') {
-                    // Extract KID:KEY or KID=KEY format (e.g. 1234:5678 or {"kid":"key"})
                     let clearKeysConfig = {};
 
                     try {
@@ -221,14 +228,18 @@ class ShakaPlayerEngine {
                             // Remote ClearKey server
                             this.player.configure({
                                 drm: {
-                                    servers: {
-                                        'org.w3.clearkey': licenseKey
-                                    }
+                                    servers: { 'org.w3.clearkey': licenseKey }
                                 }
                             });
                             console.log(`[ShakaPlayer] ClearKey remote server configured: ${licenseKey}`);
                         } else {
+                            // Local ClearKey (JSON or KID:KEY pairs)
                             if (licenseKey.startsWith('{')) {
+                                // Robust extraction: handle trailing garbage (fixes SyntaxError)
+                                const lastBrace = licenseKey.lastIndexOf('}');
+                                if (lastBrace !== -1) {
+                                    licenseKey = licenseKey.substring(0, lastBrace + 1);
+                                }
                                 clearKeysConfig = JSON.parse(licenseKey);
                             } else {
                                 // Helper to decode Base64Url to Hex
@@ -243,19 +254,15 @@ class ShakaPlayerEngine {
                                             hex += (h.length === 2 ? h : '0' + h);
                                         }
                                         return hex.toLowerCase();
-                                    } catch (e) {
-                                        return str; // Return original if not valid base64
-                                    }
+                                    } catch (e) { return str; }
                                 };
                                 const isHex = (str) => /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
 
-                                // Can be multiple keys separated by comma
+                                // Multiple keys separated by comma
                                 const keyPairs = licenseKey.split(',');
                                 for (const pair of keyPairs) {
-                                    // Format: kid:key (strip quotes and spaces)
                                     let [kid, key] = pair.trim().replace(/['"]/g, '').split(':');
                                     if (kid && key) {
-                                        // Shaka Player requires Hex format for kid/key
                                         if (!isHex(kid)) kid = base64ToHex(kid);
                                         if (!isHex(key)) key = base64ToHex(key);
                                         clearKeysConfig[kid] = key;
@@ -264,47 +271,22 @@ class ShakaPlayerEngine {
                             }
 
                             this.player.configure({
-                                drm: {
-                                    clearKeys: clearKeysConfig
-                                }
+                                drm: { clearKeys: clearKeysConfig }
                             });
                             console.log('[ShakaPlayer] clearKeys configured:', clearKeysConfig);
                         }
-
                     } catch (err) {
-                        console.error('[ShakaPlayer] Error parsing clearkey:', err);
-                    }
-                } else if (licenseType === 'com.widevine.alpha' || licenseType === 'widevine') {
-                    // It's a license server URL
-                    // Sometimes KODIPROP URLs have additional headers separated by |
-                    let serverUrl = licenseKey;
-                    const headersIndex = serverUrl.indexOf('|');
-                    let headers = {};
-
-                    if (headersIndex !== -1) {
-                        // Advanced: parse Kodi-style headers here if strictly necessary
-                        // format: URL|Header1=Value1&Header2=Value2
-                        const headersStr = serverUrl.substring(headersIndex + 1);
-                        serverUrl = serverUrl.substring(0, headersIndex);
-
-                        const headersObj = this.currentDrmHeaders || {};
-                        headersStr.split('&').forEach(h => {
-                            const [k, v] = h.split('=');
-                            if (k && v) {
-                                headersObj[k.trim()] = decodeURIComponent(v.trim());
-                            }
-                        });
-                        this.currentDrmHeaders = headersObj;
+                        console.error('[ShakaPlayer] Error parsing clearkey:', err, 'Raw key:', licenseKey);
                     }
 
+                    // --- Widevine Parsing ---
+                } else if (normalizedLicenseType === 'com.widevine.alpha' || normalizedLicenseType === 'widevine') {
                     this.player.configure({
                         drm: {
-                            servers: {
-                                'com.widevine.alpha': serverUrl
-                            }
+                            servers: { 'com.widevine.alpha': licenseKey }
                         }
                     });
-                    console.log(`[ShakaPlayer] Widevine server configured: ${serverUrl}`);
+                    console.log(`[ShakaPlayer] Widevine server configured: ${licenseKey}`);
                 }
             }
         }

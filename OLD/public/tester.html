@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Stream Tester | NodeCast TV</title>
+    <meta name="description" content="Test stream functionality with DRM and headers">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="css/main.css?v=5">
+    <link rel="stylesheet" href="css/media.css?v=5">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
+        rel="stylesheet">
+    <!-- HLS.js for video playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+    <!-- Shaka Player for DASH/DRM -->
+    <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.16.0/dist/shaka-player.ui.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/shaka-player@4.16.0/dist/controls.css">
+    <style>
+        .tester-layout {
+            display: flex;
+            height: calc(100vh - 60px);
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .tester-sidebar {
+            width: 450px;
+            min-width: 450px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-right: 1px solid var(--glass-border);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow-y: auto;
+            padding: var(--space-lg);
+            transition: margin-left var(--transition-normal), opacity var(--transition-normal);
+            z-index: 10;
+        }
+
+        .tester-sidebar.collapsed {
+            margin-left: -450px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .tester-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #000;
+            position: relative;
+        }
+
+        .tester-section {
+            background: var(--glass-bg-accent);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: var(--space-md);
+            margin-bottom: var(--space-lg);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .tester-section h3 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: var(--space-md);
+            padding-bottom: var(--space-sm);
+            border-bottom: 1px solid var(--color-border);
+            color: var(--color-text-primary);
+        }
+
+        .form-group {
+            margin-bottom: var(--space-md);
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: var(--space-xs);
+            font-size: 0.85rem;
+            color: var(--color-text-secondary);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        .form-row {
+            display: flex;
+            gap: var(--space-sm);
+            margin-bottom: var(--space-sm);
+        }
+
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .btn-icon {
+            background: var(--color-bg-elevated);
+            border: 1px solid var(--color-border);
+            color: var(--color-text-secondary);
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-icon:hover {
+            background: var(--color-bg-hover);
+            color: var(--color-text-primary);
+        }
+
+        .btn-icon.danger:hover {
+            color: var(--color-error);
+            border-color: var(--color-error);
+        }
+
+        .btn-icon.warning {
+            color: var(--color-warning);
+        }
+
+        .headers-container {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .header-row {
+            display: flex;
+            gap: var(--space-sm);
+            align-items: center;
+        }
+
+        .header-row input {
+            flex: 1;
+        }
+
+        .btn-test {
+            width: 100%;
+            padding: var(--space-md);
+            background: var(--color-accent);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-md);
+            font-weight: 600;
+            font-size: 1.1rem;
+            cursor: pointer;
+            margin-bottom: var(--space-lg);
+            transition: all 0.2s;
+        }
+
+        .btn-test:hover {
+            background: var(--color-accent-hover);
+            box-shadow: 0 4px 12px var(--color-accent-glow);
+        }
+
+        .copy-input-group {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .copy-input-group input {
+            padding-right: 40px;
+        }
+
+        .copy-btn {
+            position: absolute;
+            right: 4px;
+            background: transparent;
+            border: none;
+            color: var(--color-text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        .copy-btn:hover {
+            color: var(--color-text-primary);
+            background: var(--color-bg-hover);
+        }
+
+        /* Player specific */
+        .tester-player-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tester-player-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .error-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: var(--space-lg);
+            border-radius: var(--radius-md);
+            color: var(--color-error);
+            text-align: center;
+            display: none;
+        }
+
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+
+        .spinner-circle {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: var(--color-accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Sidebar Toggle Button */
+        .btn-toggle-sidebar {
+            position: absolute;
+            top: var(--space-md);
+            left: var(--space-md);
+            z-index: 1000;
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            color: var(--color-text-secondary);
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-toggle-sidebar:hover {
+            color: var(--color-text-primary);
+            background: var(--color-bg-hover);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-toggle-sidebar svg {
+            width: 24px;
+            height: 24px;
+            transition: transform var(--transition-normal);
+        }
+
+        .btn-toggle-sidebar.collapsed svg {
+            transform: rotate(180deg);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Navigation (Simplified for tester) -->
+        <nav class="navbar">
+            <div class="navbar-brand">
+                <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 187.63 210.6" fill="#6366f1"
+                        class="icon">
+                        <path
+                            d="M169.71,87.87c-4.77,0-9.1,1.88-12.31,4.92L35.3,22.3c.35-1.4.56-2.86.56-4.37C35.86,8.03,27.83,0,17.93,0S0,8.03,0,17.93c0,8.44,5.84,15.5,13.69,17.4v140c-7.71,2.01-13.41,8.99-13.41,17.33,0,9.9,8.03,17.93,17.93,17.93s17.93-8.03,17.93-17.93c0-1.56-.22-3.07-.6-4.51l121.21-69.98c3.26,3.42,7.86,5.55,12.95,5.55,9.9,0,17.93-8.03,17.93-17.93s-8.03-17.93-17.93-17.93ZM152.78,99.92c-.14.41-.27.83-.38,1.25h-51.47l-44.18-24.72L30.4,30.8c.33-.32.64-.65.94-.99l121.45,70.12ZM22.17,175.2V35.33c.23-.05.45-.11.67-.17l26.35,45.65-.34,50.04-25.74,44.59c-.31-.09-.63-.17-.95-.24ZM31.52,180.69c-.27-.3-.55-.6-.84-.89l25.48-44.13,44.64-25.78h51.47c.07.32.15.63.24.94L31.52,180.69Z" />
+                    </svg></span>
+                <span class="brand-text">Stream Tester</span>
+            </div>
+            <div class="navbar-menu">
+                <a href="/" class="nav-link">
+                    <span>Back to Live TV</span>
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content" style="overflow: visible;">
+            <div class="tester-layout">
+                <aside class="tester-sidebar">
+                    <button id="btn-play" class="btn-test">TEST VIDEO</button>
+
+                    <!-- DRM Section -->
+                    <div class="tester-section">
+                        <h3>DRM <span class="btn-icon warning" style="border:none;background:transparent;">🔑</span>
+                        </h3>
+                        <div class="form-group">
+                            <label>🔑 Dati di Clearkey (KID:KEY)</label>
+                            <input type="text" id="drm-clearkey" class="input" placeholder="e.g. kid:key">
+                        </div>
+                        <div class="form-group">
+                            <label>🔗 Widevine URL</label>
+                            <input type="text" id="drm-widevine-url" class="input" placeholder="https://...">
+                        </div>
+                        <div class="form-group">
+                            <label>📜 URL certificato Widevine</label>
+                            <input type="text" id="drm-cert-url" class="input" placeholder="https://...">
+                        </div>
+                    </div>
+
+                    <!-- Headers Section -->
+                    <div class="tester-section">
+                        <h3>Intestazioni <button id="btn-add-header" class="btn-icon" title="Add Header">+</button></h3>
+                        <div id="headers-container" class="headers-container">
+                            <!-- Headers will be added here -->
+                        </div>
+                    </div>
+
+                    <!-- Channel Info -->
+                    <div class="tester-section">
+                        <h3>Info Canale</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>📺 Nome Canale</label>
+                                <input type="text" id="info-name" class="input" placeholder="Channel 1">
+                            </div>
+                            <div class="form-group">
+                                <label>🏷️ EPG TVG ID</label>
+                                <input type="text" id="info-tvgid" class="input" placeholder="ch1.tv">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>📚 Gruppo Canali</label>
+                                <input type="text" id="info-group" class="input" placeholder="Sports">
+                            </div>
+                            <div class="form-group">
+                                <label>🖼️ Logo URL Canale</label>
+                                <input type="text" id="info-logo" class="input" placeholder="https://...">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 0.5;">
+                                <label>Tipo di Canale</label>
+                                <select id="info-type" class="input">
+                                    <option value="mpd">MPD (DASH)</option>
+                                    <option value="m3u8">M3U8 (HLS)</option>
+                                    <option value="ts">TS</option>
+                                    <option value="auto" selected>Auto</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1.5;">
+                                <label>🔗 URL Canale</label>
+                                <input type="text" id="info-url" class="input" placeholder="https://...">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Section -->
+                    <div class="tester-section">
+                        <h3>Risultato</h3>
+                        <div class="form-group">
+                            <label>Clearkey HEX</label>
+                            <div class="copy-input-group">
+                                <input type="text" id="res-clearkey-hex" class="input" readonly>
+                                <button class="copy-btn" data-target="res-clearkey-hex" title="Copy">📋</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Clearkey BASE64</label>
+                            <div class="copy-input-group">
+                                <input type="text" id="res-clearkey-b64" class="input" readonly>
+                                <button class="copy-btn" data-target="res-clearkey-b64" title="Copy">📋</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Link diretto</label>
+                            <div class="copy-input-group">
+                                <input type="text" id="res-direct-link" class="input" readonly>
+                                <button class="copy-btn" data-target="res-direct-link" title="Copy">📋</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Canale M3U</label>
+                            <div class="copy-input-group">
+                                <textarea id="res-m3u" class="input" rows="4" readonly
+                                    style="resize:vertical; padding-right:40px;"></textarea>
+                                <button class="copy-btn" data-target="res-m3u" style="top:4px;" title="Copy">📋</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Decoder Utility -->
+                    <div class="tester-section" style="margin-bottom: var(--space-xl);">
+                        <h3>Decoder Base64 <span class="btn-icon" style="border:none;background:transparent;">🔓</span>
+                        </h3>
+                        <div class="form-group">
+                            <label>Stringa Base64 (es. {"clearkeys":...} o raw)</label>
+                            <textarea id="dec-input-b64" class="input" rows="3"
+                                placeholder='es. eyJjbGVhcmtleXMiO... o stringa url-safe b64'
+                                style="resize:vertical;"></textarea>
+                        </div>
+                        <button id="btn-decode-b64" class="btn-test"
+                            style="padding: 10px; margin-bottom: 15px; font-size: 0.95rem;">Decodifica in HEX</button>
+                        <div class="form-group">
+                            <label>Risultato (KID:KEY o HEX)</label>
+                            <div class="copy-input-group">
+                                <input type="text" id="dec-output-hex" class="input" readonly>
+                                <button class="copy-btn" data-target="dec-output-hex" title="Copy">📋</button>
+                            </div>
+                        </div>
+                    </div>
+
+                </aside>
+
+                <main class="tester-main">
+                    <button id="btn-toggle-sidebar" class="btn-toggle-sidebar" title="Toggle Sidebar">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6 1.41-1.41z" />
+                        </svg>
+                    </button>
+                    <div class="tester-player-container video-container" id="shaka-container">
+                        <video id="test-video" playsinline></video>
+
+                        <div id="test-loading" class="player-loading-spinner hidden">
+                            <div class="spinner"></div>
+                            <div class="loading-text">Caricamento...</div>
+                        </div>
+
+                        <div id="test-error" class="error-overlay"></div>
+
+                        <!-- Now Playing OSD -->
+                        <div class="now-playing-overlay hidden" id="now-playing">
+                            <div class="osd-content">
+                                <div class="osd-main">
+                                    <div class="osd-header">
+                                        <span class="osd-tag">Now Playing</span>
+                                        <h3 class="channel-name" id="osd-channel-name">Tester Stream</h3>
+                                    </div>
+                                    <p class="program-title" id="osd-program-title"></p>
+                                    <div class="osd-meta">
+                                        <span class="program-time" id="osd-program-time"></span>
+                                        <span class="osd-sep">•</span>
+                                        <span class="osd-live-badge">LIVE</span>
+                                    </div>
+                                </div>
+                                <div class="osd-up-next">
+                                    <h4>Up Next</h4>
+                                    <ul id="up-next-list"></ul>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </main>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/tester.js"></script>
+</body>
+
+</html>

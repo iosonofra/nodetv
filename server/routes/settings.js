@@ -193,6 +193,16 @@ router.post('/warp-setup', async (req, res) => {
     try {
         console.log('[WarpSetup] Configuring Warp...');
 
+        // 0. Check if warp-cli exists
+        try {
+            await execPromise('warp-cli --version');
+        } catch (e) {
+            return res.status(404).json({
+                success: false,
+                error: 'warp-cli not found on this server. It must be installed manually before using this tool.'
+            });
+        }
+
         // 1. Set mode to proxy
         await execPromise('warp-cli set-mode proxy');
 

@@ -20,6 +20,27 @@ const fetch = require('node-fetch');
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 const globalHttpAgent = new http.Agent();
 
+/**
+ * Helper to get Proxy URL for a source
+ * Ensures Warp is only used when useWarp is true and warpProxyUrl is configured
+ */
+async function getProxyUrl(sourceId) {
+    if (!sourceId) return null;
+    try {
+        const source = await sources.getById(sourceId);
+        const settingsData = await require('../db').settings.get();
+        if (source && source.useWarp && settingsData.warpProxyUrl) {
+            console.log(`[Proxy] Using Warp proxy for source ${sourceId}`);
+            return settingsData.warpProxyUrl;
+        } else if (source) {
+            console.log(`[Proxy] Skipping Warp proxy for source ${sourceId} (useWarp: ${!!source.useWarp})`);
+        }
+    } catch (err) {
+        console.error(`[Proxy] Error checking proxy for source ${sourceId}:`, err.message);
+    }
+    return null;
+}
+
 // Conditional auth middleware: allow public access for streaming/DRM used by video players
 router.use((req, res, next) => {
     const publicRoutes = ['/stream', '/drm', '/image'];
@@ -108,15 +129,14 @@ async function getStreamsFromDb(sourceId, type, categoryId, includeHidden, userI
 // Login / Authenticate
 router.get('/xtream/:sourceId', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(req.params.sourceId, req.user?.id, req.user?.role);
         if (!source || source.type !== 'xtream') return res.status(404).send('Source not found or unauthorized');
-
-        // Proxy auth check to upstream to ensure credentials are still valid
 
         const cached = cache.get('xtream', source.id, 'auth', 300000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
+        const proxyUrl = await getProxyUrl(source.id);
+        const api = xtreamApi.createFromSource(source, proxyUrl);
         const data = await api.authenticate();
         cache.set('xtream', source.id, 'auth', data);
         res.json(data);
@@ -130,7 +150,7 @@ router.get('/xtream/:sourceId/live_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
-        const cats = await getCategoriesFromDb(sourceId, 'live', includeHidden, req.user.id, req.user.role);
+        const cats = await getCategoriesFromDb(sourceId, 'live', includeHidden, req.user?.id, req.user?.role);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -144,7 +164,7 @@ router.get('/xtream/:sourceId/live_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = await getStreamsFromDb(sourceId, 'live', categoryId, includeHidden, req.user.id, req.user.role);
+        const streams = await getStreamsFromDb(sourceId, 'live', categoryId, includeHidden, req.user?.id, req.user?.role);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -157,7 +177,7 @@ router.get('/xtream/:sourceId/vod_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
-        const cats = await getCategoriesFromDb(sourceId, 'movie', includeHidden, req.user.id, req.user.role);
+        const cats = await getCategoriesFromDb(sourceId, 'movie', includeHidden, req.user?.id, req.user?.role);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -171,7 +191,7 @@ router.get('/xtream/:sourceId/vod_streams', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = await getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden, req.user.id, req.user.role);
+        const streams = await getStreamsFromDb(sourceId, 'movie', categoryId, includeHidden, req.user?.id, req.user?.role);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -184,7 +204,7 @@ router.get('/xtream/:sourceId/series_categories', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
         const includeHidden = req.query.includeHidden === 'true';
-        const cats = await getCategoriesFromDb(sourceId, 'series', includeHidden, req.user.id, req.user.role);
+        const cats = await getCategoriesFromDb(sourceId, 'series', includeHidden, req.user?.id, req.user?.role);
         res.json(cats);
     } catch (err) {
         console.error(err);
@@ -198,7 +218,7 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
         const sourceId = parseInt(req.params.sourceId);
         const categoryId = req.query.category_id;
         const includeHidden = req.query.includeHidden === 'true';
-        const streams = await getStreamsFromDb(sourceId, 'series', categoryId, includeHidden, req.user.id, req.user.role);
+        const streams = await getStreamsFromDb(sourceId, 'series', categoryId, includeHidden, req.user?.id, req.user?.role);
         res.json(streams);
     } catch (err) {
         console.error(err);
@@ -210,7 +230,7 @@ router.get('/xtream/:sourceId/series', async (req, res) => {
 // Proxy series info request
 router.get('/xtream/:sourceId/series_info', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(req.params.sourceId, req.user?.id, req.user?.role);
         if (!source) return res.status(404).send('Source not found or unauthorized');
 
         const seriesId = req.query.series_id;
@@ -220,7 +240,7 @@ router.get('/xtream/:sourceId/series_info', async (req, res) => {
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
+        const api = xtreamApi.createFromSource(source, await getProxyUrl(source.id));
         const data = await api.getSeriesInfo(seriesId);
         cache.set('xtream', source.id, cacheKey, data);
         res.json(data);
@@ -232,7 +252,7 @@ router.get('/xtream/:sourceId/series_info', async (req, res) => {
 // VOD Info
 router.get('/xtream/:sourceId/vod_info', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(req.params.sourceId, req.user?.id, req.user?.role);
         if (!source) return res.status(404).send('Source not found or unauthorized');
 
         const vodId = req.query.vod_id;
@@ -242,7 +262,7 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
         const cached = cache.get('xtream', source.id, cacheKey, 3600000);
         if (cached) return res.json(cached);
 
-        const api = xtreamApi.createFromSource(source);
+        const api = xtreamApi.createFromSource(source, await getProxyUrl(source.id));
         const data = await api.getVodInfo(vodId);
         cache.set('xtream', source.id, cacheKey, data);
         res.json(data);
@@ -255,7 +275,7 @@ router.get('/xtream/:sourceId/vod_info', async (req, res) => {
 // Returns the direct stream URL for a given stream ID
 router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(req.params.sourceId, req.user?.id, req.user?.role);
         if (!source || source.type !== 'xtream') {
             return res.status(404).json({ error: 'Xtream source not found or unauthorized' });
         }
@@ -302,8 +322,8 @@ router.get('/m3u/:sourceId', async (req, res) => {
         const includeHidden = req.query.includeHidden === 'true';
 
         // Fetch from DB
-        const channels = await getStreamsFromDb(sourceId, 'live', null, includeHidden, req.user.id, req.user.role);
-        const groups = await getCategoriesFromDb(sourceId, 'live', includeHidden, req.user.id, req.user.role);
+        const channels = await getStreamsFromDb(sourceId, 'live', null, includeHidden, req.user?.id, req.user?.role);
+        const groups = await getCategoriesFromDb(sourceId, 'live', includeHidden, req.user?.id, req.user?.role);
 
         // Format for frontend helper
         // ChannelList expects:
@@ -343,8 +363,29 @@ router.get('/m3u/:sourceId', async (req, res) => {
 router.get('/epg/:sourceId', async (req, res) => {
     try {
         const sourceId = parseInt(req.params.sourceId);
-        const source = await sources.getById(sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(sourceId, req.user?.id, req.user?.role);
         if (!source) return res.status(404).json({ error: 'Unauthorized EPG source' });
+
+        const forceRefresh = req.query.refresh === '1';
+
+        // If force refresh or not an xtream/m3u source (direct EPG), we might want to fetch from URL
+        // However, for the main EPGBuide, we usually prefer the DB data.
+        // We only fetch from URL if requested and it's a standalone EPG source or Xtream XMLTV
+        if (forceRefresh && (source.type === 'epg' || source.type === 'xtream')) {
+            console.log(`[Proxy] Force refreshing EPG from URL for source ${sourceId}`);
+            let url = source.url;
+            if (source.type === 'xtream') {
+                const api = xtreamApi.createFromSource(source); // Will use Warp in fetchAndParse if we update it
+                url = api.getXmltvUrl();
+            }
+
+            const proxyUrl = await getProxyUrl(sourceId);
+            const proxyAgent = proxyUrl ? new SocksProxyAgent(proxyUrl, { tls: { rejectUnauthorized: false } }) : null;
+
+            const freshData = await epgParser.fetchAndParse(url, proxyAgent);
+            // Re-map to match Guide format if needed, but fetchAndParse returns { channels, programmes }
+            return res.json(freshData);
+        }
 
         const db = getDb();
 
@@ -421,7 +462,7 @@ router.delete('/cache/:sourceId', (req, res) => {
 router.get('/xtream/:sourceId/:action', async (req, res) => {
     try {
         const sourceId = req.params.sourceId;
-        const source = await sources.getById(sourceId, req.user.id, req.user.role);
+        const source = await sources.getById(sourceId, req.user?.id, req.user?.role);
         if (!source || source.type !== 'xtream') {
             return res.status(404).json({ error: 'Xtream source not found or unauthorized' });
         }
@@ -451,7 +492,8 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
         }
 
         // Fetch fresh data
-        const api = xtreamApi.createFromSource(source);
+        const proxyUrl = await getProxyUrl(sourceId);
+        const api = xtreamApi.createFromSource(source, proxyUrl);
         let data;
         switch (action) {
             case 'auth':
@@ -500,74 +542,7 @@ router.get('/xtream/:sourceId/:action', async (req, res) => {
     }
 });
 
-/**
- * Get Xtream stream URL
- * GET /api/proxy/xtream/:sourceId/stream/:streamId
- */
-router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
-    try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
-        if (!source || source.type !== 'xtream') {
-            return res.status(404).json({ error: 'Xtream source not found or unauthorized' });
-        }
-
-        const api = xtreamApi.createFromSource(source);
-        const { streamId, type = 'live' } = req.params;
-        const { container = 'm3u8' } = req.query;
-
-        const url = api.buildStreamUrl(streamId, type, container);
-        res.json({ url });
-    } catch (err) {
-        console.error('Stream URL error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * Fetch and parse EPG (with file-based caching)
- * GET /api/proxy/epg/:sourceId
- * Query params:
- *   - refresh=1  Force refresh, bypass cache
- *   - maxAge=N   Max cache age in hours (default 24)
- */
-router.get('/epg/:sourceId', async (req, res) => {
-    try {
-        const sourceId = req.params.sourceId;
-        const source = await sources.getById(sourceId, req.user.id, req.user.role);
-        if (!source || (source.type !== 'epg' && source.type !== 'xtream')) {
-            return res.status(404).json({ error: 'Valid EPG source not found or unauthorized' });
-        }
-
-        const forceRefresh = req.query.refresh === '1';
-        const maxAgeHours = parseInt(req.query.maxAge) || DEFAULT_MAX_AGE_HOURS;
-        const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
-
-        // Check file cache (unless force refresh)
-        if (!forceRefresh) {
-            const cached = cache.get('epg', sourceId, 'data', maxAgeMs);
-            if (cached) {
-                return res.json(cached);
-            }
-        }
-
-        // Fetch fresh data
-        let url = source.url;
-        if (source.type === 'xtream') {
-            const api = xtreamApi.createFromSource(source);
-            url = api.getXmltvUrl();
-        }
-
-        const data = await epgParser.fetchAndParse(url);
-
-        // Store in file cache
-        cache.set('epg', sourceId, 'data', data);
-
-        res.json(data);
-    } catch (err) {
-        console.error('EPG proxy error:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
+// This route is a duplicate of the one at line 256, removing to avoid confusion and enforce consistency.
 
 /**
  * Clear cache for a source
@@ -595,8 +570,8 @@ router.delete('/epg/:sourceId/cache', (req, res) => {
  */
 router.post('/epg/:sourceId/channels', async (req, res) => {
     try {
-        const source = await sources.getById(req.params.sourceId, req.user.id, req.user.role);
-        if (!source || source.type !== 'epg') {
+        const source = await sources.getById(req.params.sourceId, req.user?.id, req.user?.role);
+        if (!source) {
             return res.status(404).json({ error: 'EPG source not found or unauthorized' });
         }
 
@@ -605,7 +580,9 @@ router.post('/epg/:sourceId/channels', async (req, res) => {
             return res.status(400).json({ error: 'channelIds array required' });
         }
 
-        const data = await epgParser.fetchAndParse(source.url);
+        const proxyUrl = await getProxyUrl(req.params.sourceId);
+        const proxyAgent = proxyUrl ? new SocksProxyAgent(proxyUrl, { tls: { rejectUnauthorized: false } }) : null;
+        const data = await epgParser.fetchAndParse(source.url, proxyAgent);
 
         // Filter programmes for requested channels
         const result = {};
@@ -628,6 +605,21 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
     try {
         let { url, sourceId } = req.query;
         if (!url) return res.status(400).json({ error: 'DRM URL required' });
+
+        // Check if this source requires Warp proxy
+        let proxyAgent = null;
+        if (sourceId) {
+            const source = await sources.getById(sourceId);
+            const settingsData = await require('../db').settings.get();
+            if (source && source.useWarp && settingsData.warpProxyUrl) {
+                console.log(`[Proxy] Using Warp proxy for DRM request for source ${sourceId}`);
+                proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl, {
+                    tls: { rejectUnauthorized: false }
+                });
+            } else if (source) {
+                console.log(`[Proxy] Skipping Warp proxy for DRM request for source ${sourceId} (useWarp: ${!!source.useWarp})`);
+            }
+        }
 
         console.log(`[Proxy] Forwarding DRM License Request (POST) to: ${url}`);
 
@@ -747,6 +739,8 @@ router.get('/stream', async (req, res) => {
                     proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl, {
                         tls: { rejectUnauthorized: false }
                     });
+                } else if (source) {
+                    console.log(`[Proxy] Skipping Warp proxy for source ${sourceId} (useWarp: ${!!source.useWarp})`);
                 }
             }
 
@@ -1016,6 +1010,8 @@ router.get('/image', async (req, res) => {
                 proxyAgent = new SocksProxyAgent(settingsData.warpProxyUrl, {
                     tls: { rejectUnauthorized: false }
                 });
+            } else if (source) {
+                console.log(`[Proxy] Skipping Warp proxy for image request for source ${sourceId} (useWarp: ${!!source.useWarp})`);
             }
         }
 

@@ -304,7 +304,17 @@ router.get('/:id/estimate', async (req, res) => {
         }
 
         console.log(`[Sources] Estimating M3U size for ${source.name}...`);
-        const count = await m3uParser.countEntries(source.url);
+        const settingsData = await require('../db').settings.get();
+        const proxyUrl = (source.useWarp && settingsData.warpProxyUrl) ? settingsData.warpProxyUrl : null;
+        const proxyAgent = proxyUrl ? new SocksProxyAgent(proxyUrl) : null;
+
+        if (proxyAgent) {
+            console.log(`[Sources] Using Warp proxy for estimation of source ${source.id}`);
+        } else {
+            console.log(`[Sources] Skipping Warp proxy for estimation of source ${source.id} (useWarp: ${!!source.useWarp})`);
+        }
+
+        const count = await m3uParser.countEntries(source.url, proxyAgent);
         console.log(`[Sources] M3U estimate: ${count} entries`);
 
         res.json({

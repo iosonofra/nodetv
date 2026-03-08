@@ -948,7 +948,8 @@ router.get('/stream', async (req, res) => {
             }
 
             // Binary content (Video Segment or Key): Collect and send
-            console.log(`[Proxy] Serving binary content (${contentType})`);
+            console.log(`[Proxy] Serving binary content (${contentType}) at status ${response.status}`);
+            res.status(response.status);
             res.set('Content-Type', contentType || 'application/octet-stream');
 
             // Send the first chunk we read

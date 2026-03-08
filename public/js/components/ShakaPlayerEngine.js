@@ -266,6 +266,20 @@ class ShakaPlayerEngine {
                             }
 
                             keyData = keyData.trim();
+
+                            // Try to base64 decode if it doesn't look like JSON or colon-separated pairs
+                            if (!keyData.startsWith('{') && !keyData.includes(':')) {
+                                try {
+                                    const decoded = atob(keyData);
+                                    if (decoded.includes(':') || decoded.trim().startsWith('{')) {
+                                        keyData = decoded.trim();
+                                        console.log('[ShakaPlayer] Decoded base64 clearKey string');
+                                    }
+                                } catch (e) {
+                                    // Not base64, proceed as is
+                                }
+                            }
+
                             if (keyData.startsWith('{')) {
                                 try {
                                     // Try to extract JSON if there's trailing junk not caught by pipe

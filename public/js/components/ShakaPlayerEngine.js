@@ -106,13 +106,9 @@ class ShakaPlayerEngine {
         // We only care about restoring the base URL for the manifest itself
         if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST) return;
 
-        // If the manifest was loaded through our proxy, we need to instruct Shaka
-        // that its real base URL is the original upstream URL.
-        // Otherwise, Shaka will resolve relative segment URLs (e.g. `segment1.m4s`)
-        // against `/api/proxy/stream`, resulting in `/api/proxy/segment1.m4s` (404).
-        //
-        // This is safe even with Warp: handleRequestFilter will intercept the
-        // resolved absolute upstream URLs and proxy them via /api/proxy/stream.
+        // If the manifest was loaded through our proxy, restore the original
+        // upstream URL so Shaka can resolve relative segment URLs correctly.
+        // handleRequestFilter will intercept the resolved URLs and proxy them.
         if (response.uri && response.uri.includes('/api/proxy/stream')) {
             try {
                 const urlParams = new URLSearchParams(response.uri.split('?')[1]);
@@ -124,6 +120,28 @@ class ShakaPlayerEngine {
                 }
             } catch (err) {
                 console.warn('[ShakaPlayer] Could not parse original manifest URL from proxy URI', err);
+            }
+        }
+
+        // CRITICAL FIX: Shaka's DRM engine ignores clearKeys when the manifest
+        // declares Widevine/PlayReady ContentProtection. It only uses clearKeys
+        // when there are NO ContentProtection elements. So when we have clearKeys,
+        // we strip Widevine/PlayReady ContentProtection from the MPD manifest.
+        // This makes Shaka treat it as "no DRM info" → clearKeys kicks in.
+        if (this.hasClearKeys && response.data) {
+            try {
+                const text = new TextDecoder().decode(response.data);
+                if (text.includes('<ContentProtection') && text.includes('<MPD')) {
+                    // Remove Widevine and PlayReady ContentProtection elements
+                    // but keep any ClearKey ones
+                    const cleaned = text.replace(
+                        /<ContentProtection[^>]*schemeIdUri="urn:uuid:(edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^]*?<\/ContentProtection>|<ContentProtection[^>]*schemeIdUri="urn:uuid:(edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
+                        '<!-- ContentProtection removed for ClearKey -->');
+                    console.log('[ShakaPlayer] Stripped Widevine/PlayReady ContentProtection from MPD for ClearKey decryption');
+                    response.data = new TextEncoder().encode(cleaned).buffer;
+                }
+            } catch (err) {
+                console.warn('[ShakaPlayer] Could not process manifest for ClearKey:', err);
             }
         }
     }
@@ -188,6 +206,7 @@ class ShakaPlayerEngine {
         */
 
         this.isUsingProxy = forceProxy; // Track if we're currently forcing the proxy
+        this.hasClearKeys = false; // Reset — will be set when clearKeys are configured below
 
 
         // Stop the main VideoPlayer if it's running
@@ -344,7 +363,8 @@ class ShakaPlayerEngine {
                                     }
                                 }
                             });
-                            console.log('[ShakaPlayer] clearKeys + keySystemsMapping configured:', clearKeysConfig);
+                            this.hasClearKeys = true; // Flag for handleResponseFilter to strip Widevine ContentProtection
+                            console.log('[ShakaPlayer] clearKeys configured:', clearKeysConfig);
                         }
 
                     } catch (err) {

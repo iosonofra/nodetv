@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+data/*.db
+.env
+*.log
+transcode-cache/
+dist/
+release/
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+test_*.js
+server_output*.log

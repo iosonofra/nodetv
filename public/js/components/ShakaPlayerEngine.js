@@ -103,42 +103,24 @@ class ShakaPlayerEngine {
     }
 
     handleResponseFilter(type, response) {
-        // We only care about the base URL for the manifest itself
+        // We only care about restoring the base URL for the manifest itself
         if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST) return;
 
-        // If the manifest was loaded through our proxy, we need to fix the base URI
-        // so Shaka can resolve relative segment/key URLs correctly.
+        // If the manifest was loaded through our proxy, we need to instruct Shaka
+        // that its real base URL is the original upstream URL.
+        // Otherwise, Shaka will resolve relative segment URLs (e.g. `segment1.m4s`)
+        // against `/api/proxy/stream`, resulting in `/api/proxy/segment1.m4s` (404).
         //
-        // IMPORTANT: We must NOT restore response.uri to the upstream URL when Warp
-        // is active, because that would cause Shaka to resolve relative segment URLs
-        // against the upstream server directly — bypassing Warp entirely.
-        //
-        // Instead, we set response.uri to a proxy URL pointing to the BASE DIRECTORY
-        // of the manifest. This way:
-        //   - Absolute URLs in the MPD → handleRequestFilter intercepts & proxies them
-        //   - Relative URLs in the MPD → Shaka resolves them against this proxy base →
-        //     handleRequestFilter intercepts & proxies them too
+        // This is safe even with Warp: handleRequestFilter will intercept the
+        // resolved absolute upstream URLs and proxy them via /api/proxy/stream.
         if (response.uri && response.uri.includes('/api/proxy/stream')) {
             try {
                 const urlParams = new URLSearchParams(response.uri.split('?')[1]);
                 const originalUrl = urlParams.get('url');
-                const sourceId = urlParams.get('sourceId') || '';
 
                 if (originalUrl) {
-                    if (this.currentChannel && this.currentChannel.useWarp) {
-                        // Warp is active: keep resolution through the proxy.
-                        // Build a proxy URL for the manifest's base directory so
-                        // relative segment URLs are resolved via /api/proxy/stream.
-                        const manifestBaseDir = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
-                        const proxyBase = `/api/proxy/stream?url=${encodeURIComponent(manifestBaseDir)}${sourceId ? '&sourceId=' + sourceId : ''}`;
-                        console.log(`[ShakaPlayer] Warp active — keeping segment resolution via proxy base: ${manifestBaseDir}`);
-                        response.uri = proxyBase;
-                    } else {
-                        // Warp is NOT active: restore the original upstream URL so Shaka
-                        // can resolve relative segments natively if needed.
-                        console.log(`[ShakaPlayer] Restoring manifest base URI to: ${originalUrl}`);
-                        response.uri = originalUrl;
-                    }
+                    console.log(`[ShakaPlayer] Restoring manifest base URI to: ${originalUrl}`);
+                    response.uri = originalUrl;
                 }
             } catch (err) {
                 console.warn('[ShakaPlayer] Could not parse original manifest URL from proxy URI', err);

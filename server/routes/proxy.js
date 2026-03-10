@@ -781,12 +781,18 @@ router.get('/stream', async (req, res) => {
             const isPluto = plutoDomains.some(domain => finalUrl.includes(domain));
             const isFancode = finalUrl.includes('fancode.com');
 
+            // The browser's actual origin (e.g. https://itv.iosonofra.click)
+            // CDNs often validate Origin against their CORS allowlist.
+            // We must forward the BROWSER's origin, not the CDN's own origin,
+            // otherwise the CDN may reject the request with an HTML error page.
+            const browserOrigin = req.get('origin') || req.get('referer')?.replace(/\/$/, '') || null;
+
             const getOrigin = () => {
                 if (customHeaders['Origin']) return customHeaders['Origin'];
                 if (customHeaders['origin']) return customHeaders['origin'];
                 if (isPluto) return 'https://pluto.tv';
                 if (isFancode) return 'https://fancode.com';
-                return urlObj.origin;
+                return browserOrigin || urlObj.origin;
             };
 
             const getReferer = () => {
@@ -794,7 +800,7 @@ router.get('/stream', async (req, res) => {
                 if (customHeaders['referer']) return customHeaders['referer'];
                 if (isPluto) return 'https://pluto.tv/';
                 if (isFancode) return 'https://fancode.com/';
-                return urlObj.origin + '/';
+                return (browserOrigin || urlObj.origin) + '/';
             };
 
             const headers = {

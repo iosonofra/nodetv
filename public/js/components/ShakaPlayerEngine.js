@@ -404,16 +404,28 @@ class ShakaPlayerEngine {
             // Dispatch event for UI sync
             window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
         } catch (e) {
-            // 1001 = RESTRICTED_CROSS_ORIGIN (CORS), 1002 = BAD_HTTP_STATUS (e.g. 403 Forbidden)
-            if ((e.code === 1001 || e.code === 1002) && !this.isUsingProxy) {
-                console.log(`[ShakaPlayer] Network Error ${e.code} detected. Retrying with backend proxy...`);
-                // Unload previous attempt to prevent Error 7000 (LOAD_INTERRUPTED)
-                await this.player.unload();
-                return this.play(channel, streamUrl, true);
+            // If we haven't tried the proxy yet, retry for a broad set of error types:
+            // - 1001 = RESTRICTED_CROSS_ORIGIN (CORS), 1002 = BAD_HTTP_STATUS
+            // - 4001/4003 = DRM/Manifest failures (e.g. URL returns 200 text/html instead of MPD)
+            // - Any other first-attempt failure where the proxy might help
+            if (!this.isUsingProxy) {
+                const category = e.category || 0;
+                const shouldRetry =
+                    e.code === 1001 || e.code === 1002 || // Network/CORS errors
+                    category === 1 ||  // NETWORK category
+                    category === 4 ||  // DRM category (e.g. 4003 from bad manifest content)
+                    category === 5;    // MANIFEST category (e.g. 4001 invalid XML from HTML response)
+
+                if (shouldRetry) {
+                    console.log(`[ShakaPlayer] Error ${e.code} (category ${category}) on direct load. Retrying via backend proxy...`);
+                    await this.player.unload();
+                    return this.play(channel, streamUrl, true);
+                }
             }
             this.onError(e);
             this.showError('Failed to play DASH stream: Shaka Error ' + e.code);
         }
+
     }
 
     stop() {

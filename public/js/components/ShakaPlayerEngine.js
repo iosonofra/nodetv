@@ -349,10 +349,20 @@ class ShakaPlayerEngine {
 
                             this.player.configure({
                                 drm: {
-                                    clearKeys: clearKeysConfig
+                                    clearKeys: clearKeysConfig,
+                                    // When we have explicit keys, remap Widevine/PlayReady
+                                    // signals in the manifest to use the ClearKey CDM.
+                                    // This fixes error 4003 (data:[]) where the manifest
+                                    // declares Widevine but no Widevine CDM is available
+                                    // (e.g. Firefox). Shaka will use org.w3.clearkey instead.
+                                    keySystemsMapping: {
+                                        'com.widevine.alpha': 'org.w3.clearkey',
+                                        'com.microsoft.playready': 'org.w3.clearkey',
+                                        'com.microsoft.playready.recommendation': 'org.w3.clearkey'
+                                    }
                                 }
                             });
-                            console.log('[ShakaPlayer] clearKeys configured:', clearKeysConfig);
+                            console.log('[ShakaPlayer] clearKeys + keySystemsMapping configured:', clearKeysConfig);
                         }
 
                     } catch (err) {

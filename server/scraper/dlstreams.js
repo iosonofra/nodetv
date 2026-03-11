@@ -21,7 +21,7 @@ const {
     CHROMIUM_PATH
 } = require('../services/dlstreamsResolver');
 
-const SCHEDULE_URL = `${BASE_URL}/`;
+const SCHEDULE_URL = `${BASE_URL}/index.php?cat=All+Soccer+Events`;
 
 // Only scrape soccer/football events
 const SOCCER_KEYWORDS = ['soccer', 'football', 'calcio', 'fútbol', 'fußball', 'serie a', 'premier league', 'la liga', 'bundesliga', 'ligue 1', 'champions league', 'europa league', 'conference league', 'copa', 'mls', 'eredivisie', 'primeira liga', 'süper lig'];
@@ -174,14 +174,10 @@ async function scrape() {
         // Step 1: Parse schedule
         const allEvents = await parseSchedule(page);
 
-        // Step 1.5: Filter to soccer/football only
-        const events = allEvents.filter(event => {
-            const cat = (event.category || '').toLowerCase();
-            const title = (event.title || '').toLowerCase();
-            return SOCCER_KEYWORDS.some(kw => cat.includes(kw) || title.includes(kw));
-        });
+        // Step 1.5: We are already on the 'All Soccer Events' page, so take all events
+        const events = allEvents;
 
-        console.log(`[*] Filtered to ${events.length} soccer events (from ${allEvents.length} total).`);
+        console.log(`[*] Found ${events.length} events on the All Soccer Events page.`);
 
         if (events.length === 0) {
             console.log("[!] No soccer events found in schedule.");

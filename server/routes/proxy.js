@@ -951,6 +951,63 @@ router.get('/stream', async (req, res) => {
                 return res.send(manifest);
             }
 
+            // DASH Manifest (MPD) with ClearKey: Rewrite ContentProtection for browser DRM
+            // When the URL has ?ck=base64(KID:KEY), this is a ClearKey stream whose
+            // manifest (from Sky/cssott CDN) declares only Widevine + PlayReady.
+            // Browsers like Firefox don't support Widevine, so we rewrite the MPD to
+            // use ClearKey ContentProtection. Shaka's clearKeys config will decrypt it.
+            const urlForMpd = response.url || url;
+            const contentLooksLikeMpd =
+                contentType.includes('dash+xml') ||
+                contentType.includes('application/xml') ||
+                urlForMpd.includes('.mpd');
+
+            const ckParam = (() => {
+                try { return new URL(urlForMpd).searchParams.get('ck'); } catch { return null; }
+            })();
+
+            if (contentLooksLikeMpd && ckParam) {
+                // Read the full manifest
+                const mpdChunks = [firstChunk];
+                let mpdNext = await iterator.next();
+                while (!mpdNext.done) { mpdChunks.push(Buffer.from(mpdNext.value)); mpdNext = await iterator.next(); }
+                let mpd = Buffer.concat(mpdChunks).toString('utf-8');
+
+                console.log(`[Proxy] Rewriting MPD ContentProtection for ClearKey (ck param detected)`);
+
+                // Decode the ck param to get KID:KEY (base64 encoded)
+                let kidForClearKey = '';
+                try {
+                    const decoded = Buffer.from(ckParam, 'base64').toString('utf-8');
+                    // Format: KID:KEY (hex)
+                    kidForClearKey = decoded.split(':')[0].trim();
+                } catch (e) {
+                    console.warn('[Proxy] Could not decode ck param:', e.message);
+                }
+
+                // Convert KID hex (no dashes) to UUID format for cenc:default_KID
+                const kidUuid = kidForClearKey.length === 32
+                    ? `${kidForClearKey.slice(0,8)}-${kidForClearKey.slice(8,12)}-${kidForClearKey.slice(12,16)}-${kidForClearKey.slice(16,20)}-${kidForClearKey.slice(20)}`
+                    : '';
+
+                // Strip ALL existing ContentProtection elements
+                mpd = mpd
+                    .replace(/<ContentProtection[^>]*\/>/gi, '')
+                    .replace(/<ContentProtection[\s\S]*?<\/ContentProtection>/gi, '');
+
+                // Inject ClearKey ContentProtection into every AdaptationSet
+                // Place it right after each <AdaptationSet ...> opening tag
+                const clearKeyBlock = kidUuid
+                    ? `<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${kidUuid}"></ContentProtection>` +
+                      `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`
+                    : `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`;
+
+                mpd = mpd.replace(/(<AdaptationSet[^>]*>)/g, `$1${clearKeyBlock}`);
+
+                res.set('Content-Type', 'application/dash+xml');
+                return res.send(mpd);
+            }
+
             // Binary content (Video Segment or Key): Collect and send
             console.log(`[Proxy] Serving binary content (${contentType}) at status ${response.status}`);
             res.status(response.status);

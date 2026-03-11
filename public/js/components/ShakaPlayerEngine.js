@@ -147,6 +147,10 @@ class ShakaPlayerEngine {
                 if (originalUrl && !originalUrl.startsWith('/api/') && !originalUrl.startsWith('data:')) {
                     const sourceId = this.currentChannel ? this.currentChannel.sourceId : '';
                     if (type === RequestType.LICENSE) {
+                        // With clearKeys, Shaka handles decryption locally — no license server needed.
+                        // Do NOT proxy the LICENSE request; intercepting it would break
+                        // Shaka's internal ClearKey session initialization.
+                        if (this.hasClearKeys) return;
                         const proxyUrl = `/api/proxy/drm?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}`;
                         request.uris = [proxyUrl];
                         console.log(`[ShakaPlayer] Licensing request proxied: ${proxyUrl}`);
@@ -183,8 +187,8 @@ class ShakaPlayerEngine {
         }
         */
 
-        this.isUsingProxy = forceProxy; // Track if we're currently forcing the proxy
-        this.hasClearKeys = false; // Reset — will be set when clearKeys are configured below
+        this.isUsingProxy = forceProxy;
+        this.hasClearKeys = false; // reset — set to true below when clearKeys are configured
 
 
         // Stop the main VideoPlayer if it's running
@@ -329,10 +333,6 @@ class ShakaPlayerEngine {
                             this.player.configure({
                                 drm: {
                                     clearKeys: clearKeysConfig,
-                                    // When we have explicit keys, ignore what the manifest says
-                                    // about DRM (Widevine, etc.) and force our clearKeys config.
-                                    ignoreManifestEncryptionInformation: true,
-                                    // Map common DRMs to ClearKey for robustness
                                     keySystemsMapping: {
                                         'com.widevine.alpha': 'org.w3.clearkey',
                                         'com.microsoft.playready': 'org.w3.clearkey',
@@ -340,7 +340,8 @@ class ShakaPlayerEngine {
                                     }
                                 }
                             });
-                            console.log('[ShakaPlayer] clearKeys + keySystemsMapping configured:', clearKeysConfig);
+                            this.hasClearKeys = true; // stops LICENSE requests from being proxied
+                            console.log('[ShakaPlayer] clearKeys configured:', clearKeysConfig);
                         }
 
                     } catch (err) {

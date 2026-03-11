@@ -1202,6 +1202,11 @@ class ChannelList {
                 }
                 const resolved = await res.json();
                 streamUrl = resolved.streamUrl;
+                
+                // Force HLS detection for DaddyHD disguised URLs (e.g. mono.css)
+                if (streamUrl && !streamUrl.includes('.m3u8') && !streamUrl.includes('m3u8') && !streamUrl.includes('.mpd')) {
+                    streamUrl += '#.m3u8';
+                }
                 console.log(`[ChannelList] DLStreams resolved: ${streamUrl?.substring(0, 80)}... (cached: ${resolved.cached})`);
 
                 // If DRM keys were resolved, inject them as properties for Shaka Player

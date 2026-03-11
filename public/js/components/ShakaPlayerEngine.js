@@ -122,28 +122,6 @@ class ShakaPlayerEngine {
                 console.warn('[ShakaPlayer] Could not parse original manifest URL from proxy URI', err);
             }
         }
-
-        // CRITICAL FIX: Shaka's DRM engine ignores clearKeys when the manifest
-        // declares Widevine/PlayReady ContentProtection. It only uses clearKeys
-        // when there are NO ContentProtection elements. So when we have clearKeys,
-        // we strip Widevine/PlayReady ContentProtection from the MPD manifest.
-        // This makes Shaka treat it as "no DRM info" → clearKeys kicks in.
-        if (this.hasClearKeys && response.data) {
-            try {
-                const text = new TextDecoder().decode(response.data);
-                if (text.includes('<ContentProtection') && text.includes('<MPD')) {
-                    // Remove Widevine and PlayReady ContentProtection elements
-                    // but keep any ClearKey ones
-                    const cleaned = text.replace(
-                        /<ContentProtection[^>]*schemeIdUri="urn:uuid:(edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^]*?<\/ContentProtection>|<ContentProtection[^>]*schemeIdUri="urn:uuid:(edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
-                        '<!-- ContentProtection removed for ClearKey -->');
-                    console.log('[ShakaPlayer] Stripped Widevine/PlayReady ContentProtection from MPD for ClearKey decryption');
-                    response.data = new TextEncoder().encode(cleaned).buffer;
-                }
-            } catch (err) {
-                console.warn('[ShakaPlayer] Could not process manifest for ClearKey:', err);
-            }
-        }
     }
 
     handleRequestFilter(type, request) {
@@ -351,11 +329,10 @@ class ShakaPlayerEngine {
                             this.player.configure({
                                 drm: {
                                     clearKeys: clearKeysConfig,
-                                    // When we have explicit keys, remap Widevine/PlayReady
-                                    // signals in the manifest to use the ClearKey CDM.
-                                    // This fixes error 4003 (data:[]) where the manifest
-                                    // declares Widevine but no Widevine CDM is available
-                                    // (e.g. Firefox). Shaka will use org.w3.clearkey instead.
+                                    // When we have explicit keys, ignore what the manifest says
+                                    // about DRM (Widevine, etc.) and force our clearKeys config.
+                                    ignoreManifestEncryptionInformation: true,
+                                    // Map common DRMs to ClearKey for robustness
                                     keySystemsMapping: {
                                         'com.widevine.alpha': 'org.w3.clearkey',
                                         'com.microsoft.playready': 'org.w3.clearkey',
@@ -363,8 +340,7 @@ class ShakaPlayerEngine {
                                     }
                                 }
                             });
-                            this.hasClearKeys = true; // Flag for handleResponseFilter to strip Widevine ContentProtection
-                            console.log('[ShakaPlayer] clearKeys configured:', clearKeysConfig);
+                            console.log('[ShakaPlayer] clearKeys + keySystemsMapping configured:', clearKeysConfig);
                         }
 
                     } catch (err) {

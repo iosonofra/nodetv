@@ -15,6 +15,9 @@ puppeteer.use(StealthPlugin());
 const BASE_URL = "https://dlstreams.top";
 const SCHEDULE_URL = `${BASE_URL}/`;
 
+// Only scrape soccer/football events
+const SOCCER_KEYWORDS = ['soccer', 'football', 'calcio', 'fútbol', 'fußball', 'serie a', 'premier league', 'la liga', 'bundesliga', 'ligue 1', 'champions league', 'europa league', 'conference league', 'copa', 'mls', 'eredivisie', 'primeira liga', 'süper lig'];
+
 // Output paths
 const DATA_DIR = path.join(__dirname, "../../data/scraper");
 if (!fs.existsSync(DATA_DIR)) {
@@ -298,10 +301,19 @@ async function scrape() {
         await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
 
         // Step 1: Parse schedule
-        const events = await parseSchedule(page);
+        const allEvents = await parseSchedule(page);
+
+        // Step 1.5: Filter to soccer/football only
+        const events = allEvents.filter(event => {
+            const cat = (event.category || '').toLowerCase();
+            const title = (event.title || '').toLowerCase();
+            return SOCCER_KEYWORDS.some(kw => cat.includes(kw) || title.includes(kw));
+        });
+
+        console.log(`[*] Filtered to ${events.length} soccer events (from ${allEvents.length} total).`);
 
         if (events.length === 0) {
-            console.log("[!] No events found in schedule.");
+            console.log("[!] No soccer events found in schedule.");
         }
 
         const m3uLines = ["#EXTM3U"];

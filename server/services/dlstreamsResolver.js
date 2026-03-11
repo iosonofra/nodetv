@@ -53,7 +53,7 @@ async function extractStreamUrl(page, channelId) {
         const originalFetch = window.fetch;
         window.fetch = function() {
             const url = arguments[0];
-            if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
+            if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
                 console.log('INTERCEPT_URL:' + url);
             }
             return originalFetch.apply(this, arguments);
@@ -61,7 +61,7 @@ async function extractStreamUrl(page, channelId) {
         const originalOpen = XMLHttpRequest.prototype.open;
         XMLHttpRequest.prototype.open = function() {
             const url = arguments[1];
-            if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
+            if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
                 console.log('INTERCEPT_URL:' + url);
             }
             return originalOpen.apply(this, arguments);
@@ -72,7 +72,7 @@ async function extractStreamUrl(page, channelId) {
     // Passive listeners
     const requestHandler = request => {
         const url = request.url();
-        if ((url.includes('.mpd') || url.includes('.m3u8')) && !url.toLowerCase().includes('ad')) {
+        if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv')) && !url.toLowerCase().includes('ad')) {
             if (!streamUrl) {
                 console.log(`  [+] Intercepted from request: ${url}`);
                 streamUrl = url;
@@ -116,7 +116,7 @@ async function extractStreamUrl(page, channelId) {
             for (const frame of page.frames()) {
                 try {
                     const src = frame.url();
-                    if (src && (src.includes('.mpd') || src.includes('.m3u8')) && !streamUrl) {
+                    if (src && !src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
                         console.log(`  [+] Found manifest in frame URL: ${src}`);
                         streamUrl = src;
                         break;
@@ -134,7 +134,7 @@ async function extractStreamUrl(page, channelId) {
 
                     for (let src of iframeSrcs) {
                         if (src.startsWith("//")) src = "https:" + src;
-                        if ((src.includes('.mpd') || src.includes('.m3u8')) && !streamUrl) {
+                        if (!src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
                             console.log(`  [+] Found manifest in iframe DOM src: ${src}`);
                             streamUrl = src;
                             break;

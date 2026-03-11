@@ -1184,6 +1184,43 @@ class ChannelList {
             const streamFormat = window.app?.player?.settings?.streamFormat || 'm3u8';
             const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', streamFormat);
             streamUrl = result.url;
+        } else if (channel.tvgId && channel.tvgId.startsWith('dl_')) {
+            // DLStreams channel: resolve fresh URL on-demand (tokens expire)
+            const dlChannelId = channel.tvgId.replace('dl_', '');
+            console.log(`[ChannelList] DLStreams channel detected (ID: ${dlChannelId}). Resolving fresh URL...`);
+
+            // Show resolving indicator
+            if (window.app?.player?.loadingSpinner) {
+                window.app.player.loadingSpinner.classList.add('show');
+            }
+
+            try {
+                const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || `Resolve failed (${res.status})`);
+                }
+                const resolved = await res.json();
+                streamUrl = resolved.streamUrl;
+                console.log(`[ChannelList] DLStreams resolved: ${streamUrl?.substring(0, 80)}... (cached: ${resolved.cached})`);
+
+                // If DRM keys were resolved, inject them as properties for Shaka Player
+                if (resolved.clearKeys) {
+                    channel.properties = channel.properties || {};
+                    channel.properties['inputstream.adaptive.license_type'] = 'clearkey';
+                    channel.properties['inputstream.adaptive.license_key'] = resolved.clearKeys;
+                }
+            } catch (err) {
+                console.error(`[ChannelList] DLStreams resolve failed:`, err.message);
+                if (window.app?.player) {
+                    window.app.player.showError(
+                        `Failed to resolve DLStreams channel.<br><br>` +
+                        `<strong>Error:</strong> ${err.message}<br><br>` +
+                        `The stream token may have expired. Try again or re-run the scraper.`
+                    );
+                }
+                return;
+            }
         } else {
             streamUrl = channel.url;
         }

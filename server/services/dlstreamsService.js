@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { sources, users, settings } = require('../db');
 const syncService = require('./syncService');
+const { resolveChannelUrl, decodeClearKey } = require('./dlstreamsResolver');
 
 class DlstreamsService {
     constructor() {
@@ -311,6 +312,39 @@ class DlstreamsService {
             this._autoRunTimer = null;
             console.log('[DLStreams] Auto-run disabled');
         }
+    }
+
+    /**
+     * Resolve a fresh stream URL for a DLStreams channel on-demand.
+     * Launches Puppeteer to visit the watch page and intercept the stream URL.
+     * @param {string} channelId - DLStreams channel ID (numeric string)
+     * @returns {{ streamUrl: string|null, clearKeys: string|null, cached: boolean }}
+     */
+    async resolveStreamUrl(channelId) {
+        console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
+        const result = await resolveChannelUrl(channelId);
+
+        // Decode ClearKey if present
+        let clearKeys = null;
+        let extractedCk = result.ckParam;
+
+        // Also check for ck= in the URL itself
+        if (!extractedCk && result.streamUrl && result.streamUrl.includes('ck=')) {
+            try {
+                const parts = result.streamUrl.split('ck=');
+                if (parts.length > 1) extractedCk = parts[1].split('&')[0];
+            } catch (err) { }
+        }
+
+        if (extractedCk) {
+            clearKeys = decodeClearKey(extractedCk);
+        }
+
+        return {
+            streamUrl: result.streamUrl,
+            clearKeys,
+            cached: result.cached
+        };
     }
 }
 

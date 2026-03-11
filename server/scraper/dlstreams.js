@@ -12,7 +12,15 @@ const path = require('path');
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
 
-const BASE_URL = "https://dlstreams.top";
+// Import shared resolver functions
+const {
+    extractStreamUrl,
+    decodeClearKey,
+    getLaunchOptions,
+    BASE_URL,
+    CHROMIUM_PATH
+} = require('../services/dlstreamsResolver');
+
 const SCHEDULE_URL = `${BASE_URL}/`;
 
 // Only scrape soccer/football events
@@ -26,9 +34,6 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const PLAYLIST_FILE = path.join(DATA_DIR, "dlstreams.m3u");
 const HISTORY_FILE = path.join(DATA_DIR, "dlstreams_history.json");
-
-// Optional custom Chromium path (useful for Linux/Docker)
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 
 /**
  * Parse schedule page and extract events with channel info
@@ -148,135 +153,6 @@ async function parseSchedule(page) {
     return events;
 }
 
-/**
- * Visit a player page and intercept stream URL (m3u8/mpd)
- */
-async function extractStreamUrl(page, channelId) {
-    const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
-    let streamUrl = null;
-    let ckParam = null;
-
-    // Monitor script for fetch/XHR interception
-    const MONITOR_SCRIPT = `
-    (function() {
-        const originalFetch = window.fetch;
-        window.fetch = function() {
-            const url = arguments[0];
-            if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
-                console.log('INTERCEPT_URL:' + url);
-            }
-            return originalFetch.apply(this, arguments);
-        };
-        const originalOpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function() {
-            const url = arguments[1];
-            if (typeof url === 'string' && (url.includes('.mpd') || url.includes('.m3u8'))) {
-                console.log('INTERCEPT_URL:' + url);
-            }
-            return originalOpen.apply(this, arguments);
-        };
-    })();
-    `;
-
-    // Passive listeners
-    const requestHandler = request => {
-        const url = request.url();
-        if ((url.includes('.mpd') || url.includes('.m3u8')) && !url.toLowerCase().includes('ad')) {
-            if (!streamUrl) {
-                console.log(`  [+] Intercepted from request: ${url}`);
-                streamUrl = url;
-
-                try {
-                    const parsedUrl = new URL(url);
-                    const ck = parsedUrl.searchParams.get('ck');
-                    if (ck) ckParam = ck;
-                } catch (err) { }
-            }
-        }
-    };
-
-    const consoleHandler = msg => {
-        const text = msg.text();
-        if (text.startsWith('INTERCEPT_URL:')) {
-            const url = text.replace('INTERCEPT_URL:', '');
-            if (!streamUrl) {
-                console.log(`  [+] Intercepted from console: ${url}`);
-                streamUrl = url;
-
-                try {
-                    const parsedUrl = new URL(url);
-                    const ck = parsedUrl.searchParams.get('ck');
-                    if (ck) ckParam = ck;
-                } catch (err) { }
-            }
-        }
-    };
-
-    page.on('request', requestHandler);
-    page.on('console', consoleHandler);
-
-    try {
-        await page.evaluateOnNewDocument(MONITOR_SCRIPT);
-        await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
-        await new Promise(r => setTimeout(r, 10000)); // Wait for video to load
-
-        // Check all frames for manifests
-        const checkFrames = async () => {
-            for (const frame of page.frames()) {
-                try {
-                    const src = frame.url();
-                    if (src && (src.includes('.mpd') || src.includes('.m3u8')) && !streamUrl) {
-                        console.log(`  [+] Found manifest in frame URL: ${src}`);
-                        streamUrl = src;
-                        break;
-                    }
-                } catch (e) { }
-            }
-
-            if (!streamUrl) {
-                try {
-                    const iframeSrcs = await page.evaluate(() => {
-                        return Array.from(document.querySelectorAll('iframe'))
-                            .map(f => f.getAttribute('src'))
-                            .filter(s => s);
-                    });
-
-                    for (let src of iframeSrcs) {
-                        if (src.startsWith("//")) src = "https:" + src;
-                        if ((src.includes('.mpd') || src.includes('.m3u8')) && !streamUrl) {
-                            console.log(`  [+] Found manifest in iframe DOM src: ${src}`);
-                            streamUrl = src;
-                            break;
-                        }
-                    }
-                } catch (e) { }
-            }
-        };
-
-        await checkFrames();
-
-        // Click in center to trigger playback if needed
-        if (!streamUrl) {
-            await page.mouse.click(640, 360);
-            await new Promise(r => setTimeout(r, 3000));
-            await checkFrames();
-        }
-
-        if (!streamUrl) {
-            await page.mouse.click(640, 400);
-            await new Promise(r => setTimeout(r, 5000));
-            await checkFrames();
-        }
-
-    } catch (err) {
-        console.error(` [!] Error on ${playerUrl}: ${err.message}`);
-    } finally {
-        page.off('request', requestHandler);
-        page.off('console', consoleHandler);
-    }
-
-    return { streamUrl, ckParam };
-}
 
 async function scrape() {
     const startTime = Date.now();
@@ -285,14 +161,9 @@ async function scrape() {
 
     let browser;
     try {
-        const launchOptions = {
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        };
-
-        if (fs.existsSync(CHROMIUM_PATH)) {
-            launchOptions.executablePath = CHROMIUM_PATH;
-            console.log(`[*] Using Chromium at: ${CHROMIUM_PATH}`);
+        const launchOptions = getLaunchOptions();
+        if (launchOptions.executablePath) {
+            console.log(`[*] Using Chromium at: ${launchOptions.executablePath}`);
         }
 
         browser = await puppeteer.launch(launchOptions);

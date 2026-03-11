@@ -160,6 +160,33 @@ router.put('/dlstreams/settings', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+/**
+ * Resolve a fresh stream URL for a DLStreams channel on-demand
+ * GET /api/scraper/dlstreams/resolve/:channelId
+ * 
+ * This endpoint uses Puppeteer to visit the DLStreams watch page
+ * and intercept the fresh stream URL with a valid token.
+ */
+router.get('/dlstreams/resolve/:channelId', async (req, res) => {
+    try {
+        const { channelId } = req.params;
+
+        if (!channelId || !/^\d+$/.test(channelId)) {
+            return res.status(400).json({ error: 'Valid numeric channelId required' });
+        }
+
+        const result = await dlstreamsService.resolveStreamUrl(channelId);
+
+        if (!result.streamUrl) {
+            return res.status(404).json({ error: 'Could not resolve stream URL', channelId });
+        }
+
+        res.json(result);
+    } catch (err) {
+        console.error(`[DLStreams Resolve] Error resolving channel ${req.params.channelId}:`, err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 module.exports = router;
 

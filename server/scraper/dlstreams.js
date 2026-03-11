@@ -46,106 +46,105 @@ async function parseSchedule(page) {
     // Extract events from the schedule HTML
     const events = await page.evaluate((baseUrl) => {
         const results = [];
-        // The schedule is organized with category headers and event rows
-        // Each event has a time, title, and channel links
-        const rows = document.querySelectorAll('tr');
-        let currentCategory = 'Events';
-
-        for (const row of rows) {
-            // Check for category header
-            const categoryHeader = row.querySelector('td.competition-cell, td[colspan]');
-            if (categoryHeader) {
-                const catText = categoryHeader.textContent.trim();
-                if (catText && !catText.includes('Time') && catText.length > 1 && catText.length < 100) {
-                    currentCategory = catText;
-                    continue;
-                }
-            }
-
-            // Extract event data from table rows
-            const cells = row.querySelectorAll('td');
-            if (cells.length < 2) continue;
-
-            // Try to find time, event name, and channel links
-            let time = '';
-            let eventTitle = '';
+        const eventNodes = document.querySelectorAll('.schedule__event');
+        
+        for (const ev of eventNodes) {
+            // Get category
+            const catEl = ev.closest('.schedule__category')?.querySelector('.card__meta');
+            const category = catEl ? catEl.textContent.trim() : 'Events';
+            
+            const timeEl = ev.querySelector('.schedule__time');
+            const titleEl = ev.querySelector('.schedule__eventTitle');
+            
+            const time = timeEl ? timeEl.textContent.trim() : '';
+            const title = titleEl ? titleEl.textContent.trim() : 'Unknown Event';
+            
+            const channelLinks = ev.querySelectorAll('.schedule__channels a[href*="watch.php"]');
             const channels = [];
-
-            for (const cell of cells) {
-                const text = cell.textContent.trim();
-
-                // Time detection (HH:MM format)
-                if (/^\d{1,2}:\d{2}/.test(text) && !time) {
-                    time = text.match(/\d{1,2}:\d{2}/)[0];
-                    continue;
-                }
-
-                // Channel links
-                const links = cell.querySelectorAll('a[href*="watch.php"]');
-                if (links.length > 0) {
-                    links.forEach(link => {
-                        const href = link.getAttribute('href');
-                        const idMatch = href.match(/id=(\d+)/);
-                        if (idMatch) {
-                            channels.push({
-                                name: link.textContent.trim(),
-                                id: idMatch[1],
-                                url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
-                            });
-                        }
-                    });
-                    continue;
-                }
-
-                // Event title (non-time, non-channel text)
-                if (text && text.length > 2 && !time && channels.length === 0) {
-                    eventTitle = text;
-                }
-            }
-
-            // If no event title found from dedicated cell, try the row text
-            if (!eventTitle && cells.length >= 2) {
-                eventTitle = cells[1]?.textContent?.trim() || cells[0]?.textContent?.trim() || '';
-                // Clean up - remove channel names from event title
-                channels.forEach(ch => {
-                    eventTitle = eventTitle.replace(ch.name, '').trim();
-                });
-            }
-
-            if (channels.length > 0) {
-                results.push({
-                    category: currentCategory,
-                    title: eventTitle || 'Unknown Event',
-                    time: time || '',
-                    channels
-                });
-            }
-        }
-
-        // Fallback: if table parsing didn't work, try extracting all watch.php links
-        if (results.length === 0) {
-            const allLinks = document.querySelectorAll('a[href*="watch.php"]');
-            const seenIds = new Set();
-
-            allLinks.forEach(link => {
+            
+            channelLinks.forEach(link => {
                 const href = link.getAttribute('href');
                 const idMatch = href.match(/id=(\d+)/);
-                if (idMatch && !seenIds.has(idMatch[1])) {
-                    seenIds.add(idMatch[1]);
-                    results.push({
-                        category: 'Events',
-                        title: link.textContent.trim(),
-                        time: '',
-                        channels: [{
-                            name: link.textContent.trim(),
-                            id: idMatch[1],
-                            url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
-                        }]
+                if (idMatch) {
+                    channels.push({
+                        name: link.textContent.trim(),
+                        id: idMatch[1],
+                        url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
                     });
                 }
             });
+            
+            if (channels.length > 0) {
+                results.push({ category, title, time, channels });
+            }
         }
+        
+        // Fallback for old table structure just in case
+        if (results.length === 0) {
+            const rows = document.querySelectorAll('tr');
+            let currentCategory = 'Events';
 
+            for (const row of rows) {
+                const categoryHeader = row.querySelector('td.competition-cell, td[colspan]');
+                if (categoryHeader) {
+                    const catText = categoryHeader.textContent.trim();
+                    if (catText && !catText.includes('Time') && catText.length > 1 && catText.length < 100) {
+                        currentCategory = catText;
+                        continue;
+                    }
+                }
+
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 2) continue;
+
+                let time = '';
+                let eventTitle = '';
+                const channels = [];
+
+                for (const cell of cells) {
+                    const text = cell.textContent.trim();
+                    if (/^\d{1,2}:\d{2}/.test(text) && !time) {
+                        time = text.match(/\d{1,2}:\d{2}/)[0];
+                        continue;
+                    }
+                    const links = cell.querySelectorAll('a[href*="watch.php"]');
+                    if (links.length > 0) {
+                        links.forEach(link => {
+                            const href = link.getAttribute('href');
+                            const idMatch = href.match(/id=(\d+)/);
+                            if (idMatch) {
+                                channels.push({
+                                    name: link.textContent.trim(),
+                                    id: idMatch[1],
+                                    url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
+                                });
+                            }
+                        });
+                        continue;
+                    }
+                    if (text && text.length > 2 && !time && channels.length === 0) {
+                        eventTitle = text;
+                    }
+                }
+
+                if (!eventTitle && cells.length >= 2) {
+                    eventTitle = cells[1]?.textContent?.trim() || cells[0]?.textContent?.trim() || '';
+                    channels.forEach(ch => {
+                        eventTitle = eventTitle.replace(ch.name, '').trim();
+                    });
+                }
+
+                if (channels.length > 0) {
+                    results.push({
+                        category: currentCategory,
+                        title: eventTitle || 'Unknown Event',
+                        time: time || '',
+                        channels
+                    });
+                }
+            }
+        }
+        
         return results;
     }, BASE_URL);
 

@@ -74,7 +74,12 @@ function parseExtinf(line) {
 
     // Generate ID if not present
     if (!info.tvgId) {
-        info.tvgId = info.name ? info.name.toLowerCase().replace(/\s+/g, '_') : `channel_${Date.now()}`;
+        info.tvgId = info.name 
+            ? info.name.toLowerCase()
+                .replace(/[^a-z0-9_-]/g, '_')
+                .replace(/_+/g, '_')
+                .replace(/^_|_$/g, '')
+            : `channel_${Date.now()}`;
     }
 
     return info;

@@ -85,6 +85,14 @@ const API = {
         updateSettings: (data) => API.request('PUT', '/scraper/settings', data)
     },
 
+    // DLStreams Scraper
+    dlstreams: {
+        getStatus: () => API.request('GET', '/scraper/dlstreams/status'),
+        getLogs: () => API.request('GET', '/scraper/dlstreams/logs'),
+        run: () => API.request('POST', '/scraper/dlstreams/run'),
+        updateSettings: (data) => API.request('PUT', '/scraper/dlstreams/settings', data)
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

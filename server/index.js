@@ -132,6 +132,10 @@ app.listen(PORT, async () => {
         const scraperService = require('./services/scraperService');
         scraperService.startAutoRun();
 
+        // Start the DLStreams scraper auto-run
+        const dlstreamsService = require('./services/dlstreamsService');
+        dlstreamsService.startAutoRun();
+
         // Detect hardware acceleration capabilities
         try {
             const hwDetect = require('./services/hwDetect');

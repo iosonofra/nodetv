@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const scraperService = require('../services/scraperService');
+const dlstreamsService = require('../services/dlstreamsService');
 
 /**
  * Get scraper status and history
@@ -81,4 +82,84 @@ router.put('/settings', async (req, res) => {
     }
 });
 
+// ========================================
+// DLStreams Scraper Routes
+// ========================================
+
+/**
+ * Get DLStreams scraper status and history
+ * GET /api/scraper/dlstreams/status
+ */
+router.get('/dlstreams/status', async (req, res) => {
+    try {
+        const status = await dlstreamsService.getStatus();
+        res.json(status);
+    } catch (err) {
+        console.error('Error getting DLStreams status:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * Get DLStreams scraper logs
+ * GET /api/scraper/dlstreams/logs
+ */
+router.get('/dlstreams/logs', (req, res) => {
+    res.json({ logs: dlstreamsService.getLogs() });
+});
+
+/**
+ * Run DLStreams scraper
+ * POST /api/scraper/dlstreams/run
+ */
+router.post('/dlstreams/run', async (req, res) => {
+    try {
+        if (dlstreamsService.isRunning) {
+            return res.status(400).json({ error: 'DLStreams scraper is already running' });
+        }
+
+        dlstreamsService.run().catch(err => {
+            console.error('[DLStreams Route] Run failed:', err);
+        });
+
+        res.json({ message: 'DLStreams scraper started' });
+    } catch (err) {
+        console.error('Error starting DLStreams scraper:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * Download DLStreams playlist
+ * GET /api/scraper/dlstreams/download
+ */
+router.get('/dlstreams/download', (req, res) => {
+    const playlistFile = dlstreamsService.playlistFile;
+    if (require('fs').existsSync(playlistFile)) {
+        res.download(playlistFile, 'dlstreams.m3u');
+    } else {
+        res.status(404).json({ error: 'Playlist file not found' });
+    }
+});
+
+/**
+ * Update DLStreams scraper settings
+ * PUT /api/scraper/dlstreams/settings
+ */
+router.put('/dlstreams/settings', async (req, res) => {
+    try {
+        const { settings: dbSettings } = require('../db');
+        const updates = req.body;
+
+        await dbSettings.update(updates);
+        await dlstreamsService.restartAutoRun();
+
+        res.json({ message: 'DLStreams scraper settings updated' });
+    } catch (err) {
+        console.error('Error updating DLStreams settings:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
+

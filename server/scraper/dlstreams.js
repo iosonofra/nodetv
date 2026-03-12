@@ -305,7 +305,7 @@ async function scrape() {
         }
 
         const m3uLines = ["#EXTM3U"];
-        const processedChannels = new Set(); // Avoid duplicate channel visits
+        const processedChannels = new Map(); // Avoid duplicate channel visits
 
         // Step 2: For each event, visit channel player pages
         let eventIdx = 0;
@@ -313,16 +313,21 @@ async function scrape() {
             eventIdx++;
 
             for (const channel of event.channels) {
-                // Skip if we already processed this channel ID
+                let streamUrl, ckParam;
+                
+                // Use cached data if we already processed this channel ID
                 if (processedChannels.has(channel.id)) {
-                    // Still add to M3U with cached data if available
-                    continue;
+                    console.log(`[${eventIdx}/${events.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id}) [CACHED]`);
+                    const cached = processedChannels.get(channel.id);
+                    streamUrl = cached.streamUrl;
+                    ckParam = cached.ckParam;
+                } else {
+                    console.log(`[${eventIdx}/${events.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
+                    const result = await extractStreamUrl(page, channel.id);
+                    streamUrl = result.streamUrl;
+                    ckParam = result.ckParam;
+                    processedChannels.set(channel.id, { streamUrl, ckParam });
                 }
-
-                console.log(`[${eventIdx}/${events.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
-
-                const { streamUrl, ckParam } = await extractStreamUrl(page, channel.id);
-                processedChannels.add(channel.id);
 
                 if (streamUrl) {
                     let finalUrl = streamUrl;

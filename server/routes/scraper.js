@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const scraperService = require('../services/scraperService');
 const dlstreamsService = require('../services/dlstreamsService');
+const { fetchCategories } = require('../services/dlstreamsResolver');
 
 /**
  * Get scraper status and history
@@ -160,6 +161,47 @@ router.put('/dlstreams/settings', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+/**
+ * Fetch available categories from DLStreams
+ * GET /api/scraper/dlstreams/categories
+ */
+router.get('/dlstreams/categories', async (req, res) => {
+    try {
+        const { settings: dbSettings } = require('../db');
+        const currentSettings = await dbSettings.get();
+        const saved = currentSettings.dlstreamsSelectedCategories || [];
+
+        const available = await fetchCategories();
+
+        res.json({ available, selected: saved });
+    } catch (err) {
+        console.error('Error fetching DLStreams categories:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * Save selected DLStreams categories
+ * PUT /api/scraper/dlstreams/categories
+ */
+router.put('/dlstreams/categories', async (req, res) => {
+    try {
+        const { settings: dbSettings } = require('../db');
+        const { categories } = req.body;
+
+        if (!Array.isArray(categories)) {
+            return res.status(400).json({ error: 'categories must be an array' });
+        }
+
+        await dbSettings.update({ dlstreamsSelectedCategories: categories });
+        res.json({ message: 'Categories saved', categories });
+    } catch (err) {
+        console.error('Error saving DLStreams categories:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 /**
  * Resolve a fresh stream URL for a DLStreams channel on-demand
  * GET /api/scraper/dlstreams/resolve/:channelId

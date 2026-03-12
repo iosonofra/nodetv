@@ -21,10 +21,7 @@ const {
     CHROMIUM_PATH
 } = require('../services/dlstreamsResolver');
 
-const SCHEDULE_URL = `${BASE_URL}/index.php?cat=All+Soccer+Events`;
-
-// Only scrape soccer/football events
-const SOCCER_KEYWORDS = ['soccer', 'football', 'calcio', 'fútbol', 'fußball', 'serie a', 'premier league', 'la liga', 'bundesliga', 'ligue 1', 'champions league', 'europa league', 'conference league', 'copa', 'mls', 'eredivisie', 'primeira liga', 'süper lig'];
+const SCHEDULE_URL = `${BASE_URL}/index.php`;
 
 // Output paths
 const DATA_DIR = path.join(__dirname, "../../data/scraper");
@@ -152,11 +149,131 @@ async function parseSchedule(page) {
     return events;
 }
 
+/**
+ * Parse a specific category page
+ */
+async function parseCategoryPage(page, categorySlug) {
+    const catUrl = `${BASE_URL}/index.php?cat=${encodeURIComponent(categorySlug).replace(/%20/g, '+')}`;
+    console.log(`[*] Fetching category: ${categorySlug} from ${catUrl}...`);
+
+    // Temporarily override the SCHEDULE_URL for parseSchedule-like logic
+    await page.goto(catUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    const events = await page.evaluate((baseUrl) => {
+        const results = [];
+        const eventNodes = document.querySelectorAll('.schedule__event');
+        
+        for (const ev of eventNodes) {
+            const catEl = ev.closest('.schedule__category')?.querySelector('.card__meta');
+            const category = catEl ? catEl.textContent.trim() : 'Events';
+            
+            const timeEl = ev.querySelector('.schedule__time');
+            const titleEl = ev.querySelector('.schedule__eventTitle');
+            
+            const time = timeEl ? timeEl.textContent.trim() : '';
+            const title = titleEl ? titleEl.textContent.trim() : 'Unknown Event';
+            
+            const channelLinks = ev.querySelectorAll('.schedule__channels a[href*="watch.php"]');
+            const channels = [];
+            
+            channelLinks.forEach(link => {
+                const href = link.getAttribute('href');
+                const idMatch = href.match(/id=(\d+)/);
+                if (idMatch) {
+                    channels.push({
+                        name: link.textContent.trim(),
+                        id: idMatch[1],
+                        url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
+                    });
+                }
+            });
+            
+            if (channels.length > 0) {
+                results.push({ category, title, time, channels });
+            }
+        }
+
+        // Fallback table parser
+        if (results.length === 0) {
+            const rows = document.querySelectorAll('tr');
+            let currentCategory = 'Events';
+            for (const row of rows) {
+                const categoryHeader = row.querySelector('td.competition-cell, td[colspan]');
+                if (categoryHeader) {
+                    const catText = categoryHeader.textContent.trim();
+                    if (catText && !catText.includes('Time') && catText.length > 1 && catText.length < 100) {
+                        currentCategory = catText;
+                        continue;
+                    }
+                }
+                const cells = row.querySelectorAll('td');
+                if (cells.length < 2) continue;
+                let time = '';
+                let eventTitle = '';
+                const channels = [];
+                for (const cell of cells) {
+                    const text = cell.textContent.trim();
+                    if (/^\d{1,2}:\d{2}/.test(text) && !time) {
+                        time = text.match(/\d{1,2}:\d{2}/)[0];
+                        continue;
+                    }
+                    const links = cell.querySelectorAll('a[href*="watch.php"]');
+                    if (links.length > 0) {
+                        links.forEach(link => {
+                            const href = link.getAttribute('href');
+                            const idMatch = href.match(/id=(\d+)/);
+                            if (idMatch) {
+                                channels.push({
+                                    name: link.textContent.trim(),
+                                    id: idMatch[1],
+                                    url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
+                                });
+                            }
+                        });
+                        continue;
+                    }
+                    if (text && text.length > 2 && !time && channels.length === 0) {
+                        eventTitle = text;
+                    }
+                }
+                if (!eventTitle && cells.length >= 2) {
+                    eventTitle = cells[1]?.textContent?.trim() || cells[0]?.textContent?.trim() || '';
+                    channels.forEach(ch => { eventTitle = eventTitle.replace(ch.name, '').trim(); });
+                }
+                if (channels.length > 0) {
+                    results.push({ category: currentCategory, title: eventTitle || 'Unknown Event', time: time || '', channels });
+                }
+            }
+        }
+
+        return results;
+    }, BASE_URL);
+
+    console.log(`[*] Found ${events.length} events for category: ${categorySlug}`);
+    return events;
+}
+
 
 async function scrape() {
     const startTime = Date.now();
     const runType = process.env.SCRAPER_RUN_TYPE || 'manual';
     console.log(`[*] Starting DLStreams Scraper (${runType})...`);
+
+    // Parse selected categories from environment variable
+    let selectedCategories = [];
+    try {
+        if (process.env.DLSTREAMS_CATEGORIES) {
+            selectedCategories = JSON.parse(process.env.DLSTREAMS_CATEGORIES);
+        }
+    } catch (e) {
+        console.error('[!] Error parsing DLSTREAMS_CATEGORIES env var:', e.message);
+    }
+
+    if (selectedCategories.length > 0) {
+        console.log(`[*] Selected categories (${selectedCategories.length}): ${selectedCategories.join(', ')}`);
+    } else {
+        console.log('[*] No categories selected — scraping ALL events.');
+    }
 
     let browser;
     try {
@@ -170,16 +287,21 @@ async function scrape() {
 
         await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
 
-        // Step 1: Parse schedule
-        const allEvents = await parseSchedule(page);
+        // Step 1: Parse schedule — either per-category or all
+        let events = [];
+        if (selectedCategories.length > 0) {
+            for (const cat of selectedCategories) {
+                const catEvents = await parseCategoryPage(page, cat);
+                events.push(...catEvents);
+            }
+        } else {
+            events = await parseSchedule(page);
+        }
 
-        // Step 1.5: We are already on the 'All Soccer Events' page, so take all events
-        const events = allEvents;
-
-        console.log(`[*] Found ${events.length} events on the All Soccer Events page.`);
+        console.log(`[*] Total events found: ${events.length}`);
 
         if (events.length === 0) {
-            console.log("[!] No soccer events found in schedule.");
+            console.log("[!] No events found in schedule.");
         }
 
         const m3uLines = ["#EXTM3U"];

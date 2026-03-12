@@ -88,13 +88,23 @@ class DlstreamsService {
 
         this.addLog(`[*] Starting DLStreams scraper execution (${runType})...`);
 
+        // Read selected categories from settings
+        const currentSettings = await settings.get();
+        const selectedCategories = currentSettings.dlstreamsSelectedCategories || [];
+        if (selectedCategories.length > 0) {
+            this.addLog(`[*] Categories: ${selectedCategories.join(', ')}`);
+        } else {
+            this.addLog('[*] No categories selected — scraping all events.');
+        }
+
         const scriptPath = path.join(__dirname, '../scraper/dlstreams.js');
 
         this.currentProcess = spawn(process.execPath, [scriptPath], {
             env: {
                 ...process.env,
                 PORT: process.env.PORT || 3000,
-                SCRAPER_RUN_TYPE: runType
+                SCRAPER_RUN_TYPE: runType,
+                DLSTREAMS_CATEGORIES: JSON.stringify(selectedCategories)
             }
         });
 

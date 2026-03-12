@@ -115,6 +115,7 @@ function getDefaultSettings() {
     // DLStreams scraper settings
     dlstreamsAutoRun: false,
     dlstreamsInterval: '1',        // hours
+    dlstreamsSelectedCategories: [], // empty = scrape all categories
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

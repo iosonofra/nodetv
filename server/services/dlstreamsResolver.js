@@ -250,10 +250,59 @@ function decodeClearKey(ckParam) {
     return '';
 }
 
+/**
+ * Fetch available categories from DLStreams homepage
+ * Scrapes the navigation/filter bar for category links
+ * @returns {Array<{name: string, slug: string}>}
+ */
+async function fetchCategories() {
+    console.log('[DLStreams Resolver] Fetching categories from homepage...');
+    let browser;
+    try {
+        browser = await puppeteer.launch(getLaunchOptions());
+        const page = await browser.newPage();
+
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+        );
+
+        await page.goto(BASE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
+
+        const categories = await page.evaluate(() => {
+            const results = [];
+            const links = document.querySelectorAll('a[href*="index.php?cat="]');
+            const seen = new Set();
+
+            for (const link of links) {
+                const href = link.getAttribute('href');
+                const match = href.match(/[?&]cat=([^&]+)/);
+                if (match) {
+                    const slug = decodeURIComponent(match[1].replace(/\+/g, ' '));
+                    // Skip duplicates and "All" type entries
+                    if (!seen.has(slug) && slug !== 'All' && slug !== 'Upcoming Events' && slug !== 'TV Shows') {
+                        seen.add(slug);
+                        results.push({
+                            name: link.textContent.trim(),
+                            slug: slug
+                        });
+                    }
+                }
+            }
+            return results;
+        });
+
+        console.log(`[DLStreams Resolver] Found ${categories.length} categories.`);
+        return categories;
+    } finally {
+        if (browser) await browser.close();
+    }
+}
+
 module.exports = {
     extractStreamUrl,
     resolveChannelUrl,
     decodeClearKey,
+    fetchCategories,
     getLaunchOptions,
     BASE_URL,
     CHROMIUM_PATH

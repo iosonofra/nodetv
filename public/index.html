@@ -1019,6 +1019,26 @@
                 </div>
               </div>
 
+              <!-- Categories Selection -->
+              <div class="settings-section"
+                style="margin-top: var(--space-md); border-top: 1px solid var(--color-border-subtle); padding-top: var(--space-md);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+                  <div>
+                    <span class="setting-label">Sport Categories</span>
+                    <span class="setting-hint" style="display: block; margin-top: 2px;">Select which categories to scrape. None selected = scrape all events.</span>
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-sm btn-ghost" id="dl-fetch-categories">Fetch Categories</button>
+                    <button class="btn btn-sm btn-secondary" id="dl-save-categories" style="display: none;">Save Categories</button>
+                  </div>
+                </div>
+                <div id="dl-categories-container"
+                  style="display: flex; flex-wrap: wrap; gap: 6px; padding: var(--space-sm); background: var(--color-bg-tertiary); border-radius: var(--radius-sm); border: 1px solid var(--color-border); min-height: 44px; align-items: center;">
+                  <span class="hint" style="font-size: 0.8rem;">Click "Fetch Categories" to load available categories from DLStreams.</span>
+                </div>
+                <div id="dl-categories-status" style="margin-top: var(--space-xs); font-size: 0.75rem; color: var(--color-text-secondary);"></div>
+              </div>
+
               <div class="scraper-status-container"
                 style="margin-top: var(--space-md); padding: var(--space-md); background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
                 <div class="status-item" style="display: flex; justify-content: space-between; align-items: center;">

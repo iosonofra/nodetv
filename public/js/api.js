@@ -90,7 +90,9 @@ const API = {
         getStatus: () => API.request('GET', '/scraper/dlstreams/status'),
         getLogs: () => API.request('GET', '/scraper/dlstreams/logs'),
         run: () => API.request('POST', '/scraper/dlstreams/run'),
-        updateSettings: (data) => API.request('PUT', '/scraper/dlstreams/settings', data)
+        updateSettings: (data) => API.request('PUT', '/scraper/dlstreams/settings', data),
+        getCategories: () => API.request('GET', '/scraper/dlstreams/categories'),
+        saveCategories: (categories) => API.request('PUT', '/scraper/dlstreams/categories', { categories })
     },
 
     // Favorites

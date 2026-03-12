@@ -915,6 +915,8 @@ class SettingsPage {
         const saveSettingsBtn = document.getElementById('save-dl-settings');
         const autoRunToggle = document.getElementById('setting-dl-auto-run');
         const intervalContainer = document.getElementById('dl-interval-container');
+        const fetchCategoriesBtn = document.getElementById('dl-fetch-categories');
+        const saveCategoriesBtn = document.getElementById('dl-save-categories');
 
         if (runBtn) {
             runBtn.addEventListener('click', () => this.runDlstreams());
@@ -932,6 +934,153 @@ class SettingsPage {
             autoRunToggle.addEventListener('change', () => {
                 intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
             });
+        }
+
+        if (fetchCategoriesBtn) {
+            fetchCategoriesBtn.addEventListener('click', () => this.fetchDlstreamsCategories());
+        }
+
+        if (saveCategoriesBtn) {
+            saveCategoriesBtn.addEventListener('click', () => this.saveDlstreamsCategories());
+        }
+
+        // Auto-load saved categories on page init
+        this.loadSavedDlCategories();
+    }
+
+    /**
+     * Load saved categories from settings (without fetching from DLStreams)
+     */
+    async loadSavedDlCategories() {
+        try {
+            const status = await API.dlstreams.getStatus();
+            // Read saved categories from status settings if available
+            // We'll use a lightweight approach: render saved ones as chips
+            const settings = await API.settings.get();
+            const saved = settings.dlstreamsSelectedCategories || [];
+            if (saved.length > 0) {
+                this.renderDlCategories(saved.map(s => ({ name: s, slug: s })), saved);
+            }
+        } catch (err) {
+            // Silent fail - categories will load when user clicks Fetch
+        }
+    }
+
+    /**
+     * Fetch available categories from DLStreams website
+     */
+    async fetchDlstreamsCategories() {
+        const fetchBtn = document.getElementById('dl-fetch-categories');
+        const statusEl = document.getElementById('dl-categories-status');
+
+        if (fetchBtn) {
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = 'Fetching...';
+        }
+        if (statusEl) statusEl.textContent = 'Scraping DLStreams homepage for categories...';
+
+        try {
+            const data = await API.dlstreams.getCategories();
+            const available = data.available || [];
+            const selected = data.selected || [];
+
+            if (available.length === 0) {
+                if (statusEl) statusEl.textContent = 'No categories found. The site may be down.';
+                return;
+            }
+
+            this.renderDlCategories(available, selected);
+            if (statusEl) statusEl.textContent = `Found ${available.length} categories. ${selected.length} selected.`;
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Error fetching categories: ' + err.message;
+            this.appendDlstreamsLog('Error fetching categories: ' + err.message);
+        } finally {
+            if (fetchBtn) {
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = 'Fetch Categories';
+            }
+        }
+    }
+
+    /**
+     * Render category chips in the container
+     */
+    renderDlCategories(available, selected) {
+        const container = document.getElementById('dl-categories-container');
+        const saveBtn = document.getElementById('dl-save-categories');
+        if (!container) return;
+
+        const selectedSet = new Set(selected);
+
+        container.innerHTML = available.map(cat => {
+            const isActive = selectedSet.has(cat.slug);
+            return `<button type="button" class="dl-category-chip ${isActive ? 'active' : ''}" data-slug="${this.escapeHtml(cat.slug)}"
+                style="
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    border: 1px solid ${isActive ? 'var(--color-accent)' : 'var(--color-border)'};
+                    background: ${isActive ? 'var(--color-accent)' : 'var(--color-bg-secondary)'};
+                    color: ${isActive ? '#fff' : 'var(--color-text-secondary)'};
+                    cursor: pointer;
+                    font-size: 0.78rem;
+                    font-weight: 500;
+                    transition: all 0.15s ease;
+                    white-space: nowrap;
+                ">${this.escapeHtml(cat.name)}</button>`;
+        }).join('');
+
+        // Bind click handlers
+        container.querySelectorAll('.dl-category-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                const isActive = chip.classList.toggle('active');
+                chip.style.border = `1px solid ${isActive ? 'var(--color-accent)' : 'var(--color-border)'}`;
+                chip.style.background = isActive ? 'var(--color-accent)' : 'var(--color-bg-secondary)';
+                chip.style.color = isActive ? '#fff' : 'var(--color-text-secondary)';
+
+                // Update status count
+                const activeCount = container.querySelectorAll('.dl-category-chip.active').length;
+                const statusEl = document.getElementById('dl-categories-status');
+                if (statusEl) {
+                    statusEl.textContent = activeCount > 0
+                        ? `${activeCount} categories selected. Click "Save Categories" to apply.`
+                        : 'No categories selected — will scrape all events.';
+                }
+            });
+        });
+
+        // Show save button
+        if (saveBtn) saveBtn.style.display = 'inline-flex';
+    }
+
+    /**
+     * Save selected categories to settings
+     */
+    async saveDlstreamsCategories() {
+        const container = document.getElementById('dl-categories-container');
+        const saveBtn = document.getElementById('dl-save-categories');
+        const statusEl = document.getElementById('dl-categories-status');
+        if (!container) return;
+
+        const selected = [];
+        container.querySelectorAll('.dl-category-chip.active').forEach(chip => {
+            selected.push(chip.dataset.slug);
+        });
+
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            await API.dlstreams.saveCategories(selected);
+            if (statusEl) {
+                statusEl.textContent = selected.length > 0
+                    ? `✓ Saved ${selected.length} categories.`
+                    : '✓ Saved — no categories selected, will scrape all events.';
+            }
+            this.appendDlstreamsLog(`Categories saved: ${selected.length > 0 ? selected.join(', ') : '(all events)'}`);
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Error saving: ' + err.message;
+            this.appendDlstreamsLog('Error saving categories: ' + err.message);
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
         }
     }
 

@@ -161,8 +161,11 @@ async function extractStreamUrl(page, channelId) {
             const type = req.resourceType();
             const url = req.url();
             // Block images, fonts, and media (the player will try to load media but we interecept the URL before it starts downloading)
+            // Also block common ad and tracking domains
             if (['image', 'font', 'media', 'manifest'].includes(type) || 
-                url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle')) {
+                url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
+                url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
+                url.includes('yandex.ru') || url.includes('adsystem') || url.includes('hitstat')) {
                 return req.abort().catch(() => {});
             }
             req.continue().catch(() => {});
@@ -184,7 +187,8 @@ async function extractStreamUrl(page, channelId) {
             await page.evaluateOnNewDocument(MONITOR_SCRIPT);
             page._monitorRegistered = true;
         }
-        await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
+        // Change to domcontentloaded to avoid waiting for slow ads/trackers
+        await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
         // Check all frames for manifests
         const checkFrames = async () => {

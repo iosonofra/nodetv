@@ -977,17 +977,12 @@ router.get('/stream', async (req, res) => {
                     return;
                 }
 
-                // Compute the upstream base URL for resolving relative paths
-                const mpdUrlObj = new URL(urlForMpd);
-                const mpdBaseUrl = mpdUrlObj.origin + mpdUrlObj.pathname.substring(0, mpdUrlObj.pathname.lastIndexOf('/') + 1);
-                const mpdQueryStr = mpdUrlObj.search; // Preserve query params (tokens, etc.)
-
                 const proxyBase = `${req.protocol}://${req.get('host')}${req.baseUrl}/stream`;
                 const sourceIdParam = sourceId ? `&sourceId=${sourceId}` : '';
 
                 console.log(`[Proxy] Processing DASH manifest (MPD) from: ${urlForMpd.substring(0, 100)}...`);
 
-                // Helper: Convert a URL (absolute or relative) to a proxied URL
+                // Helper: Convert an absolute URL to a proxied URL
                 const proxyUrl = (segUrl) => {
                     if (!segUrl || segUrl.startsWith('data:')) return segUrl;
                     let absoluteUrl;
@@ -995,7 +990,7 @@ router.get('/stream', async (req, res) => {
                         if (segUrl.startsWith('http://') || segUrl.startsWith('https://')) {
                             absoluteUrl = segUrl;
                         } else {
-                            absoluteUrl = new URL(segUrl, mpdBaseUrl).href;
+                            return segUrl; // Keep relative URLs as-is (client-side request filter handles them)
                         }
                     } catch (e) {
                         return segUrl; // Can't parse, return as-is
@@ -1003,19 +998,13 @@ router.get('/stream', async (req, res) => {
                     return `${proxyBase}?url=${encodeURIComponent(absoluteUrl)}${sourceIdParam}`;
                 };
 
-                // 1. Rewrite <BaseURL> elements
-                // Match <BaseURL>content</BaseURL> and rewrite the content
-                mpd = mpd.replace(/<BaseURL([^>]*)>([\s\S]*?)<\/BaseURL>/gi, (match, attrs, content) => {
-                    const trimmedContent = content.trim();
-                    if (!trimmedContent) return match;
-                    // If BaseURL is just a path segment (no protocol), make it absolute first
-                    const rewritten = proxyUrl(trimmedContent);
-                    // Append trailing slash to proxy URL for BaseURL (Shaka resolves relative to it)
-                    // We encode the full directory URL, the player will append segment names to it
-                    return `<BaseURL${attrs}>${rewritten}</BaseURL>`;
-                });
+                // NOTE: We do NOT rewrite <BaseURL> elements or inject proxy BaseURLs.
+                // Proxy-style query-parameter URLs (/api/proxy/stream?url=...) break
+                // standard URL resolution for relative segment paths. Instead, we rely on
+                // the client-side ShakaPlayer request filter to intercept resolved absolute
+                // URLs and proxy them through the backend.
 
-                // 2. Rewrite SegmentTemplate initialization and media attributes (absolute URLs only)
+                // 1. Rewrite SegmentTemplate initialization and media attributes (absolute URLs only)
                 // Template attributes with $variables$ (like $Number$, $Time$, $Bandwidth$) are kept
                 // for relative templates. For absolute URLs in templates, we rewrite them.
                 mpd = mpd.replace(/<SegmentTemplate([^>]*)>/gi, (match, attrs) => {
@@ -1040,7 +1029,7 @@ router.get('/stream', async (req, res) => {
                     return `<SegmentTemplate${newAttrs}>`;
                 });
 
-                // 3. Rewrite <Initialization sourceURL="..."> elements
+                // 2. Rewrite <Initialization sourceURL="..."> elements
                 mpd = mpd.replace(/<Initialization([^>]*?)sourceURL="([^"]+)"([^>]*?)\/?>/gi, (match, pre, val, post) => {
                     if (val.startsWith('http://') || val.startsWith('https://')) {
                         return `<Initialization${pre}sourceURL="${proxyUrl(val)}"${post}/>`;
@@ -1048,25 +1037,13 @@ router.get('/stream', async (req, res) => {
                     return match;
                 });
 
-                // 4. Rewrite <SegmentURL media="..."> elements  
+                // 3. Rewrite <SegmentURL media="..."> elements  
                 mpd = mpd.replace(/<SegmentURL([^>]*?)media="([^"]+)"([^>]*?)\/?>/gi, (match, pre, val, post) => {
                     if (val.startsWith('http://') || val.startsWith('https://')) {
                         return `<SegmentURL${pre}media="${proxyUrl(val)}"${post}/>`;
                     }
                     return match;
                 });
-
-                // 5. For manifests with NO <BaseURL> and relative segment URLs,
-                // inject a proxy BaseURL at each Period level so relative paths resolve through proxy.
-                // Only inject if there's no existing <BaseURL> inside the Period.
-                const hasBaseUrl = /<BaseURL/i.test(mpd);
-                if (!hasBaseUrl) {
-                    // Inject a BaseURL right after the <MPD ...> opening tag
-                    // The proxy BaseURL encodes the upstream base directory
-                    const proxyBaseUrl = `${proxyBase}?url=${encodeURIComponent(mpdBaseUrl)}${sourceIdParam}`;
-                    mpd = mpd.replace(/(<MPD[^>]*>)/i, `$1\n  <BaseURL>${proxyBaseUrl}</BaseURL>`);
-                    console.log(`[Proxy] Injected proxy BaseURL for relative segment resolution`);
-                }
 
                 // === ClearKey ContentProtection Rewriting ===
                 // When the URL has ?ck=base64(KID:KEY), this is a ClearKey stream whose

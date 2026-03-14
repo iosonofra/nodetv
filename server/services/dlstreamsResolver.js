@@ -121,8 +121,7 @@ async function extractStreamUrl(page, channelId) {
             await page.evaluateOnNewDocument(MONITOR_SCRIPT);
             page._monitorRegistered = true;
         }
-        await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
-        await new Promise(r => setTimeout(r, 10000)); // Wait for video to load
+        await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
         // Check all frames for manifests
         const checkFrames = async () => {
@@ -157,21 +156,37 @@ async function extractStreamUrl(page, channelId) {
             }
         };
 
-        await checkFrames();
+        // Wait up to 10 seconds for video to load, polling every 500ms
+        let pollAttempts = 0;
+        while (!streamUrl && pollAttempts < 20) {
+            await new Promise(r => setTimeout(r, 500));
+            await checkFrames();
+            pollAttempts++;
+        }
 
         // Click in center to trigger playback if needed
         if (!streamUrl) {
             await page.bringToFront();
             await page.mouse.click(640, 360);
-            await new Promise(r => setTimeout(r, 3000));
-            await checkFrames();
+            
+            pollAttempts = 0;
+            while (!streamUrl && pollAttempts < 6) { // 3 seconds
+                await new Promise(r => setTimeout(r, 500));
+                await checkFrames();
+                pollAttempts++;
+            }
         }
 
         if (!streamUrl) {
             await page.bringToFront();
             await page.mouse.click(640, 400);
-            await new Promise(r => setTimeout(r, 5000));
-            await checkFrames();
+            
+            pollAttempts = 0;
+            while (!streamUrl && pollAttempts < 10) { // 5 seconds
+                await new Promise(r => setTimeout(r, 500));
+                await checkFrames();
+                pollAttempts++;
+            }
         }
 
     } catch (err) {

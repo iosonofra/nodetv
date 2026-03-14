@@ -26,7 +26,16 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 function getLaunchOptions() {
     const opts = {
         headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--autoplay-policy=no-user-gesture-required',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=CalculateNativeWinOcclusion,PauseBackgroundTabs'
+        ]
     };
 
     if (fs.existsSync(CHROMIUM_PATH)) {
@@ -107,7 +116,11 @@ async function extractStreamUrl(page, channelId) {
     page.on('console', consoleHandler);
 
     try {
-        await page.evaluateOnNewDocument(MONITOR_SCRIPT);
+        await page.setViewport({ width: 1280, height: 720 });
+        if (!page._monitorRegistered) {
+            await page.evaluateOnNewDocument(MONITOR_SCRIPT);
+            page._monitorRegistered = true;
+        }
         await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
         await new Promise(r => setTimeout(r, 10000)); // Wait for video to load
 
@@ -148,12 +161,14 @@ async function extractStreamUrl(page, channelId) {
 
         // Click in center to trigger playback if needed
         if (!streamUrl) {
+            await page.bringToFront();
             await page.mouse.click(640, 360);
             await new Promise(r => setTimeout(r, 3000));
             await checkFrames();
         }
 
         if (!streamUrl) {
+            await page.bringToFront();
             await page.mouse.click(640, 400);
             await new Promise(r => setTimeout(r, 5000));
             await checkFrames();

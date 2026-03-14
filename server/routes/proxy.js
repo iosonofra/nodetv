@@ -951,58 +951,160 @@ router.get('/stream', async (req, res) => {
                 return res.send(manifest);
             }
 
-            // DASH Manifest (MPD) with ClearKey: Rewrite ContentProtection for browser DRM
-            // When the URL has ?ck=base64(KID:KEY), this is a ClearKey stream whose
-            // manifest (from Sky/cssott CDN) declares only Widevine + PlayReady.
-            // Browsers like Firefox don't support Widevine, so we rewrite the MPD to
-            // use ClearKey ContentProtection. Shaka's clearKeys config will decrypt it.
+            // DASH Manifest (MPD): Rewrite segment URLs to go through proxy
+            // This ensures all DASH segments are fetched via the backend (and through Warp if configured).
+            // Also handles ClearKey ContentProtection rewriting when ?ck= param is present.
             const urlForMpd = response.url || url;
             const contentLooksLikeMpd =
                 contentType.includes('dash+xml') ||
                 contentType.includes('application/xml') ||
                 urlForMpd.includes('.mpd');
 
-            const ckParam = (() => {
-                try { return new URL(urlForMpd).searchParams.get('ck'); } catch { return null; }
-            })();
-
-            if (contentLooksLikeMpd && ckParam) {
+            if (contentLooksLikeMpd) {
                 // Read the full manifest
                 const mpdChunks = [firstChunk];
                 let mpdNext = await iterator.next();
                 while (!mpdNext.done) { mpdChunks.push(Buffer.from(mpdNext.value)); mpdNext = await iterator.next(); }
                 let mpd = Buffer.concat(mpdChunks).toString('utf-8');
 
-                console.log(`[Proxy] Rewriting MPD ContentProtection for ClearKey (ck param detected)`);
-
-                // Decode the ck param to get KID:KEY (base64 encoded)
-                let kidForClearKey = '';
-                try {
-                    const decoded = Buffer.from(ckParam, 'base64').toString('utf-8');
-                    // Format: KID:KEY (hex)
-                    kidForClearKey = decoded.split(':')[0].trim();
-                } catch (e) {
-                    console.warn('[Proxy] Could not decode ck param:', e.message);
+                // Verify it's actually XML/MPD (not a video segment served with wrong content-type)
+                const mpdTrimmed = mpd.trimStart();
+                if (!mpdTrimmed.startsWith('<?xml') && !mpdTrimmed.startsWith('<MPD')) {
+                    // Not an MPD manifest, serve as binary
+                    console.log(`[Proxy] Content looks like MPD by URL/headers but isn't XML, serving as binary`);
+                    res.set('Content-Type', contentType || 'application/octet-stream');
+                    res.send(Buffer.concat(mpdChunks));
+                    return;
                 }
 
-                // Convert KID hex (no dashes) to UUID format for cenc:default_KID
-                const kidUuid = kidForClearKey.length === 32
-                    ? `${kidForClearKey.slice(0,8)}-${kidForClearKey.slice(8,12)}-${kidForClearKey.slice(12,16)}-${kidForClearKey.slice(16,20)}-${kidForClearKey.slice(20)}`
-                    : '';
+                // Compute the upstream base URL for resolving relative paths
+                const mpdUrlObj = new URL(urlForMpd);
+                const mpdBaseUrl = mpdUrlObj.origin + mpdUrlObj.pathname.substring(0, mpdUrlObj.pathname.lastIndexOf('/') + 1);
+                const mpdQueryStr = mpdUrlObj.search; // Preserve query params (tokens, etc.)
 
-                // Strip ALL existing ContentProtection elements
-                mpd = mpd
-                    .replace(/<ContentProtection[^>]*\/>/gi, '')
-                    .replace(/<ContentProtection[\s\S]*?<\/ContentProtection>/gi, '');
+                const proxyBase = `${req.protocol}://${req.get('host')}${req.baseUrl}/stream`;
+                const sourceIdParam = sourceId ? `&sourceId=${sourceId}` : '';
 
-                // Inject ClearKey ContentProtection into every AdaptationSet
-                // Place it right after each <AdaptationSet ...> opening tag
-                const clearKeyBlock = kidUuid
-                    ? `<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${kidUuid}"></ContentProtection>` +
-                      `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`
-                    : `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`;
+                console.log(`[Proxy] Processing DASH manifest (MPD) from: ${urlForMpd.substring(0, 100)}...`);
 
-                mpd = mpd.replace(/(<AdaptationSet[^>]*>)/g, `$1${clearKeyBlock}`);
+                // Helper: Convert a URL (absolute or relative) to a proxied URL
+                const proxyUrl = (segUrl) => {
+                    if (!segUrl || segUrl.startsWith('data:')) return segUrl;
+                    let absoluteUrl;
+                    try {
+                        if (segUrl.startsWith('http://') || segUrl.startsWith('https://')) {
+                            absoluteUrl = segUrl;
+                        } else {
+                            absoluteUrl = new URL(segUrl, mpdBaseUrl).href;
+                        }
+                    } catch (e) {
+                        return segUrl; // Can't parse, return as-is
+                    }
+                    return `${proxyBase}?url=${encodeURIComponent(absoluteUrl)}${sourceIdParam}`;
+                };
+
+                // 1. Rewrite <BaseURL> elements
+                // Match <BaseURL>content</BaseURL> and rewrite the content
+                mpd = mpd.replace(/<BaseURL([^>]*)>([\s\S]*?)<\/BaseURL>/gi, (match, attrs, content) => {
+                    const trimmedContent = content.trim();
+                    if (!trimmedContent) return match;
+                    // If BaseURL is just a path segment (no protocol), make it absolute first
+                    const rewritten = proxyUrl(trimmedContent);
+                    // Append trailing slash to proxy URL for BaseURL (Shaka resolves relative to it)
+                    // We encode the full directory URL, the player will append segment names to it
+                    return `<BaseURL${attrs}>${rewritten}</BaseURL>`;
+                });
+
+                // 2. Rewrite SegmentTemplate initialization and media attributes (absolute URLs only)
+                // Template attributes with $variables$ (like $Number$, $Time$, $Bandwidth$) are kept
+                // for relative templates. For absolute URLs in templates, we rewrite them.
+                mpd = mpd.replace(/<SegmentTemplate([^>]*)>/gi, (match, attrs) => {
+                    let newAttrs = attrs;
+
+                    // Rewrite initialization= attribute if it's an absolute URL
+                    newAttrs = newAttrs.replace(/initialization="([^"]+)"/gi, (m, val) => {
+                        if (val.startsWith('http://') || val.startsWith('https://')) {
+                            return `initialization="${proxyUrl(val)}"`;
+                        }
+                        return m; // Keep relative templates as-is (resolved via BaseURL)
+                    });
+
+                    // Rewrite media= attribute if it's an absolute URL
+                    newAttrs = newAttrs.replace(/media="([^"]+)"/gi, (m, val) => {
+                        if (val.startsWith('http://') || val.startsWith('https://')) {
+                            return `media="${proxyUrl(val)}"`;
+                        }
+                        return m; // Keep relative templates as-is
+                    });
+
+                    return `<SegmentTemplate${newAttrs}>`;
+                });
+
+                // 3. Rewrite <Initialization sourceURL="..."> elements
+                mpd = mpd.replace(/<Initialization([^>]*?)sourceURL="([^"]+)"([^>]*?)\/?>/gi, (match, pre, val, post) => {
+                    if (val.startsWith('http://') || val.startsWith('https://')) {
+                        return `<Initialization${pre}sourceURL="${proxyUrl(val)}"${post}/>`;
+                    }
+                    return match;
+                });
+
+                // 4. Rewrite <SegmentURL media="..."> elements  
+                mpd = mpd.replace(/<SegmentURL([^>]*?)media="([^"]+)"([^>]*?)\/?>/gi, (match, pre, val, post) => {
+                    if (val.startsWith('http://') || val.startsWith('https://')) {
+                        return `<SegmentURL${pre}media="${proxyUrl(val)}"${post}/>`;
+                    }
+                    return match;
+                });
+
+                // 5. For manifests with NO <BaseURL> and relative segment URLs,
+                // inject a proxy BaseURL at each Period level so relative paths resolve through proxy.
+                // Only inject if there's no existing <BaseURL> inside the Period.
+                const hasBaseUrl = /<BaseURL/i.test(mpd);
+                if (!hasBaseUrl) {
+                    // Inject a BaseURL right after the <MPD ...> opening tag
+                    // The proxy BaseURL encodes the upstream base directory
+                    const proxyBaseUrl = `${proxyBase}?url=${encodeURIComponent(mpdBaseUrl)}${sourceIdParam}`;
+                    mpd = mpd.replace(/(<MPD[^>]*>)/i, `$1\n  <BaseURL>${proxyBaseUrl}</BaseURL>`);
+                    console.log(`[Proxy] Injected proxy BaseURL for relative segment resolution`);
+                }
+
+                // === ClearKey ContentProtection Rewriting ===
+                // When the URL has ?ck=base64(KID:KEY), this is a ClearKey stream whose
+                // manifest declares only Widevine + PlayReady. We rewrite to use ClearKey.
+                const ckParam = (() => {
+                    try { return new URL(urlForMpd).searchParams.get('ck'); } catch { return null; }
+                })();
+
+                if (ckParam) {
+                    console.log(`[Proxy] Rewriting MPD ContentProtection for ClearKey (ck param detected)`);
+
+                    // Decode the ck param to get KID:KEY (base64 encoded)
+                    let kidForClearKey = '';
+                    try {
+                        const decoded = Buffer.from(ckParam, 'base64').toString('utf-8');
+                        kidForClearKey = decoded.split(':')[0].trim();
+                    } catch (e) {
+                        console.warn('[Proxy] Could not decode ck param:', e.message);
+                    }
+
+                    // Convert KID hex (no dashes) to UUID format for cenc:default_KID
+                    const kidUuid = kidForClearKey.length === 32
+                        ? `${kidForClearKey.slice(0,8)}-${kidForClearKey.slice(8,12)}-${kidForClearKey.slice(12,16)}-${kidForClearKey.slice(16,20)}-${kidForClearKey.slice(20)}`
+                        : '';
+
+                    // Strip ALL existing ContentProtection elements
+                    mpd = mpd
+                        .replace(/<ContentProtection[^>]*\/>/gi, '')
+                        .replace(/<ContentProtection[\s\S]*?<\/ContentProtection>/gi, '');
+
+                    // Inject ClearKey ContentProtection into every AdaptationSet
+                    const clearKeyBlock = kidUuid
+                        ? `<ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="${kidUuid}"></ContentProtection>` +
+                          `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`
+                        : `<ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"></ContentProtection>`;
+
+                    mpd = mpd.replace(/(<AdaptationSet[^>]*>)/g, `$1${clearKeyBlock}`);
+                }
 
                 res.set('Content-Type', 'application/dash+xml');
                 return res.send(mpd);

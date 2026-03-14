@@ -20,6 +20,45 @@ const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 const urlCache = new Map();
 const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
+// Shared browser instance for reuse
+let sharedBrowser = null;
+let browserClosingTimer = null;
+const BROWSER_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Get or launch shared browser
+ */
+async function getSharedBrowser() {
+    // Clear any pending shutdown timer
+    if (browserClosingTimer) {
+        clearTimeout(browserClosingTimer);
+        browserClosingTimer = null;
+    }
+
+    if (!sharedBrowser) {
+        console.log('[DLStreams Resolver] Launching shared browser instance...');
+        sharedBrowser = await puppeteer.launch(getLaunchOptions());
+        
+        // Handle unexpected disconnection
+        sharedBrowser.on('disconnected', () => {
+            console.log('[DLStreams Resolver] Shared browser disconnected.');
+            sharedBrowser = null;
+        });
+    }
+
+    // Reset shutdown timer
+    browserClosingTimer = setTimeout(async () => {
+        if (sharedBrowser) {
+            console.log('[DLStreams Resolver] Shared browser idle timeout reached. Closing...');
+            const b = sharedBrowser;
+            sharedBrowser = null;
+            await b.close().catch(() => {});
+        }
+    }, BROWSER_IDLE_TIMEOUT_MS);
+
+    return sharedBrowser;
+}
+
 /**
  * Get Puppeteer launch options
  */
@@ -115,13 +154,33 @@ async function extractStreamUrl(page, channelId) {
     page.on('request', requestHandler);
     page.on('console', consoleHandler);
 
+    // Speed up: block unnecessary resources
+    try {
+        await page.setRequestInterception(true);
+        page.on('request', req => {
+            const type = req.resourceType();
+            const url = req.url();
+            // Block images, fonts, and media (the player will try to load media but we interecept the URL before it starts downloading)
+            if (['image', 'font', 'media', 'manifest'].includes(type)) {
+                return req.abort();
+            }
+            // Block ads/trackers known destinations if possible, or just stay simple
+            if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle')) {
+                return req.abort();
+            }
+            req.continue();
+        });
+    } catch (e) {
+        console.error(` [!] Error setting request interception: ${e.message}`);
+    }
+
     try {
         await page.setViewport({ width: 1280, height: 720 });
         if (!page._monitorRegistered) {
             await page.evaluateOnNewDocument(MONITOR_SCRIPT);
             page._monitorRegistered = true;
         }
-        await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
 
         // Check all frames for manifests
         const checkFrames = async () => {
@@ -156,9 +215,9 @@ async function extractStreamUrl(page, channelId) {
             }
         };
 
-        // Wait up to 10 seconds for video to load, polling every 500ms
+        // Wait up to 2 seconds for video to load natively (autostart), polling every 500ms
         let pollAttempts = 0;
-        while (!streamUrl && pollAttempts < 20) {
+        while (!streamUrl && pollAttempts < 4) {
             await new Promise(r => setTimeout(r, 500));
             await checkFrames();
             pollAttempts++;
@@ -217,7 +276,7 @@ async function resolveChannelUrl(channelId) {
 
     let browser;
     try {
-        browser = await puppeteer.launch(getLaunchOptions());
+        browser = await getSharedBrowser();
         const page = await browser.newPage();
 
         await page.setUserAgent(
@@ -243,10 +302,14 @@ async function resolveChannelUrl(channelId) {
         }
 
         console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'No URL found'}`);
+        
+        // Close page but NOT the browser
+        await page.close().catch(() => {});
         return { ...result, cached: false };
 
-    } finally {
-        if (browser) await browser.close();
+    } catch (err) {
+        console.error(`[DLStreams Resolver] Error resolving channel ${channelId}: ${err.message}`);
+        return { streamUrl: null, ckParam: null, cached: false };
     }
 }
 
@@ -289,7 +352,7 @@ async function fetchCategories() {
     console.log('[DLStreams Resolver] Fetching categories from homepage...');
     let browser;
     try {
-        browser = await puppeteer.launch(getLaunchOptions());
+        browser = await getSharedBrowser();
         const page = await browser.newPage();
 
         await page.setUserAgent(
@@ -322,9 +385,11 @@ async function fetchCategories() {
         });
 
         console.log(`[DLStreams Resolver] Found ${categories.length} categories.`);
+        await page.close().catch(() => {});
         return categories;
-    } finally {
-        if (browser) await browser.close();
+    } catch (err) {
+        console.error(`[DLStreams Resolver] Error fetching categories: ${err.message}`);
+        return [];
     }
 }
 

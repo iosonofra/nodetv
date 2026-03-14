@@ -157,7 +157,19 @@ class ShakaPlayerEngine {
                         console.log(`[ShakaPlayer] Licensing request proxied: ${proxyUrl}`);
                     } else {
                         const headersParam = this.currentStreamHeaders ? `&headers=${encodeURIComponent(this.currentStreamHeaders)}` : '';
-                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}`;
+                        
+                        // Propagate additional query parameters from manifest URL (like ?ck= for PlusCDN)
+                        let extraParams = '';
+                        if (this.currentUrlParams) {
+                            for (const [k, v] of Object.entries(this.currentUrlParams)) {
+                                // Only append if not already in URL to avoid duplication
+                                if (!originalUrl.includes(`${k}=`)) {
+                                    extraParams += `&${k}=${encodeURIComponent(v)}`;
+                                }
+                            }
+                        }
+
+                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}${extraParams}`;
                         request.uris = [proxyUrl];
                     }
                 }
@@ -191,19 +203,34 @@ class ShakaPlayerEngine {
 
         this.isUsingProxy = forceProxy;
         this.hasClearKeys = false; // reset — set to true below when clearKeys are configured
-        this.currentStreamHeaders = null; // reset — extracted below from stream URL
 
-        // Extract &headers= param from stream URL to forward on all segment proxy requests
-        // DAZN and similar services encode auth tokens (dazn-token) in this param
+        // Extract auth headers & query params from stream URL to forward on all segment proxy requests
+        // - headers= param: DAZN and similar services encode auth tokens (dazn-token) here
+        // - other params (e.g. ?ck=): PlusCDN and others use query params directly on manifest/segments
+        this.currentUrlParams = null;
         try {
             const streamUrlObj = new URL(streamUrl, window.location.origin);
+            
+            // 1. Specific headers param (legacy DAZN fix)
             const headersParam = streamUrlObj.searchParams.get('headers');
             if (headersParam) {
                 this.currentStreamHeaders = headersParam;
                 console.log('[ShakaPlayer] Extracted stream headers for segment auth forwarding');
             }
+
+            // 2. Generic query parameters to propagate (PlusCDN fix)
+            const params = {};
+            streamUrlObj.searchParams.forEach((value, key) => {
+                if (key !== 'headers' && key !== 'url' && key !== 'sourceId') {
+                    params[key] = value;
+                }
+            });
+            if (Object.keys(params).length > 0) {
+                this.currentUrlParams = params;
+                console.log('[ShakaPlayer] Extracted query parameters for propagation:', Object.keys(params));
+            }
         } catch (e) {
-            // URL parsing failed, no headers to extract
+            // URL parsing failed
         }
 
 

@@ -155,21 +155,25 @@ async function extractStreamUrl(page, channelId) {
     page.on('console', consoleHandler);
 
     // Speed up: block unnecessary resources
-    try {
-        await page.setRequestInterception(true);
-        page.on('request', req => {
+    const interceptionHandler = req => {
+        try {
+            if (req.isInterceptionHandled()) return;
             const type = req.resourceType();
             const url = req.url();
             // Block images, fonts, and media (the player will try to load media but we interecept the URL before it starts downloading)
-            if (['image', 'font', 'media', 'manifest'].includes(type)) {
-                return req.abort();
+            if (['image', 'font', 'media', 'manifest'].includes(type) || 
+                url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle')) {
+                return req.abort().catch(() => {});
             }
-            // Block ads/trackers known destinations if possible, or just stay simple
-            if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle')) {
-                return req.abort();
-            }
-            req.continue();
-        });
+            req.continue().catch(() => {});
+        } catch (e) {
+            // Request may have been handled or page closed
+        }
+    };
+
+    try {
+        await page.setRequestInterception(true);
+        page.on('request', interceptionHandler);
     } catch (e) {
         console.error(` [!] Error setting request interception: ${e.message}`);
     }
@@ -247,12 +251,12 @@ async function extractStreamUrl(page, channelId) {
                 pollAttempts++;
             }
         }
-
     } catch (err) {
         console.error(` [!] Error on ${playerUrl}: ${err.message}`);
     } finally {
         page.off('request', requestHandler);
         page.off('console', consoleHandler);
+        page.off('request', interceptionHandler);
     }
 
     return { streamUrl, ckParam };

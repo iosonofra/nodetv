@@ -982,6 +982,19 @@ router.get('/stream', async (req, res) => {
 
                 console.log(`[Proxy] Processing DASH manifest (MPD) from: ${urlForMpd.substring(0, 100)}...`);
 
+                const extraParams = (() => {
+                    try {
+                        const urlObj = new URL(urlForMpd);
+                        let params = '';
+                        urlObj.searchParams.forEach((val, key) => {
+                            if (key !== 'url' && key !== 'sourceId') {
+                                params += `&${key}=${encodeURIComponent(val)}`;
+                            }
+                        });
+                        return params;
+                    } catch { return ''; }
+                })();
+
                 // Helper: Convert an absolute URL to a proxied URL
                 const proxyUrl = (segUrl) => {
                     if (!segUrl || segUrl.startsWith('data:')) return segUrl;
@@ -995,7 +1008,7 @@ router.get('/stream', async (req, res) => {
                     } catch (e) {
                         return segUrl; // Can't parse, return as-is
                     }
-                    return `${proxyBase}?url=${encodeURIComponent(absoluteUrl)}${sourceIdParam}`;
+                    return `${proxyBase}?url=${encodeURIComponent(absoluteUrl)}${sourceIdParam}${extraParams}`;
                 };
 
                 // NOTE: We do NOT rewrite <BaseURL> elements or inject proxy BaseURLs.

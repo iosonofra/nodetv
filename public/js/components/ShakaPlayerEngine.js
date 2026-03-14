@@ -151,11 +151,13 @@ class ShakaPlayerEngine {
                         // Do NOT proxy the LICENSE request; intercepting it would break
                         // Shaka's internal ClearKey session initialization.
                         if (this.hasClearKeys) return;
-                        const proxyUrl = `/api/proxy/drm?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}`;
+                        const headersParam = this.currentStreamHeaders ? `&headers=${encodeURIComponent(this.currentStreamHeaders)}` : '';
+                        const proxyUrl = `/api/proxy/drm?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}`;
                         request.uris = [proxyUrl];
                         console.log(`[ShakaPlayer] Licensing request proxied: ${proxyUrl}`);
                     } else {
-                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}`;
+                        const headersParam = this.currentStreamHeaders ? `&headers=${encodeURIComponent(this.currentStreamHeaders)}` : '';
+                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}`;
                         request.uris = [proxyUrl];
                     }
                 }
@@ -189,6 +191,20 @@ class ShakaPlayerEngine {
 
         this.isUsingProxy = forceProxy;
         this.hasClearKeys = false; // reset — set to true below when clearKeys are configured
+        this.currentStreamHeaders = null; // reset — extracted below from stream URL
+
+        // Extract &headers= param from stream URL to forward on all segment proxy requests
+        // DAZN and similar services encode auth tokens (dazn-token) in this param
+        try {
+            const streamUrlObj = new URL(streamUrl, window.location.origin);
+            const headersParam = streamUrlObj.searchParams.get('headers');
+            if (headersParam) {
+                this.currentStreamHeaders = headersParam;
+                console.log('[ShakaPlayer] Extracted stream headers for segment auth forwarding');
+            }
+        } catch (e) {
+            // URL parsing failed, no headers to extract
+        }
 
 
         // Stop the main VideoPlayer if it's running

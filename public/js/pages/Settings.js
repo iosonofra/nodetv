@@ -1087,16 +1087,24 @@ class SettingsPage {
     async saveDlstreamsSettings() {
         const autoRunToggle = document.getElementById('setting-dl-auto-run');
         const intervalSelect = document.getElementById('setting-dl-interval');
+        const concurrencyInput = document.getElementById('setting-dl-concurrency');
         const saveBtn = document.getElementById('save-dl-settings');
 
         if (!autoRunToggle || !intervalSelect) return;
 
         if (saveBtn) saveBtn.disabled = true;
 
+        let concurrency = 5;
+        if (concurrencyInput) {
+            concurrency = parseInt(concurrencyInput.value, 10);
+            if (isNaN(concurrency) || concurrency < 1) concurrency = 5;
+        }
+
         try {
             await API.dlstreams.updateSettings({
                 dlstreamsAutoRun: autoRunToggle.checked,
-                dlstreamsInterval: intervalSelect.value
+                dlstreamsInterval: intervalSelect.value,
+                dlstreamsConcurrencyLimit: concurrency
             });
             this.appendDlstreamsLog('DLStreams settings updated successfully.');
             this.loadDlstreamsStatus();
@@ -1181,11 +1189,15 @@ class SettingsPage {
                 const autoRunToggle = document.getElementById('setting-dl-auto-run');
                 const intervalSelect = document.getElementById('setting-dl-interval');
                 const intervalContainer = document.getElementById('dl-interval-container');
+                const concurrencyInput = document.getElementById('setting-dl-concurrency');
 
                 if (autoRunToggle && !this._dlSettingsInitialized) {
                     autoRunToggle.checked = info.enabled;
                     if (intervalSelect) intervalSelect.value = String(info.intervalHours);
                     if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    if (concurrencyInput && status.dlstreamsConcurrencyLimit) {
+                         concurrencyInput.value = status.dlstreamsConcurrencyLimit;
+                    }
                     this._dlSettingsInitialized = true;
                 }
 

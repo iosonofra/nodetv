@@ -116,6 +116,7 @@ function getDefaultSettings() {
     dlstreamsAutoRun: false,
     dlstreamsInterval: '1',        // hours
     dlstreamsSelectedCategories: [], // empty = scrape all categories
+    dlstreamsConcurrencyLimit: 5,  // default: 5 parallel pages
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

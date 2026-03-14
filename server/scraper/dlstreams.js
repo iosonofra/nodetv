@@ -283,19 +283,18 @@ async function scrape() {
         }
 
         browser = await puppeteer.launch(launchOptions);
-        const page = await browser.newPage();
-
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        const mainPage = await browser.newPage();
+        await mainPage.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
 
         // Step 1: Parse schedule — either per-category or all
         let events = [];
         if (selectedCategories.length > 0) {
             for (const cat of selectedCategories) {
-                const catEvents = await parseCategoryPage(page, cat);
+                const catEvents = await parseCategoryPage(mainPage, cat);
                 events.push(...catEvents);
             }
         } else {
-            events = await parseSchedule(page);
+            events = await parseSchedule(mainPage);
         }
 
         console.log(`[*] Total events found: ${events.length}`);
@@ -306,87 +305,125 @@ async function scrape() {
 
         const m3uLines = ["#EXTM3U"];
         const processedChannels = new Map(); // Avoid duplicate channel visits
+        
+        // Flatten tasks
+        const tasks = [];
+        events.forEach(event => {
+            event.channels.forEach(channel => {
+                tasks.push({ event, channel });
+            });
+        });
 
-        // Step 2: For each event, visit channel player pages
-        let eventIdx = 0;
-        for (const event of events) {
-            eventIdx++;
+        console.log(`[*] Flattened events into ${tasks.length} total channel tasks.`);
 
-            for (const channel of event.channels) {
-                let streamUrl, ckParam;
+        // Worker Pool logic
+        const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY || '5', 10);
+        console.log(`[*] Proceeding with concurrency limit: ${concurrencyLimit}`);
+        
+        let completedChannels = 0;
+        let activeWorkers = 0;
+        let taskIndex = 0;
+        
+        const workers = [];
+        
+        const workerFn = async (workerId) => {
+            // Give each worker its own page
+            const page = await browser.newPage();
+            await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+            
+            while (taskIndex < tasks.length) {
+                const currentTaskIndex = taskIndex++;
+                const { event, channel } = tasks[currentTaskIndex];
                 
-                // Use cached data if we already processed this channel ID
-                if (processedChannels.has(channel.id)) {
-                    console.log(`[${eventIdx}/${events.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id}) [CACHED]`);
-                    const cached = processedChannels.get(channel.id);
-                    streamUrl = cached.streamUrl;
-                    ckParam = cached.ckParam;
-                } else {
-                    console.log(`[${eventIdx}/${events.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
-                    const result = await extractStreamUrl(page, channel.id);
-                    streamUrl = result.streamUrl;
-                    ckParam = result.ckParam;
-                    processedChannels.set(channel.id, { streamUrl, ckParam });
-                }
+                try {
+                    let streamUrl, ckParam;
+                    
+                    // Use cached data if we already processed this channel ID
+                    if (processedChannels.has(channel.id)) {
+                        console.log(`[Worker ${workerId}] [${completedChannels + 1}/${tasks.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id}) [CACHED]`);
+                        const cached = processedChannels.get(channel.id);
+                        streamUrl = cached.streamUrl;
+                        ckParam = cached.ckParam;
+                    } else {
+                        console.log(`[Worker ${workerId}] [${completedChannels + 1}/${tasks.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
+                        const result = await extractStreamUrl(page, channel.id);
+                        streamUrl = result.streamUrl;
+                        ckParam = result.ckParam;
+                        processedChannels.set(channel.id, { streamUrl, ckParam });
+                    }
 
-                if (streamUrl) {
-                    let finalUrl = streamUrl;
+                    if (streamUrl) {
+                        let finalUrl = streamUrl;
 
-                    // Handle chrome-extension wrapper
-                    if (finalUrl.startsWith("chrome-extension://")) {
-                        if (finalUrl.includes("#")) {
-                            finalUrl = finalUrl.split("#")[1];
+                        // Handle chrome-extension wrapper
+                        if (finalUrl.startsWith("chrome-extension://")) {
+                            if (finalUrl.includes("#")) {
+                                finalUrl = finalUrl.split("#")[1];
+                            }
                         }
-                    }
 
-                    // Decode DRM keys
-                    let keysStr = "";
-                    let extractedCk = ckParam;
-                    if (!extractedCk && finalUrl.includes("ck=")) {
-                        try {
-                            const parts = finalUrl.split("ck=");
-                            if (parts.length > 1) extractedCk = parts[1].split("&")[0];
-                        } catch (err) { }
-                    }
-
-                    if (extractedCk) {
-                        try {
-                            let cleanCk = extractedCk;
-                            while (cleanCk.length % 4 !== 0) cleanCk += '=';
-
-                            let decoded = Buffer.from(cleanCk, 'base64').toString('utf-8');
+                        // Decode DRM keys
+                        let keysStr = "";
+                        let extractedCk = ckParam;
+                        if (!extractedCk && finalUrl.includes("ck=")) {
                             try {
-                                const ckJson = JSON.parse(decoded);
-                                if (ckJson.keys) {
-                                    keysStr = ckJson.keys.filter(k => k.kid && k.k).map(k => `${k.kid}:${k.k}`).join(",");
-                                } else {
-                                    keysStr = Object.entries(ckJson).filter(([k, v]) => k.length > 10).map(([k, v]) => `${k}:${v}`).join(",");
+                                const parts = finalUrl.split("ck=");
+                                if (parts.length > 1) extractedCk = parts[1].split("&")[0];
+                            } catch (err) { }
+                        }
+
+                        if (extractedCk) {
+                            try {
+                                let cleanCk = extractedCk;
+                                while (cleanCk.length % 4 !== 0) cleanCk += '=';
+
+                                let decoded = Buffer.from(cleanCk, 'base64').toString('utf-8');
+                                try {
+                                    const ckJson = JSON.parse(decoded);
+                                    if (ckJson.keys) {
+                                        keysStr = ckJson.keys.filter(k => k.kid && k.k).map(k => `${k.kid}:${k.k}`).join(",");
+                                    } else {
+                                        keysStr = Object.entries(ckJson).filter(([k, v]) => k.length > 10).map(([k, v]) => `${k}:${v}`).join(",");
+                                    }
+                                } catch (e) {
+                                    if (decoded.includes(":")) keysStr = decoded;
                                 }
                             } catch (e) {
-                                if (decoded.includes(":")) keysStr = decoded;
+                                console.error(`  [!] Error decoding keys: ${e.message}`);
                             }
-                        } catch (e) {
-                            console.error(`  [!] Error decoding keys: ${e.message}`);
                         }
-                    }
 
-                    const group = event.category || "Events";
-                    const name = event.time
-                        ? `${event.title} (${event.time}) - ${channel.name}`
-                        : `${event.title} - ${channel.name}`;
+                        const group = event.category || "Events";
+                        const name = event.time
+                            ? `${event.title} (${event.time}) - ${channel.name}`
+                            : `${event.title} - ${channel.name}`;
 
-                    m3uLines.push(`#EXTINF:-1 tvg-id="dl_${channel.id}" tvg-logo="" group-title="${group}" category-id="${group}", ${name}`);
-                    if (keysStr) {
-                        m3uLines.push(`#KODIPROP:inputstream.adaptive.license_type=clearkey`);
-                        m3uLines.push(`#KODIPROP:inputstream.adaptive.license_key=${keysStr}`);
+                        m3uLines.push(`#EXTINF:-1 tvg-id="dl_${channel.id}" tvg-logo="" group-title="${group}" category-id="${group}", ${name}`);
+                        if (keysStr) {
+                            m3uLines.push(`#KODIPROP:inputstream.adaptive.license_type=clearkey`);
+                            m3uLines.push(`#KODIPROP:inputstream.adaptive.license_key=${keysStr}`);
+                        }
+                        m3uLines.push(finalUrl);
+                        console.log(`  [Worker ${workerId}] [v] Successfully added channel.`);
+                    } else {
+                        console.log(`  [Worker ${workerId}] [-] No stream URL found for channel ${channel.name} (ID: ${channel.id})`);
                     }
-                    m3uLines.push(finalUrl);
-                    console.log(`  [v] Successfully added channel.`);
-                } else {
-                    console.log(`  [-] No stream URL found for channel ${channel.name} (ID: ${channel.id})`);
+                } catch (e) {
+                    console.error(`  [Worker ${workerId}] [!] Error extracting channel ${channel.name} (ID: ${channel.id}): ${e.message}`);
                 }
+                
+                completedChannels++;
             }
+            
+            await page.close();
+        };
+
+        const actualConcurrency = Math.min(concurrencyLimit, tasks.length);
+        for (let i = 0; i < actualConcurrency; i++) {
+            workers.push(workerFn(i + 1));
         }
+        
+        await Promise.all(workers);
 
         // Save Playlist
         fs.writeFileSync(PLAYLIST_FILE, m3uLines.join("\n"), 'utf8');

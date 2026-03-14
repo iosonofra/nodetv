@@ -1014,6 +1014,13 @@
                     <option value="24">Every 24 hours (Daily)</option>
                   </select>
                 </div>
+                <div class="setting-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Concurrency Limit</span>
+                    <span class="setting-hint">Maximum number of concurrent pages to run stream scraping. Higher limit requires more CPU and memory but completes faster.</span>
+                  </div>
+                  <input type="number" id="setting-dl-concurrency" class="form-input setting-number" min="1" max="25" value="5">
+                </div>
                 <div style="text-align: right; margin-top: var(--space-sm);">
                   <button class="btn btn-sm btn-secondary" id="save-dl-settings">Save DLStreams Settings</button>
                 </div>

@@ -97,6 +97,9 @@ class DlstreamsService {
             this.addLog('[*] No categories selected — scraping all events.');
         }
 
+        const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 5;
+        this.addLog(`[*] Concurrency Limit: ${concurrencyLimit}`);
+
         const scriptPath = path.join(__dirname, '../scraper/dlstreams.js');
 
         this.currentProcess = spawn(process.execPath, [scriptPath], {
@@ -104,7 +107,8 @@ class DlstreamsService {
                 ...process.env,
                 PORT: process.env.PORT || 3000,
                 SCRAPER_RUN_TYPE: runType,
-                DLSTREAMS_CATEGORIES: JSON.stringify(selectedCategories)
+                DLSTREAMS_CATEGORIES: JSON.stringify(selectedCategories),
+                SCRAPER_CONCURRENCY: concurrencyLimit.toString()
             }
         });
 

@@ -1,8 +1,9 @@
 const { resolveChannelUrl } = require('./server/services/dlstreamsResolver');
 
 (async () => {
-    console.log("Testing channel 713 (beIN Sports 2 Malaysia)...");
-    const res = await resolveChannelUrl('713');
-    console.log(res);
-    process.exit(0);
+    // Testing channel 870 (Benevento vs Foggia)
+    const channelId = '870';
+    console.log(`Testing channel ${channelId}...`);
+    const result = await resolveChannelUrl(channelId);
+    console.log(JSON.stringify(result, null, 2));
 })();

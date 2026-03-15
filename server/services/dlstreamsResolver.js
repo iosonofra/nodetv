@@ -113,8 +113,11 @@ function getLaunchOptions() {
             '--disable-setuid-sandbox', 
             '--disable-dev-shm-usage',
             '--autoplay-policy=no-user-gesture-required',
-            '--disable-background-timer-throttling',
-            '--disable-features=CalculateNativeWinOcclusion,PauseBackgroundTabs'
+            '--disable-renderer-backgrounding',
+            '--disable-features=CalculateNativeWinOcclusion,PauseBackgroundTabs',
+            '--disable-gpu',
+            '--hide-scrollbars',
+            '--mute-audio'
         ]
     };
     if (fs.existsSync(CHROMIUM_PATH)) {
@@ -221,26 +224,81 @@ async function extractStreamUrl(page, channelId) {
             }
         };
 
-        let poll = 0;
-        while (!streamUrl && poll < 30) {
-            await checkFrames();
-            if (streamUrl) break;
-            if (poll % 10 === 0) {
-                const isError = await page.evaluate(() => {
-                    const text = document.body.innerText.toLowerCase();
-                    return text.includes('not found') || text.includes('error') || text.includes('invalid id');
-                }).catch(() => false);
-                if (isError) break;
-            }
-            await new Promise(r => setTimeout(r, 500));
-            poll++;
-            if (poll === 8) try { await page.mouse.click(640, 360).catch(() => {}); } catch(e) {}
+        // 1. Wait for navigation
+        try {
+            await page.goto(targetUrl, { 
+                waitUntil: 'networkidle2', // More robust for slower environments
+                timeout: 40000 
+            });
+        } catch (err) {
+            if (!streamUrl) console.log(`  [!] Navigation warning: ${err.message}`);
         }
 
-        if (!streamUrl) await navPromise;
-        if (!streamUrl) await checkFrames();
+        // 2. Polling loop with enhanced detection
+        let poll = 0;
+        let rateLimitWait = false;
+        
+        while (!streamUrl && poll < 40) { // Increased poll count
+            // Check for 429 or 404
+            const pageState = await page.evaluate(() => {
+                const text = document.body.innerText;
+                if (text.includes('429 Too Many Requests')) return '429';
+                if (text.includes('404 Page Not Found')) return '404';
+                return 'ok';
+            }).catch(() => 'error');
 
-        // Cleanup
+            if (pageState === '429' && !rateLimitWait) {
+                console.log('  [!] Rate limited (429). Waiting 15s...');
+                rateLimitWait = true;
+                await new Promise(r => setTimeout(r, 15000));
+                await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+                continue;
+            }
+
+            if (pageState === '404') {
+                console.log('  [!] Channel not found (404)');
+                break;
+            }
+
+            // Check if player iframe is present and try to get source
+            const frameSrc = await page.evaluate(() => {
+                const ifr = document.querySelector('iframe[src*="stream-"]');
+                return ifr ? ifr.src : null;
+            }).catch(() => null);
+
+            if (frameSrc && !streamUrl) {
+                // If we found the stream iframe but no URL yet, maybe it's in a script inside that frame
+                // We'll let the interceptor catch it, but we can also try to look for it
+            }
+
+            await checkFrames();
+            if (streamUrl) break;
+
+            await new Promise(r => setTimeout(r, 1000));
+            poll++;
+
+            // Click interaction to trigger potential hidden loads
+            if (poll === 10) {
+                try {
+                    const dimensions = await page.evaluate(() => ({
+                        width: window.innerWidth,
+                        height: window.innerHeight
+                    }));
+                    await page.mouse.click(dimensions.width / 2, dimensions.height / 2).catch(() => {});
+                } catch(e) {}
+            }
+        }
+        // 3. Diagnostic dump on failure
+        if (!streamUrl) {
+            const diagPath = path.join(DATA_DIR, `fail_${channelId}.html`);
+            try {
+                const html = await page.content();
+                fs.writeFileSync(diagPath, html, 'utf8');
+                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}`);
+            } catch (diagErr) { }
+        }
+
+        // 4. Cache result or failure
         page.off('request', requestHandler);
         page.off('console', consoleHandler);
 

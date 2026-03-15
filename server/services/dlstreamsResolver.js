@@ -23,7 +23,7 @@ const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 // Shared browser instance for reuse
 let sharedBrowser = null;
 let browserClosingTimer = null;
-const BROWSER_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const BROWSER_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // Increased to 20 minutes
 
 /**
  * Get or launch shared browser
@@ -154,113 +154,134 @@ async function extractStreamUrl(page, channelId) {
     page.on('request', requestHandler);
     page.on('console', consoleHandler);
 
-    // Speed up: block unnecessary resources
-    const interceptionHandler = req => {
-        try {
-            if (req.isInterceptionHandled()) return;
-            const type = req.resourceType();
-            const url = req.url();
-            // Block images, fonts, and media (the player will try to load media but we interecept the URL before it starts downloading)
-            // Also block common ad and tracking domains
-            if (['image', 'font', 'media', 'manifest'].includes(type) || 
-                url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
-                url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
-                url.includes('yandex.ru') || url.includes('adsystem') || url.includes('hitstat')) {
-                return req.abort().catch(() => {});
-            }
-            req.continue().catch(() => {});
-        } catch (e) {
-            // Request may have been handled or page closed
-        }
-    };
-
     try {
         await page.setRequestInterception(true);
-        page.on('request', interceptionHandler);
+        page.on('request', async req => {
+            try {
+                if (req.isInterceptionHandled()) return;
+                const type = req.resourceType();
+                const url = req.url();
+
+                // Intercept stream URLs
+                if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv')) && !url.toLowerCase().includes('ad')) {
+                    if (!streamUrl) {
+                        console.log(`  [+] Intercepted from request: ${url}`);
+                        streamUrl = url;
+                        try {
+                            const parsedUrl = new URL(url);
+                            const ck = parsedUrl.searchParams.get('ck');
+                            if (ck) ckParam = ck;
+                        } catch (err) { }
+                    }
+                }
+
+                // Block unnecessary resources
+                if (['image', 'font', 'media'].includes(type) || 
+                    url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
+                    url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
+                    url.includes('yandex.ru') || url.includes('adsystem') || url.includes('hitstat')) {
+                    
+                    // Don't block if it's our stream URL even if typed as media
+                    if (url === streamUrl) {
+                        return req.continue().catch(() => {});
+                    }
+                    return req.abort().catch(() => {});
+                }
+                req.continue().catch(() => {});
+            } catch (e) {}
+        });
     } catch (e) {
         console.error(` [!] Error setting request interception: ${e.message}`);
     }
 
     try {
-        await page.setViewport({ width: 1280, height: 720 });
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://dlstreams.top/'
+        });
+        await page.setViewport({ width: 1280 + Math.floor(Math.random() * 100), height: 720 + Math.floor(Math.random() * 100) });
+
         if (!page._monitorRegistered) {
             await page.evaluateOnNewDocument(MONITOR_SCRIPT);
             page._monitorRegistered = true;
         }
-        // Change to domcontentloaded to avoid waiting for slow ads/trackers
-        await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
 
-        // Check all frames for manifests
+        // Re-enable interception but be very targeted
+        await page.setRequestInterception(true);
+        page.on('request', async req => {
+            try {
+                if (req.isInterceptionHandled()) return;
+                const url = req.url();
+                const type = req.resourceType();
+
+                // Intercept stream URLs
+                if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+                    if (!streamUrl) {
+                        console.log(`  [+] Intercepted: ${url}`);
+                        streamUrl = url;
+                        const ck = new URL(url).searchParams.get('ck');
+                        if (ck) ckParam = ck;
+                    }
+                }
+
+                // Block only known heavy ad domains and tracking
+                if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
+                    url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
+                    url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') || 
+                    url.includes('chatango') || // Chatango is very heavy
+                    ['image', 'font'].includes(type)) {
+                    return req.abort().catch(() => {});
+                }
+                
+                req.continue().catch(() => {});
+            } catch (e) {}
+        });
+
+        console.log(`  [*] Resolving ${playerUrl}...`);
+        
+        // Use a combination of Promise.race and polling
+        const navPromise = page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 50000 }).catch(e => {
+            console.log(`  [!] Navigation error: ${e.message}`);
+        });
+
         const checkFrames = async () => {
-            for (const frame of page.frames()) {
+             const frames = page.frames();
+            for (const frame of frames) {
                 try {
                     const src = frame.url();
-                    if (src && !src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
+                    if (!src || src === 'about:blank') continue;
+                    
+                    if (!src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
                         console.log(`  [+] Found manifest in frame URL: ${src}`);
                         streamUrl = src;
                         break;
                     }
                 } catch (e) { }
             }
-
-            if (!streamUrl) {
-                try {
-                    const iframeSrcs = await page.evaluate(() => {
-                        return Array.from(document.querySelectorAll('iframe'))
-                            .map(f => f.getAttribute('src'))
-                            .filter(s => s);
-                    });
-
-                    for (let src of iframeSrcs) {
-                        if (src.startsWith("//")) src = "https:" + src;
-                        if (!src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
-                            console.log(`  [+] Found manifest in iframe DOM src: ${src}`);
-                            streamUrl = src;
-                            break;
-                        }
-                    }
-                } catch (e) { }
-            }
         };
 
-        // Wait up to 2 seconds for video to load natively (autostart), polling every 500ms
         let pollAttempts = 0;
-        while (!streamUrl && pollAttempts < 4) {
-            await new Promise(r => setTimeout(r, 500));
+        while (!streamUrl && pollAttempts < 60) { // 30 seconds
             await checkFrames();
+            if (streamUrl) break;
+            await new Promise(r => setTimeout(r, 500));
             pollAttempts++;
-        }
-
-        // Click in center to trigger playback if needed
-        if (!streamUrl) {
-            await page.bringToFront();
-            await page.mouse.click(640, 360);
             
-            pollAttempts = 0;
-            while (!streamUrl && pollAttempts < 6) { // 3 seconds
-                await new Promise(r => setTimeout(r, 500));
-                await checkFrames();
-                pollAttempts++;
+            if (pollAttempts === 10) {
+                try { await page.mouse.click(640, 360); } catch (e) {}
             }
         }
 
-        if (!streamUrl) {
-            await page.bringToFront();
-            await page.mouse.click(640, 400);
-            
-            pollAttempts = 0;
-            while (!streamUrl && pollAttempts < 10) { // 5 seconds
-                await new Promise(r => setTimeout(r, 500));
-                await checkFrames();
-                pollAttempts++;
-            }
-        }
+        if (!streamUrl) await navPromise;
+        // Final check
+        if (!streamUrl) await checkFrames();
+
     } catch (err) {
-        console.error(` [!] Error on ${playerUrl}: ${err.message}`);
+        console.error(` [!] Resolution error on ${playerUrl}: ${err.message}`);
     } finally {
-        page.off('request', requestHandler);
-        page.off('console', consoleHandler);
-        page.off('request', interceptionHandler);
+        page.removeAllListeners('request');
+        page.removeAllListeners('console');
     }
 
     return { streamUrl, ckParam };

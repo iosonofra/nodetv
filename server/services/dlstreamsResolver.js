@@ -204,11 +204,6 @@ async function extractStreamUrl(page, channelId) {
         `;
         await page.evaluateOnNewDocument(MONITOR_SCRIPT);
 
-        console.log(`  [*] Resolving ${playerUrl}...`);
-        const navPromise = page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => {
-            console.log(`  [!] Nav error (${channelId}): ${e.message}`);
-        });
-
         const checkFrames = async () => {
             if (streamUrl) return;
             const frames = page.frames();
@@ -226,7 +221,7 @@ async function extractStreamUrl(page, channelId) {
 
         // 1. Wait for navigation
         try {
-            await page.goto(targetUrl, { 
+            await page.goto(playerUrl, { 
                 waitUntil: 'networkidle2', // More robust for slower environments
                 timeout: 40000 
             });

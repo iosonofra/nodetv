@@ -7,6 +7,7 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
+const path = require('path');
 
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
@@ -16,20 +17,65 @@ const BASE_URL = "https://dlstreams.top";
 // Optional custom Chromium path (useful for Linux/Docker)
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 
+// Paths for persistent cache - use absolute path from project root
+const ROOT_DIR = path.resolve(__dirname, "../../");
+const DATA_DIR = path.join(ROOT_DIR, "data", "scraper");
+const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
+
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
-const urlCache = new Map();
-const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+let urlCache = new Map();
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+// Cache for failures (channelId -> { timestamp, error })
+const failureCache = new Map();
+const FAILURE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Load cache from file
+ */
+function loadUrlCache() {
+    console.log(`[DLStreams Resolver] Checking for cache at: ${URL_CACHE_FILE}`);
+    if (fs.existsSync(URL_CACHE_FILE)) {
+        try {
+            const data = JSON.parse(fs.readFileSync(URL_CACHE_FILE, 'utf8'));
+            urlCache = new Map(Object.entries(data));
+            console.log(`[DLStreams Resolver] Loaded ${urlCache.size} entries from persistent cache.`);
+        } catch (e) {
+            console.error(`[DLStreams Resolver] Error loading URL cache: ${e.message}`);
+            urlCache = new Map();
+        }
+    } else {
+        console.log(`[DLStreams Resolver] No persistent cache found.`);
+    }
+}
+
+/**
+ * Save cache to file
+ */
+function saveUrlCache() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        const data = Object.fromEntries(urlCache);
+        fs.writeFileSync(URL_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.error(`[DLStreams Resolver] Error saving URL cache: ${e.message}`);
+    }
+}
+
+// Initial load
+loadUrlCache();
 
 // Shared browser instance for reuse
 let sharedBrowser = null;
 let browserClosingTimer = null;
-const BROWSER_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // Increased to 20 minutes
+const BROWSER_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
 
 /**
  * Get or launch shared browser
  */
 async function getSharedBrowser() {
-    // Clear any pending shutdown timer
     if (browserClosingTimer) {
         clearTimeout(browserClosingTimer);
         browserClosingTimer = null;
@@ -38,15 +84,12 @@ async function getSharedBrowser() {
     if (!sharedBrowser) {
         console.log('[DLStreams Resolver] Launching shared browser instance...');
         sharedBrowser = await puppeteer.launch(getLaunchOptions());
-        
-        // Handle unexpected disconnection
         sharedBrowser.on('disconnected', () => {
             console.log('[DLStreams Resolver] Shared browser disconnected.');
             sharedBrowser = null;
         });
     }
 
-    // Reset shutdown timer
     browserClosingTimer = setTimeout(async () => {
         if (sharedBrowser) {
             console.log('[DLStreams Resolver] Shared browser idle timeout reached. Closing...');
@@ -71,356 +114,226 @@ function getLaunchOptions() {
             '--disable-dev-shm-usage',
             '--autoplay-policy=no-user-gesture-required',
             '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
             '--disable-features=CalculateNativeWinOcclusion,PauseBackgroundTabs'
         ]
     };
-
     if (fs.existsSync(CHROMIUM_PATH)) {
         opts.executablePath = CHROMIUM_PATH;
     }
-
     return opts;
 }
 
 /**
  * Visit a player page and intercept stream URL (m3u8/mpd)
- * @param {import('puppeteer').Page} page - Puppeteer page instance
- * @param {string} channelId - DLStreams channel ID
- * @returns {{ streamUrl: string|null, ckParam: string|null }}
  */
 async function extractStreamUrl(page, channelId) {
-    const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
+    // 1. Check cache first
+    const cached = urlCache.get(channelId);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+        console.log(`  [*] Cache hit for channel ${channelId}`);
+        return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
+    }
+
+    // 2. Check failure cache
+    const failure = failureCache.get(channelId);
+    if (failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
+        console.log(`  [*] Skipping channel ${channelId} due to recent failure.`);
+        return { streamUrl: null, ckParam: null, cached: false };
+    }
+
+    const playerUrl = channelId.startsWith('http') ? channelId : `${BASE_URL}/watch.php?id=${channelId}`;
     let streamUrl = null;
     let ckParam = null;
 
-    // Monitor script for fetch/XHR interception
-    const MONITOR_SCRIPT = `
-    (function() {
-        const originalFetch = window.fetch;
-        window.fetch = function() {
-            const url = arguments[0];
-            if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
-                console.log('INTERCEPT_URL:' + url);
-            }
-            return originalFetch.apply(this, arguments);
-        };
-        const originalOpen = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function() {
-            const url = arguments[1];
-            if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
-                console.log('INTERCEPT_URL:' + url);
-            }
-            return originalOpen.apply(this, arguments);
-        };
-    })();
-    `;
-
-    // Passive listeners
-    const requestHandler = request => {
-        const url = request.url();
-        if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv')) && !url.toLowerCase().includes('ad')) {
-            if (!streamUrl) {
-                console.log(`  [+] Intercepted from request: ${url}`);
-                streamUrl = url;
-
-                try {
-                    const parsedUrl = new URL(url);
-                    const ck = parsedUrl.searchParams.get('ck');
-                    if (ck) ckParam = ck;
-                } catch (err) { }
-            }
-        }
-    };
-
-    const consoleHandler = msg => {
-        const text = msg.text();
-        if (text.startsWith('INTERCEPT_URL:')) {
-            const url = text.replace('INTERCEPT_URL:', '');
-            if (!streamUrl) {
-                console.log(`  [+] Intercepted from console: ${url}`);
-                streamUrl = url;
-
-                try {
-                    const parsedUrl = new URL(url);
-                    const ck = parsedUrl.searchParams.get('ck');
-                    if (ck) ckParam = ck;
-                } catch (err) { }
-            }
-        }
-    };
-
-    page.on('request', requestHandler);
-    page.on('console', consoleHandler);
-
     try {
+        // Intercept network requests
         await page.setRequestInterception(true);
-        page.on('request', async req => {
-            try {
-                if (req.isInterceptionHandled()) return;
-                const type = req.resourceType();
-                const url = req.url();
+        const requestHandler = req => {
+            const url = req.url();
+            const type = req.resourceType();
 
-                // Intercept stream URLs
-                if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv')) && !url.toLowerCase().includes('ad')) {
-                    if (!streamUrl) {
-                        console.log(`  [+] Intercepted from request: ${url}`);
-                        streamUrl = url;
-                        try {
-                            const parsedUrl = new URL(url);
-                            const ck = parsedUrl.searchParams.get('ck');
-                            if (ck) ckParam = ck;
-                        } catch (err) { }
-                    }
+            if (!streamUrl && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+                console.log(`  [+] Intercepted: ${url}`);
+                streamUrl = url;
+                if (url.includes('ck=')) {
+                    try {
+                        const parts = url.split('ck=');
+                        if (parts.length > 1) ckParam = parts[1].split('&')[0];
+                    } catch (e) { }
                 }
+            }
 
-                // Block unnecessary resources
-                if (['image', 'font', 'media'].includes(type) || 
-                    url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
-                    url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
-                    url.includes('yandex.ru') || url.includes('adsystem') || url.includes('hitstat')) {
-                    
-                    // Don't block if it's our stream URL even if typed as media
-                    if (url === streamUrl) {
-                        return req.continue().catch(() => {});
-                    }
-                    return req.abort().catch(() => {});
+            if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
+                url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
+                url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') || 
+                url.includes('chatango') || url.includes('disqus') || 
+                ['image', 'font', 'stylesheet'].includes(type)) {
+                return req.abort().catch(() => {});
+            }
+            req.continue().catch(() => {});
+        };
+        page.on('request', requestHandler);
+
+        // Monitor console for script interception
+        const consoleHandler = msg => {
+            const text = msg.text();
+            if (text.startsWith('INTERCEPT_URL:')) {
+                const url = text.replace('INTERCEPT_URL:', '');
+                if (!streamUrl) {
+                    console.log(`  [+] Intercepted from console: ${url}`);
+                    streamUrl = url;
                 }
-                req.continue().catch(() => {});
-            } catch (e) {}
-        });
-    } catch (e) {
-        console.error(` [!] Error setting request interception: ${e.message}`);
-    }
+            }
+        };
+        page.on('console', consoleHandler);
 
-    try {
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
-            'Referer': 'https://dlstreams.top/'
-        });
-        await page.setViewport({ width: 1280 + Math.floor(Math.random() * 100), height: 720 + Math.floor(Math.random() * 100) });
-
-        if (!page._monitorRegistered) {
-            await page.evaluateOnNewDocument(MONITOR_SCRIPT);
-            page._monitorRegistered = true;
-        }
-
-        // Re-enable interception but be very targeted
-        await page.setRequestInterception(true);
-        page.on('request', async req => {
-            try {
-                if (req.isInterceptionHandled()) return;
-                const url = req.url();
-                const type = req.resourceType();
-
-                // Intercept stream URLs
-                if (!url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
-                    if (!streamUrl) {
-                        console.log(`  [+] Intercepted: ${url}`);
-                        streamUrl = url;
-                        const ck = new URL(url).searchParams.get('ck');
-                        if (ck) ckParam = ck;
-                    }
+        const MONITOR_SCRIPT = `
+        (function() {
+            const originalFetch = window.fetch;
+            window.fetch = function() {
+                const url = arguments[0];
+                if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+                    console.log('INTERCEPT_URL:' + url);
                 }
-
-                // Block heavy ad domains, tracking, and unneeded assets
-                if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
-                    url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
-                    url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') || 
-                    url.includes('chatango') || url.includes('disqus') || 
-                    url.includes('quantserve') || url.includes('facebook') || url.includes('twitter') ||
-                    ['image', 'font', 'stylesheet'].includes(type)) { // Block CSS too for speed since we rely on intercept
-                    return req.abort().catch(() => {});
-                }
-                
-                req.continue().catch(() => {});
-            } catch (e) {}
-        });
+                return originalFetch.apply(this, arguments);
+            };
+        })();
+        `;
+        await page.evaluateOnNewDocument(MONITOR_SCRIPT);
 
         console.log(`  [*] Resolving ${playerUrl}...`);
-        
-        // Use a combination of Promise.race and polling
         const navPromise = page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => {
-            console.log(`  [!] Navigation error (${channelId}): ${e.message}`);
+            console.log(`  [!] Nav error (${channelId}): ${e.message}`);
         });
 
         const checkFrames = async () => {
-             const frames = page.frames();
+            if (streamUrl) return;
+            const frames = page.frames();
             for (const frame of frames) {
                 try {
                     const src = frame.url();
-                    if (!src || src === 'about:blank') continue;
-                    
-                    if (!src.includes('s3.dualstack') && (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) && !streamUrl) {
-                        console.log(`  [+] Found manifest in frame URL: ${src}`);
+                    if (src && !src.includes('about:blank') && !src.includes('s3.dualstack') && 
+                        (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css'))) {
                         streamUrl = src;
                         break;
                     }
-                } catch (e) { }
+                } catch (e) {}
             }
         };
 
-        let pollAttempts = 0;
-        while (!streamUrl && pollAttempts < 30) { // 15 seconds max polling
+        let poll = 0;
+        while (!streamUrl && poll < 30) {
             await checkFrames();
             if (streamUrl) break;
-            
-            // Check for error text in page occasionally
-            if (pollAttempts % 10 === 0) {
+            if (poll % 10 === 0) {
                 const isError = await page.evaluate(() => {
                     const text = document.body.innerText.toLowerCase();
                     return text.includes('not found') || text.includes('error') || text.includes('invalid id');
                 }).catch(() => false);
-                if (isError) {
-                    console.log(`  [!] Page reported error for channel ${channelId}`);
-                    break;
-                }
+                if (isError) break;
             }
-
             await new Promise(r => setTimeout(r, 500));
-            pollAttempts++;
-            
-            if (pollAttempts === 8) { // Click earlier
-                try { await page.mouse.click(640, 360).catch(() => {}); } catch (e) {}
-            }
+            poll++;
+            if (poll === 8) try { await page.mouse.click(640, 360).catch(() => {}); } catch(e) {}
         }
 
         if (!streamUrl) await navPromise;
-        // Final check
         if (!streamUrl) await checkFrames();
 
+        // Cleanup
+        page.off('request', requestHandler);
+        page.off('console', consoleHandler);
+
+        // 3. Cache result or failure
+        if (streamUrl) {
+            urlCache.set(channelId, { streamUrl, ckParam, timestamp: Date.now() });
+            saveUrlCache();
+        } else {
+            failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout" });
+        }
+
     } catch (err) {
-        console.error(` [!] Resolution error on ${playerUrl}: ${err.message}`);
-    } finally {
-        page.removeAllListeners('request');
-        page.removeAllListeners('console');
+        console.error(` [!] Error: ${err.message}`);
+        failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
     }
 
     return { streamUrl, ckParam };
 }
 
 /**
- * Resolve a single channel URL on-demand with caching
- * Launches its own browser, resolves the URL, closes the browser.
- * @param {string} channelId - DLStreams channel ID (numeric string)
- * @returns {{ streamUrl: string|null, ckParam: string|null, cached: boolean }}
+ * Resolve a single channel URL on-demand (delegates to extractStreamUrl)
  */
 async function resolveChannelUrl(channelId) {
-    // Check cache first
-    const cached = urlCache.get(channelId);
-    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
-        console.log(`[DLStreams Resolver] Cache hit for channel ${channelId}`);
-        return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
-    }
-
-    console.log(`[DLStreams Resolver] Resolving fresh URL for channel ${channelId}...`);
-
+    console.log(`[DLStreams Resolver] Resolving channel ${channelId}...`);
     let browser;
     try {
         browser = await getSharedBrowser();
         const page = await browser.newPage();
-
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-        );
-
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        
         const result = await extractStreamUrl(page, channelId);
 
-        // Handle chrome-extension wrapper
         if (result.streamUrl && result.streamUrl.startsWith("chrome-extension://")) {
-            if (result.streamUrl.includes("#")) {
-                result.streamUrl = result.streamUrl.split("#")[1];
-            }
+            if (result.streamUrl.includes("#")) result.streamUrl = result.streamUrl.split("#")[1];
         }
 
-        // Cache the result
-        if (result.streamUrl) {
-            urlCache.set(channelId, {
-                streamUrl: result.streamUrl,
-                ckParam: result.ckParam,
-                timestamp: Date.now()
-            });
-        }
-
-        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'No URL found'}`);
-        
-        // Close page but NOT the browser
+        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : ''}`);
         await page.close().catch(() => {});
-        return { ...result, cached: false };
-
+        return result;
     } catch (err) {
-        console.error(`[DLStreams Resolver] Error resolving channel ${channelId}: ${err.message}`);
-        return { streamUrl: null, ckParam: null, cached: false };
+        console.error(`[DLStreams Resolver] Error: ${err.message}`);
+        return { streamUrl: null, ckParam: null, cached: false, error: err.message };
     }
 }
 
 /**
- * Decode ClearKey parameter to key string
- * @param {string} ckParam - base64 encoded ClearKey parameter
- * @returns {string} key string in KID:KEY format
+ * Decode ClearKey parameter
  */
 function decodeClearKey(ckParam) {
     if (!ckParam) return '';
-
     try {
         let cleanCk = ckParam;
         while (cleanCk.length % 4 !== 0) cleanCk += '=';
-
         let decoded = Buffer.from(cleanCk, 'base64').toString('utf-8');
         try {
             const ckJson = JSON.parse(decoded);
             if (ckJson.keys) {
                 return ckJson.keys.filter(k => k.kid && k.k).map(k => `${k.kid}:${k.k}`).join(",");
-            } else {
-                return Object.entries(ckJson).filter(([k, v]) => k.length > 10).map(([k, v]) => `${k}:${v}`).join(",");
             }
+            return Object.entries(ckJson).filter(([k]) => k.length > 10).map(([k, v]) => `${k}:${v}`).join(",");
         } catch (e) {
             if (decoded.includes(":")) return decoded;
         }
     } catch (e) {
-        console.error(`[DLStreams Resolver] Error decoding ClearKey: ${e.message}`);
+        console.error(`[DLStreams Resolver] Error decoding: ${e.message}`);
     }
-
     return '';
 }
 
 /**
- * Fetch available categories from DLStreams homepage
- * Scrapes the navigation/filter bar for category links
- * @returns {Array<{name: string, slug: string}>}
+ * Fetch categories
  */
 async function fetchCategories() {
-    console.log('[DLStreams Resolver] Fetching categories from homepage...');
+    console.log('[DLStreams Resolver] Fetching categories...');
     let browser;
     try {
         browser = await getSharedBrowser();
         const page = await browser.newPage();
-
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-        );
-
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
         await page.goto(BASE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
         const categories = await page.evaluate(() => {
             const results = [];
             const links = document.querySelectorAll('a[href*="index.php?cat="]');
             const seen = new Set();
-
             for (const link of links) {
                 const href = link.getAttribute('href');
                 const match = href.match(/[?&]cat=([^&]+)/);
                 if (match) {
                     const slug = decodeURIComponent(match[1].replace(/\+/g, ' '));
-                    // Skip duplicates and "All" type entries
-                    if (!seen.has(slug) && slug !== 'All' && slug !== 'Upcoming Events' && slug !== 'TV Shows') {
+                    if (!seen.has(slug) && slug !== 'All' && slug !== 'Upcoming Events') {
                         seen.add(slug);
-                        results.push({
-                            name: link.textContent.trim(),
-                            slug: slug
-                        });
+                        results.push({ name: link.textContent.trim(), slug });
                     }
                 }
             }
@@ -431,7 +344,7 @@ async function fetchCategories() {
         await page.close().catch(() => {});
         return categories;
     } catch (err) {
-        console.error(`[DLStreams Resolver] Error fetching categories: ${err.message}`);
+        console.error(`[DLStreams Resolver] Error: ${err.message}`);
         return [];
     }
 }

@@ -325,12 +325,17 @@ async function scrape() {
             if (event.time && event.time.includes(':')) {
                 const [h, m] = event.time.split(':').map(n => parseInt(n));
                 
-                // Allow a window: started up to 2 hours ago, or starting in next 3 hours
+                // Allow a window: started up to 1 hours ago, or starting in next 2 hours
                 // Simple circular hour difference
-                const diff = (h - currentGmtHour + 24) % 24;
-                const isRelevant = diff >= 22 || diff <= 3; // 22...23 (past 2h) or 0...3 (future 3h)
+                const nowGmt = now.getTime();
+                const eventDate = new Date(now);
+                eventDate.setUTCHours(h, m, 0, 0);
+                const eventTime = eventDate.getTime();
+
+                const diffHours = (eventTime - nowGmt) / (1000 * 60 * 60);
+                const withinWindow = diffHours >= -1.0 && diffHours <= 5.0;
                 
-                if (!isRelevant) {
+                if (!withinWindow) {
                     skippedByTime++;
                     return;
                 }

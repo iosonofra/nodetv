@@ -225,12 +225,13 @@ async function extractStreamUrl(page, channelId) {
                     }
                 }
 
-                // Block only known heavy ad domains and tracking
+                // Block heavy ad domains, tracking, and unneeded assets
                 if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
                     url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
                     url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') || 
-                    url.includes('chatango') || // Chatango is very heavy
-                    ['image', 'font'].includes(type)) {
+                    url.includes('chatango') || url.includes('disqus') || 
+                    url.includes('quantserve') || url.includes('facebook') || url.includes('twitter') ||
+                    ['image', 'font', 'stylesheet'].includes(type)) { // Block CSS too for speed since we rely on intercept
                     return req.abort().catch(() => {});
                 }
                 
@@ -241,8 +242,8 @@ async function extractStreamUrl(page, channelId) {
         console.log(`  [*] Resolving ${playerUrl}...`);
         
         // Use a combination of Promise.race and polling
-        const navPromise = page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 50000 }).catch(e => {
-            console.log(`  [!] Navigation error: ${e.message}`);
+        const navPromise = page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => {
+            console.log(`  [!] Navigation error (${channelId}): ${e.message}`);
         });
 
         const checkFrames = async () => {
@@ -262,14 +263,27 @@ async function extractStreamUrl(page, channelId) {
         };
 
         let pollAttempts = 0;
-        while (!streamUrl && pollAttempts < 60) { // 30 seconds
+        while (!streamUrl && pollAttempts < 30) { // 15 seconds max polling
             await checkFrames();
             if (streamUrl) break;
+            
+            // Check for error text in page occasionally
+            if (pollAttempts % 10 === 0) {
+                const isError = await page.evaluate(() => {
+                    const text = document.body.innerText.toLowerCase();
+                    return text.includes('not found') || text.includes('error') || text.includes('invalid id');
+                }).catch(() => false);
+                if (isError) {
+                    console.log(`  [!] Page reported error for channel ${channelId}`);
+                    break;
+                }
+            }
+
             await new Promise(r => setTimeout(r, 500));
             pollAttempts++;
             
-            if (pollAttempts === 10) {
-                try { await page.mouse.click(640, 360); } catch (e) {}
+            if (pollAttempts === 8) { // Click earlier
+                try { await page.mouse.click(640, 360).catch(() => {}); } catch (e) {}
             }
         }
 

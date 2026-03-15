@@ -299,25 +299,53 @@ async function scrape() {
 
         console.log(`[*] Total events found: ${events.length}`);
 
-        if (events.length === 0) {
-            console.log("[!] No events found in schedule.");
-        }
-
+        // Step 2: Filter and flatten tasks
         const m3uLines = ["#EXTM3U"];
         const processedChannels = new Map(); // Avoid duplicate channel visits
         
-        // Flatten tasks
+        // Filter criteria:
+        // 1. Time-based: Events within -2 to +3 hours of current UK GMT time
+        // 2. Title-based: Exclude events that look like future dates
+        const now = new Date();
+        const currentGmtHour = (now.getUTCHours() + 0) % 24; // Base UK time is GMT+0 usually (or +1)
+        // Note: DLStreams site uses UK time. 
+        
         const tasks = [];
+        let skippedByTime = 0;
+        let skippedByDate = 0;
+
         events.forEach(event => {
+            // Filter by date string in title (e.g. "Saturday, March 21, 2026")
+            if (event.title.match(/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/)) {
+                skippedByDate++;
+                return;
+            }
+
+            // Filter by time if possible
+            if (event.time && event.time.includes(':')) {
+                const [h, m] = event.time.split(':').map(n => parseInt(n));
+                
+                // Allow a window: started up to 2 hours ago, or starting in next 3 hours
+                // Simple circular hour difference
+                const diff = (h - currentGmtHour + 24) % 24;
+                const isRelevant = diff >= 22 || diff <= 3; // 22...23 (past 2h) or 0...3 (future 3h)
+                
+                if (!isRelevant) {
+                    skippedByTime++;
+                    return;
+                }
+            }
+
             event.channels.forEach(channel => {
                 tasks.push({ event, channel });
             });
         });
 
-        console.log(`[*] Flattened events into ${tasks.length} total channel tasks.`);
+        console.log(`[*] Filtered schedule: skipped ${skippedByDate} future dates, ${skippedByTime} out-of-window events.`);
+        console.log(`[*] Flattened into ${tasks.length} active channel tasks.`);
 
         // Worker Pool logic
-        const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY || '5', 10);
+        const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY || '8', 10);
         console.log(`[*] Proceeding with concurrency limit: ${concurrencyLimit}`);
         
         let completedChannels = 0;

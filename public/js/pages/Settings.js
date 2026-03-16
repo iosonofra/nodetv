@@ -1088,6 +1088,8 @@ class SettingsPage {
         const autoRunToggle = document.getElementById('setting-dl-auto-run');
         const intervalSelect = document.getElementById('setting-dl-interval');
         const concurrencyInput = document.getElementById('setting-dl-concurrency');
+        const hoursBeforeInput = document.getElementById('setting-dl-hours-before');
+        const hoursAfterInput  = document.getElementById('setting-dl-hours-after');
         const saveBtn = document.getElementById('save-dl-settings');
 
         if (!autoRunToggle || !intervalSelect) return;
@@ -1100,11 +1102,25 @@ class SettingsPage {
             if (isNaN(concurrency) || concurrency < 1) concurrency = 5;
         }
 
+        let hoursBefore = 3;
+        if (hoursBeforeInput) {
+            hoursBefore = parseFloat(hoursBeforeInput.value);
+            if (isNaN(hoursBefore) || hoursBefore < 0) hoursBefore = 3;
+        }
+
+        let hoursAfter = 3;
+        if (hoursAfterInput) {
+            hoursAfter = parseFloat(hoursAfterInput.value);
+            if (isNaN(hoursAfter) || hoursAfter < 0) hoursAfter = 3;
+        }
+
         try {
             await API.dlstreams.updateSettings({
                 dlstreamsAutoRun: autoRunToggle.checked,
                 dlstreamsInterval: intervalSelect.value,
-                dlstreamsConcurrencyLimit: concurrency
+                dlstreamsConcurrencyLimit: concurrency,
+                dlstreamsHoursBefore: hoursBefore,
+                dlstreamsHoursAfter: hoursAfter
             });
             this.appendDlstreamsLog('DLStreams settings updated successfully.');
             this.loadDlstreamsStatus();
@@ -1197,6 +1213,14 @@ class SettingsPage {
                     if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
                     if (concurrencyInput && status.dlstreamsConcurrencyLimit) {
                          concurrencyInput.value = status.dlstreamsConcurrencyLimit;
+                    }
+                    const hoursBeforeInput = document.getElementById('setting-dl-hours-before');
+                    const hoursAfterInput  = document.getElementById('setting-dl-hours-after');
+                    if (hoursBeforeInput && status.dlstreamsHoursBefore != null) {
+                        hoursBeforeInput.value = status.dlstreamsHoursBefore;
+                    }
+                    if (hoursAfterInput && status.dlstreamsHoursAfter != null) {
+                        hoursAfterInput.value = status.dlstreamsHoursAfter;
                     }
                     this._dlSettingsInitialized = true;
                 }

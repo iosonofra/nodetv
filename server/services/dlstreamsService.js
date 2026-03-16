@@ -51,6 +51,9 @@ class DlstreamsService {
             lastRun: this.lastRun,
             history: this.getHistory(),
             fileInfo,
+            dlstreamsConcurrencyLimit: currentSettings.dlstreamsConcurrencyLimit || 5,
+            dlstreamsHoursBefore: currentSettings.dlstreamsHoursBefore ?? 3,
+            dlstreamsHoursAfter:  currentSettings.dlstreamsHoursAfter  ?? 3,
             autoRunInfo: {
                 enabled: autoRunEnabled,
                 intervalHours,
@@ -100,6 +103,10 @@ class DlstreamsService {
         const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 5;
         this.addLog(`[*] Concurrency Limit: ${concurrencyLimit}`);
 
+        const hoursBefore = parseInt(currentSettings.dlstreamsHoursBefore) || 3;
+        const hoursAfter  = parseInt(currentSettings.dlstreamsHoursAfter)  || 3;
+        this.addLog(`[*] Time window: -${hoursBefore}h / +${hoursAfter}h`);
+
         const scriptPath = path.join(__dirname, '../scraper/dlstreams.js');
 
         this.currentProcess = spawn(process.execPath, [scriptPath], {
@@ -108,7 +115,9 @@ class DlstreamsService {
                 PORT: process.env.PORT || 3000,
                 SCRAPER_RUN_TYPE: runType,
                 DLSTREAMS_CATEGORIES: JSON.stringify(selectedCategories),
-                SCRAPER_CONCURRENCY: concurrencyLimit.toString()
+                SCRAPER_CONCURRENCY: concurrencyLimit.toString(),
+                DLSTREAMS_HOURS_BEFORE: hoursBefore.toString(),
+                DLSTREAMS_HOURS_AFTER: hoursAfter.toString()
             }
         });
 

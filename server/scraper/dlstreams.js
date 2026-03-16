@@ -202,18 +202,20 @@ async function scrape() {
         // Step 2: Filter and flatten tasks
         const m3uLines = ["#EXTM3U"];
         const processedChannels = new Map(); // Avoid duplicate channel visits
-        const validStreamUrlRegex = /\.(m3u8|css)(\?|$)/i;
-
         function isValidStreamUrl(url) {
-            return !!url && validStreamUrlRegex.test(url);
+            if (!url) return false;
+            const clean = url.split('#')[0];
+            return /\.(m3u8|mpd)(\?|$)/i.test(clean) ||
+                   /\/mono\.(css|csv)(\?|$)/i.test(clean);
         }
         
         // Filter criteria:
-        // 1. Time-based: Events within -2 to +3 hours of current UK GMT time
+        // 1. Time-based: configurable window around current UTC time
         // 2. Title-based: Exclude events that look like future dates
         const now = new Date();
-        const currentGmtHour = (now.getUTCHours() + 0) % 24; // Base UK time is GMT+0 usually (or +1)
-        // Note: DLStreams site uses UK time. 
+        // Note: DLStreams site uses UK time (UTC/GMT).
+        const HOURS_BEFORE = parseFloat(process.env.DLSTREAMS_HOURS_BEFORE) || 3;
+        const HOURS_AFTER  = parseFloat(process.env.DLSTREAMS_HOURS_AFTER)  || 3;
         
         const tasks = [];
         let skippedByTime = 0;
@@ -230,15 +232,25 @@ async function scrape() {
             if (event.time && event.time.includes(':')) {
                 const [h, m] = event.time.split(':').map(n => parseInt(n));
                 
-                // Allow a window: started up to 1 hours ago, or starting in next 2 hours
-                // Simple circular hour difference
+                // Allow events that started up to 3 hours ago or start in the next 3 hours
                 const nowGmt = now.getTime();
                 const eventDate = new Date(now);
                 eventDate.setUTCHours(h, m, 0, 0);
-                const eventTime = eventDate.getTime();
-
-                const diffHours = (eventTime - nowGmt) / (1000 * 60 * 60);
-                const withinWindow = diffHours >= -1.0 && diffHours <= 5.0;
+                // Handle midnight wrap-around: if the event time is far in the future,
+                // it might be from "yesterday" UTC — check both sides.
+                let eventTime = eventDate.getTime();
+                let diffHours = (eventTime - nowGmt) / (1000 * 60 * 60);
+                // If diff is > 12h, the event is likely "yesterday" in UTC — shift back 24h
+                if (diffHours > 12) {
+                    eventTime -= 24 * 60 * 60 * 1000;
+                    diffHours = (eventTime - nowGmt) / (1000 * 60 * 60);
+                }
+                // If diff is < -12h, the event is likely "tomorrow" in UTC — shift forward 24h
+                if (diffHours < -12) {
+                    eventTime += 24 * 60 * 60 * 1000;
+                    diffHours = (eventTime - nowGmt) / (1000 * 60 * 60);
+                }
+                const withinWindow = diffHours >= -HOURS_BEFORE && diffHours <= HOURS_AFTER;
                 
                 if (!withinWindow) {
                     skippedByTime++;

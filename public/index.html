@@ -1021,6 +1021,20 @@
                   </div>
                   <input type="number" id="setting-dl-concurrency" class="form-input setting-number" min="1" max="25" value="5">
                 </div>
+                <div class="setting-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Hours Before</span>
+                    <span class="setting-hint">Include events that started up to N hours before the scraper runs.</span>
+                  </div>
+                  <input type="number" id="setting-dl-hours-before" class="form-input setting-number" min="0" max="12" step="0.5" value="3">
+                </div>
+                <div class="setting-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Hours After</span>
+                    <span class="setting-hint">Include events starting up to N hours after the scraper runs.</span>
+                  </div>
+                  <input type="number" id="setting-dl-hours-after" class="form-input setting-number" min="0" max="12" step="0.5" value="3">
+                </div>
                 <div style="text-align: right; margin-top: var(--space-sm);">
                   <button class="btn btn-sm btn-secondary" id="save-dl-settings">Save DLStreams Settings</button>
                 </div>

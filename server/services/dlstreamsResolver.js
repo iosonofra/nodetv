@@ -25,7 +25,7 @@ const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
 let urlCache = new Map();
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const VALID_STREAM_URL_REGEX = /\.(m3u8|css)(\?|$)/i;
+const VALID_STREAM_URL_REGEX = /\.(m3u8|mpd|css|csv)(\?|$)/i;
 
 function isValidStreamUrl(url) {
     return !!url && VALID_STREAM_URL_REGEX.test(url);
@@ -186,7 +186,7 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
     page.on('request', requestHandler);
     page.on('console', consoleHandler);
     try {
-        await page.goto(fallbackUrl, { waitUntil: 'networkidle2', timeout: 40000 }).catch(() => {});
+        await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
 
         if (!resultUrl) {
             try {
@@ -285,13 +285,20 @@ async function extractStreamUrl(page, channelId) {
 
         const MONITOR_SCRIPT = `
         (function() {
+            const _matchStream = function(url) {
+                return typeof url === 'string' && !url.includes('s3.dualstack') &&
+                    /\.(?:mpd|m3u8|mono\.css|mono\.csv)/.test(url);
+            };
             const originalFetch = window.fetch;
             window.fetch = function() {
                 const url = arguments[0];
-                if (typeof url === 'string' && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
-                    console.log('INTERCEPT_URL:' + url);
-                }
+                if (_matchStream(url)) console.log('INTERCEPT_URL:' + url);
                 return originalFetch.apply(this, arguments);
+            };
+            const origOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                if (_matchStream(url)) console.log('INTERCEPT_URL:' + url);
+                return origOpen.apply(this, arguments);
             };
         })();
         `;
@@ -316,23 +323,22 @@ async function extractStreamUrl(page, channelId) {
             }
         };
 
-        // 1. Wait for navigation
+        // 1. Register response watcher BEFORE goto so it catches everything during page load
+        const streamResponsePromise = page.waitForResponse(res => {
+            const u = res.url();
+            return /\.(mpd|m3u8|css|csv)(\?|$)/i.test(u) && !u.includes('s3.dualstack');
+        }, { timeout: 25000 }).catch(() => null);
+
+        // 2. Navigate with domcontentloaded: doesn't wait for network idle, much faster
         try {
-            await page.goto(playerUrl, { 
-                waitUntil: 'networkidle2', // More robust for slower environments
-                timeout: 40000 
-            });
+            await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         } catch (err) {
             if (!streamUrl) console.log(`  [!] Navigation warning: ${err.message}`);
         }
 
-        // 2. Try direct response capture first (faster than repeated polling)
-        try {
-            const fastResponse = await page.waitForResponse(res => {
-                const u = res.url();
-                return !streamUrl && /\.(mpd|m3u8|css|csv)(\?|$)/.test(u) && !u.includes('s3.dualstack');
-            }, { timeout: 12000 });
-
+        // 3. Collect response URL if interceptor hasn't already found it
+        if (!streamUrl) {
+            const fastResponse = await streamResponsePromise;
             if (fastResponse) {
                 const url = fastResponse.url();
                 console.log(`  [+] Quick-intercept response: ${url}`);
@@ -341,15 +347,13 @@ async function extractStreamUrl(page, channelId) {
                     try { ckParam = url.split('ck=')[1].split('&')[0]; } catch (e) {}
                 }
             }
-        } catch (e) {
-            // continue to more robust polling if needed
         }
 
-        // 3. Polling loop with enhanced detection (fallback)
+        // 4. Polling loop with enhanced detection (fallback)
         let poll = 0;
         let rateLimitWait = false;
 
-        while (!streamUrl && poll < 20) {
+        while (!streamUrl && poll < 12) {
             const pageState = await page.evaluate(() => {
                 const text = document.body.innerText || '';
                 if (text.includes('429 Too Many Requests')) return '429';
@@ -388,10 +392,10 @@ async function extractStreamUrl(page, channelId) {
             await checkFrames();
             if (streamUrl) break;
 
-            await new Promise(r => setTimeout(r, 800));
+            await new Promise(r => setTimeout(r, 500));
             poll++;
 
-            if (poll === 8) {
+            if (poll === 5) {
                 try {
                     const dimensions = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
                     await page.mouse.click(dimensions.width / 2, dimensions.height / 2).catch(() => {});

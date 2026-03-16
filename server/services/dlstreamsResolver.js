@@ -25,18 +25,30 @@ const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
 let urlCache = new Map();
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const VALID_STREAM_URL_REGEX = /\.(m3u8|mpd|css|csv)(\?|$)/i;
 
+/**
+ * Returns true only for genuine stream URLs.
+ * Strips URL fragments (#...) first to avoid false positives like
+ * https://ad-tracker.com/script.js#.m3u8 matching as a stream.
+ * Only accepts .m3u8/.mpd directly; .css/.csv only when path ends in mono.css/mono.csv.
+ */
 function isValidStreamUrl(url) {
-    return !!url && VALID_STREAM_URL_REGEX.test(url);
+    if (!url) return false;
+    const clean = url.split('#')[0]; // strip fragment
+    return /\.(m3u8|mpd)(\?|$)/i.test(clean) ||
+           /\/mono\.(css|csv)(\?|$)/i.test(clean);
 }
 
 const STREAM_WRAPPER_REGEX = /\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
 
 function findStreamUrlInText(text) {
     if (!text) return null;
-    const m3u8Maybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~#]+?\.(?:m3u8|mpd|css|csv)(?:\?[\w\-.:@%?&=\/\+~#]*)?/i);
-    if (m3u8Maybe) return m3u8Maybe[0];
+    // Prefer direct .m3u8 / .mpd links
+    const mediaMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\.(?:m3u8|mpd)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (mediaMaybe) return mediaMaybe[0];
+    // Fallback: DLStreams-specific mono.css / mono.csv disguised streams
+    const monoMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/mono\.(?:css|csv)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (monoMaybe) return monoMaybe[0];
     return null;
 }
 
@@ -162,7 +174,7 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
         const url = req.url();
         const type = req.resourceType();
 
-        if (!resultUrl && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+        if (!resultUrl && !url.includes('s3.dualstack') && isValidStreamUrl(url)) {
             resultUrl = url;
         }
 
@@ -246,7 +258,7 @@ async function extractStreamUrl(page, channelId) {
             const url = req.url();
             const type = req.resourceType();
 
-            if (!streamUrl && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+            if (!streamUrl && !url.includes('s3.dualstack') && isValidStreamUrl(url)) {
                 console.log(`  [+] Intercepted: ${url}`);
                 streamUrl = url;
                 if (url.includes('ck=')) {
@@ -325,8 +337,8 @@ async function extractStreamUrl(page, channelId) {
 
         // 1. Register response watcher BEFORE goto so it catches everything during page load
         const streamResponsePromise = page.waitForResponse(res => {
-            const u = res.url();
-            return /\.(mpd|m3u8|css|csv)(\?|$)/i.test(u) && !u.includes('s3.dualstack');
+            const u = res.url().split('#')[0]; // strip fragment to avoid ad-URL false positives
+            return isValidStreamUrl(u) && !u.includes('s3.dualstack');
         }, { timeout: 25000 }).catch(() => null);
 
         // 2. Navigate with domcontentloaded: doesn't wait for network idle, much faster

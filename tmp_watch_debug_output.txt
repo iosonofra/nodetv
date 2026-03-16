@@ -1,0 +1,28 @@
+goto https://dlstreams.top/watch.php?id=769
+[req] https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css
+[req] https://dlstreams.top/assets/styles.css?id=xxxxxxx
+[req] https://www.xadsmart.com/limageMapResizer.min.css
+[res] https://dlstreams.top/assets/styles.css?id=xxxxxxx 200
+[res] https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css 200
+[res] https://www.xadsmart.com/limageMapResizer.min.css 200
+[req] https://www.xadsmart.com/pimageMapResizer.min.css
+[res] https://www.xadsmart.com/pimageMapResizer.min.css 200
+[req] chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_embedder.css
+[res] chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_embedder.css 200
+[req] chrome://resources/css/text_defaults_md.css
+[req] chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.css
+[res] chrome://resources/css/text_defaults_md.css 200
+[res] chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.css 200
+[req] https://www.gstatic.com/recaptcha/releases/QvLuXwupqtKCyjBw2xIzFLIf/styles__ltr.css
+[res] https://www.gstatic.com/recaptcha/releases/QvLuXwupqtKCyjBw2xIzFLIf/styles__ltr.css 200
+[req] https://chevy.soyspace.cyou/proxy/zeko/premium769/mono.css
+[res] https://chevy.soyspace.cyou/proxy/zeko/premium769/mono.css 200
+navigated 200 https://dlstreams.top/watch.php?id=769
+D:\workvscode\nodetv\tmp_watch_debug.js:27
+  await page.waitForTimeout(15000);
+             ^
+
+TypeError: page.waitForTimeout is not a function
+    at D:\workvscode\nodetv\tmp_watch_debug.js:27:14
+
+Node.js v24.11.0

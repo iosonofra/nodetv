@@ -1,0 +1,476 @@
+[DLStreams Resolver] Checking for cache at: D:\workvscode\nodetv\data\scraper\url_cache.json
+[DLStreams Resolver] Loaded 119 entries from persistent cache.
+[*] Starting DLStreams Scraper (manual)...
+[*] No categories selected ÔÇö scraping ALL events.
+[*] Fetching schedule from https://dlstreams.top/index.php...
+[*] Found 144 events with channels.
+[*] Total events found: 144
+[*] Task cap: trimming 176 tasks to 120
+[*] Filtered schedule: skipped 1 future dates, 95 out-of-window events.
+[*] Flattened into 120 active channel tasks.
+[*] Proceeding with concurrency limit: 8
+[Worker 1] [1/120] Processing: The Kelly Clarkson Show Season 7, Episode 93 - NBCNY USA (ID: 769)...
+  [*] Cache entry for channel 769 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-769.php
+[Worker 2] [1/120] Processing: General Hospital Season 63, Episode 127 - ABC NY USA (ID: 766)...
+  [*] Cache entry for channel 766 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-766.php
+[Worker 3] [1/120] Processing: Bob's Burgers Season 9, Episode 5 ÔÇó Live - FXX USA (ID: 298)...
+  [*] Cache entry for channel 298 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-298.php
+[Worker 4] [1/120] Processing: Ireland Republic - Premier Division : Drogheda United vs Shamrock - Rovers LOITV (ID: 11)...
+  [*] Cache entry for channel 11 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-11.php
+[Worker 5] [1/120] Processing: Ireland Republic - Premier Division : Dundalk vs Sligo Rovers - LOITV (ID: 12)...
+  [*] Cache entry for channel 12 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-12.php
+[Worker 6] [1/120] Processing: Ireland Republic - Premier Division : Shelbourne vs Bohemians - LOITV (ID: 13)...
+  [*] Cache entry for channel 13 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-13.php
+[Worker 7] [1/120] Processing: Ireland Republic - Premier Division : St Patrick's vs Derry City - LOITV (ID: 14)...
+  [*] Cache entry for channel 14 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-14.php
+[Worker 8] [1/120] Processing: Ireland Republic - Premier Division : Galway United vs Waterford United - LOITV (ID: 15)...
+  [*] Cache hit for channel 15
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [2/120] Processing: Poland - Ekstraklasa : Pogo┼ä Szczecin vs Korona Kielce - Canal+ Sport 3 Poland (ID: 259)...
+  [*] Cache entry for channel 259 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-259.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/wind/premium259/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 12: https://dlstreams.top/stream/stream-12.php
+  [Worker 5] [-] No stream URL found for channel LOITV (ID: 12)
+[Worker 5] [3/120] Processing: Poland - Ekstraklasa : Pogo┼ä Szczecin vs Korona Kielce - Canal+ Sport 5 Poland (ID: 75)...
+  [*] Cache entry for channel 75 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-75.php
+  [*] Filtered out non-m3u/css stream URL for channel 11: https://dlstreams.top/stream/stream-11.php
+  [Worker 4] [-] No stream URL found for channel Rovers LOITV (ID: 11)
+[Worker 4] [4/120] Processing: Poland - Ekstraklasa : Pogo┼ä Szczecin vs Korona Kielce - beIN SPORTS USA (ID: 425)...
+  [*] Cache entry for channel 425 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-425.php
+  [*] Filtered out non-m3u/css stream URL for channel 298: https://dlstreams.top/stream/stream-298.php
+  [Worker 3] [-] No stream URL found for channel FXX USA (ID: 298)
+[Worker 3] [5/120] Processing: Poland - Ekstraklasa : Pogo┼ä Szczecin vs Korona Kielce - beIN SPORTS en Espa├▒ol (ID: 372)...
+  [*] Cache hit for channel 372
+  [Worker 3] [v] Successfully added channel.
+[Worker 3] [6/120] Processing: Poland - Ekstraklasa : Pogo┼ä Szczecin vs Korona Kielce - Arena Sport 3 Croatia (ID: 434)...
+  [*] Cache entry for channel 434 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-434.php
+  [*] Filtered out non-m3u/css stream URL for channel 766: https://dlstreams.top/stream/stream-766.php
+  [Worker 2] [-] No stream URL found for channel ABC NY USA (ID: 766)
+[Worker 2] [7/120] Processing: Denmark - Super Liga : Silkeborg vs Vejle - TV2 Sport X Denmark (ID: 808)...
+  [*] Cache entry for channel 808 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-808.php
+  [*] Filtered out non-m3u/css stream URL for channel 14: https://dlstreams.top/stream/stream-14.php
+  [Worker 7] [-] No stream URL found for channel LOITV (ID: 14)
+[Worker 7] [8/120] Processing: Argentina - Primera Divisi├│n : Aldosivi vs Hurac├ín - ESPN Premium Argentina (ID: 387)...
+  [*] Cache entry for channel 387 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-387.php
+  [*] Filtered out non-m3u/css stream URL for channel 769: https://dlstreams.top/stream/stream-769.php
+  [Worker 1] [-] No stream URL found for channel NBCNY USA (ID: 769)
+[Worker 1] [9/120] Processing: Argentina - Primera Divisi├│n : Aldosivi vs Hurac├ín - ESPN Argentina (ID: 149)...
+  [*] Cache entry for channel 149 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-149.php
+  [*] Filtered out non-m3u/css stream URL for channel 13: https://dlstreams.top/stream/stream-13.php
+  [Worker 6] [-] No stream URL found for channel LOITV (ID: 13)
+[Worker 6] [10/120] Processing: Argentina - Primera Divisi├│n : Barracas Central vs Atl├®tico Tucum├ín - TNT Sports Argentina (ID: 388)...
+  [*] Cache entry for channel 388 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-388.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [11/120] Processing: Romania - Liga I : Universitatea Cluj vs CFR Cluj - Digi Sport 1 Romania (ID: 400)...
+  [*] Cache entry for channel 400 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-400.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/nfs/premium400/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 75: https://dlstreams.top/stream/stream-75.php
+  [Worker 5] [-] No stream URL found for channel Canal+ Sport 5 Poland (ID: 75)
+[Worker 5] [12/120] Processing: Romania - Liga I : Universitatea Cluj vs CFR Cluj - Prima Sport 1 Romania (ID: 583)...
+  [*] Cache hit for channel 583
+  [Worker 5] [v] Successfully added channel.
+[Worker 5] [13/120] Processing: Portugal - Segunda liga : Porto II vs UD Oliveirense - Porto Canal Portugal (ID: 718)...
+  [*] Cache entry for channel 718 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-718.php
+  [*] Filtered out non-m3u/css stream URL for channel 425: https://dlstreams.top/stream/stream-425.php
+  [Worker 4] [-] No stream URL found for channel beIN SPORTS USA (ID: 425)
+[Worker 4] [14/120] Processing: Jordan - Jordan League : Shabab Al Ordon vs Al Ahli - Jordan TV Sport (ID: 2)...
+  [*] Cache entry for channel 2 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-2.php
+  [*] Filtered out non-m3u/css stream URL for channel 149: https://dlstreams.top/stream/stream-149.php
+  [Worker 1] [-] No stream URL found for channel ESPN Argentina (ID: 149)
+[Worker 1] [15/120] Processing: Spain Liga F Moeve : RCD Espanyol de Barcelona vs SD Eibar - DAZN2 Spain (ID: 446)...
+  [*] Cache entry for channel 446 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-446.php
+  [*] Filtered out non-m3u/css stream URL for channel 388: https://dlstreams.top/stream/stream-388.php
+  [Worker 6] [-] No stream URL found for channel TNT Sports Argentina (ID: 388)
+[Worker 6] [16/120] Processing: Netherlands - Eerste Divisie : Helmond Sport vs Cambuur - ESPN 1 NL (ID: 379)...
+  [*] Cache entry for channel 379 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-379.php
+  [*] Filtered out non-m3u/css stream URL for channel 808: https://dlstreams.top/stream/stream-808.php
+  [Worker 2] [-] No stream URL found for channel TV2 Sport X Denmark (ID: 808)
+[Worker 2] [17/120] Processing: Netherlands - Eerste Divisie : AZ II vs MVV - ESPN 4 NL (ID: 3)...
+  [*] Cache entry for channel 3 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-3.php
+  [*] Filtered out non-m3u/css stream URL for channel 434: https://dlstreams.top/stream/stream-434.php
+  [Worker 3] [-] No stream URL found for channel Arena Sport 3 Croatia (ID: 434)
+[Worker 3] [18/120] Processing: Netherlands - Eerste Divisie : Roda JC vs Vitesse - ESPN 2 NL (ID: 386)...
+  [*] Cache entry for channel 386 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-386.php
+  [*] Filtered out non-m3u/css stream URL for channel 387: https://dlstreams.top/stream/stream-387.php
+  [Worker 7] [-] No stream URL found for channel ESPN Premium Argentina (ID: 387)
+[Worker 7] [19/120] Processing: Netherlands - Eerste Divisie : Den Bosch vs PSV II - ESPN 3 NL (ID: 888)...
+  [*] Cache entry for channel 888 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-888.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [20/120] Processing: Football England AmateurU21 Premier League 2 : Manchester City U21 vs Liverpool U21 - LFC TV (ID: 826)...
+  [*] Cache entry for channel 826 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-826.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/ddy6/premium826/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 718: https://dlstreams.top/stream/stream-718.php
+  [Worker 5] [-] No stream URL found for channel Porto Canal Portugal (ID: 718)
+[Worker 5] [21/120] Processing: Italy - Serie C : Vicenza vs Inter II - Sky Sport 251 IT (ID: 4)...
+  [*] Cache entry for channel 4 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-4.php
+  [*] Filtered out non-m3u/css stream URL for channel 2: https://dlstreams.top/stream/stream-2.php
+  [Worker 4] [-] No stream URL found for channel Jordan TV Sport (ID: 2)
+[Worker 4] [22/120] Processing: Italy - Serie C : Vicenza vs Inter II - Rai Sport 1 IT (ID: 882)...
+  [*] Cache entry for channel 882 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-882.php
+  [*] Filtered out non-m3u/css stream URL for channel 3: https://dlstreams.top/stream/stream-3.php
+  [Worker 2] [-] No stream URL found for channel ESPN 4 NL (ID: 3)
+[Worker 2] [23/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - LALIGA TV Hypermotion (ID: 539)...
+  [*] Cache entry for channel 539 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-539.php
+  [*] Filtered out non-m3u/css stream URL for channel 446: https://dlstreams.top/stream/stream-446.php
+  [Worker 1] [-] No stream URL found for channel DAZN2 Spain (ID: 446)
+[Worker 1] [24/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - DAZN Eleven 3 Portugal (ID: 457)...
+  [*] Cache entry for channel 457 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-457.php
+  [*] Filtered out non-m3u/css stream URL for channel 386: https://dlstreams.top/stream/stream-386.php
+  [Worker 3] [-] No stream URL found for channel ESPN 2 NL (ID: 386)
+[Worker 3] [25/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Nova Sport 3 SK (ID: 1060)...
+  [*] Cache entry for channel 1060 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1060.php
+  [*] Filtered out non-m3u/css stream URL for channel 379: https://dlstreams.top/stream/stream-379.php
+  [Worker 6] [-] No stream URL found for channel ESPN 1 NL (ID: 379)
+[Worker 6] [26/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Nova Sport 3 CZ (ID: 1023)...
+  [*] Cache entry for channel 1023 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1023.php
+  [*] Filtered out non-m3u/css stream URL for channel 888: https://dlstreams.top/stream/stream-888.php
+  [Worker 7] [-] No stream URL found for channel ESPN 3 NL (ID: 888)
+[Worker 7] [27/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Match! Football 3 Russia (ID: 138)...
+  [*] Cache entry for channel 138 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-138.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [28/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Canal+ Sport 2 Afrique (ID: 487)...
+  [*] Cache entry for channel 487 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-487.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/ddy6/premium487/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 4: https://dlstreams.top/stream/stream-4.php
+  [Worker 5] [-] No stream URL found for channel Sky Sport 251 IT (ID: 4)
+[Worker 5] [29/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - beIN Sports 2 Malaysia (ID: 713)...
+  [*] Cache hit for channel 713
+  [Worker 5] [v] Successfully added channel.
+[Worker 5] [30/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Arena Sport 1x2 Serbia (ID: 612)...
+  [*] Cache entry for channel 612 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-612.php
+  [*] Filtered out non-m3u/css stream URL for channel 882: https://dlstreams.top/stream/stream-882.php
+  [Worker 4] [-] No stream URL found for channel Rai Sport 1 IT (ID: 882)
+[Worker 4] [31/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - Nova Sports Start Greece (ID: 637)...
+  [*] Cache entry for channel 637 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-637.php
+  [*] Filtered out non-m3u/css stream URL for channel 539: https://dlstreams.top/stream/stream-539.php
+  [Worker 2] [-] No stream URL found for channel LALIGA TV Hypermotion (ID: 539)
+[Worker 2] [32/120] Processing: Spain - Segunda Division : Albacete vs Las Palmas - MAX Sport 2 Bulgaria (ID: 473)...
+  [*] Cache entry for channel 473 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-473.php
+  [*] Filtered out non-m3u/css stream URL for channel 1023: https://dlstreams.top/stream/stream-1023.php
+  [Worker 6] [-] No stream URL found for channel Nova Sport 3 CZ (ID: 1023)
+[Worker 6] [33/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Paramount+ (ID: 1)...
+  [*] Cache entry for channel 1 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1.php
+  [*] Filtered out non-m3u/css stream URL for channel 138: https://dlstreams.top/stream/stream-138.php
+  [Worker 7] [-] No stream URL found for channel Match! Football 3 Russia (ID: 138)
+[Worker 7] [34/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - DAZN Zona IT (ID: 877)...
+  [*] Cache entry for channel 877 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-877.php
+  [*] Filtered out non-m3u/css stream URL for channel 457: https://dlstreams.top/stream/stream-457.php
+  [Worker 1] [-] No stream URL found for channel DAZN Eleven 3 Portugal (ID: 457)
+[Worker 1] [35/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - DAZN2 DE (ID: 427)...
+  [*] Cache entry for channel 427 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-427.php
+  [*] Filtered out non-m3u/css stream URL for channel 1060: https://dlstreams.top/stream/stream-1060.php
+  [Worker 3] [-] No stream URL found for channel Nova Sport 3 SK (ID: 1060)
+[Worker 3] [36/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Sport TV2 Portugal (ID: 74)...
+  [*] Cache entry for channel 74 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-74.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [37/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Eleven Sports 1 Poland (ID: 71)...
+  [*] Cache hit for channel 71
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [38/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Match! Football 1 Russia (ID: 136)...
+  [*] Cache entry for channel 136 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-136.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/ddy6/premium136/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 612: https://dlstreams.top/stream/stream-612.php
+  [Worker 5] [-] No stream URL found for channel Arena Sport 1x2 Serbia (ID: 612)
+[Worker 5] [39/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - FOX Deportes (ID: 643)...
+  [*] Cache entry for channel 643 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-643.php
+  [*] Filtered out non-m3u/css stream URL for channel 637: https://dlstreams.top/stream/stream-637.php
+  [Worker 4] [-] No stream URL found for channel Nova Sports Start Greece (ID: 637)
+[Worker 4] [40/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Digi Sport 4 Romania (ID: 403)...
+  [*] Cache entry for channel 403 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-403.php
+  [*] Filtered out non-m3u/css stream URL for channel 473: https://dlstreams.top/stream/stream-473.php
+  [Worker 2] [-] No stream URL found for channel MAX Sport 2 Bulgaria (ID: 473)
+[Worker 2] [41/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Prima Sport 3 Romania (ID: 585)...
+  [*] Cache entry for channel 585 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-585.php
+  [*] Filtered out non-m3u/css stream URL for channel 1: https://dlstreams.top/stream/stream-1.php
+  [Worker 6] [-] No stream URL found for channel Paramount+ (ID: 1)
+[Worker 6] [42/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Arena 2 Premium Serbia (ID: 135)...
+  [*] Cache entry for channel 135 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-135.php
+  [*] Filtered out non-m3u/css stream URL for channel 74: https://dlstreams.top/stream/stream-74.php
+  [Worker 3] [-] No stream URL found for channel Sport TV2 Portugal (ID: 74)
+[Worker 3] [43/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Cosmote Sport 2 Greece (ID: 623)...
+  [*] Cache entry for channel 623 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-623.php
+  [*] Filtered out non-m3u/css stream URL for channel 877: https://dlstreams.top/stream/stream-877.php
+  [Worker 7] [-] No stream URL found for channel DAZN Zona IT (ID: 877)
+[Worker 7] [44/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Arena Sport 2 Croatia (ID: 433)...
+  [*] Cache entry for channel 433 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-433.php
+  [*] Filtered out non-m3u/css stream URL for channel 427: https://dlstreams.top/stream/stream-427.php
+  [Worker 1] [-] No stream URL found for channel DAZN2 DE (ID: 427)
+[Worker 1] [45/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - TV4 Fotball (ID: 747)...
+  [*] Cache hit for channel 747
+  [Worker 1] [v] Successfully added channel.
+[Worker 1] [46/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - MAX Sport 3 Bulgaria (ID: 474)...
+  [*] Cache entry for channel 474 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-474.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [47/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - SuperSport Football (ID: 56)...
+  [*] Cache entry for channel 56 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-56.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/zeko/premium56/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 643: https://dlstreams.top/stream/stream-643.php
+  [Worker 5] [-] No stream URL found for channel FOX Deportes (ID: 643)
+[Worker 5] [48/120] Processing: Italy - Serie A : Cremonese vs Fiorentina - Backup Stream (ID: 4009)...
+  [*] Cache entry for channel 4009 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-4009.php
+  [*] Filtered out non-m3u/css stream URL for channel 403: https://dlstreams.top/stream/stream-403.php
+  [Worker 4] [-] No stream URL found for channel Digi Sport 4 Romania (ID: 403)
+[Worker 4] [49/120] Processing: France - Ligue 2 : Annecy vs Troyes - beIN Sports 1 France (ID: 116)...
+  [*] Cache entry for channel 116 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-116.php
+  [*] Filtered out non-m3u/css stream URL for channel 585: https://dlstreams.top/stream/stream-585.php
+  [Worker 2] [-] No stream URL found for channel Prima Sport 3 Romania (ID: 585)
+[Worker 2] [50/120] Processing: France - Ligue 2 : Annecy vs Troyes - beIN Sports MENA 4 (ID: 94)...
+  [*] Cache entry for channel 94 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-94.php
+  [*] Filtered out non-m3u/css stream URL for channel 135: https://dlstreams.top/stream/stream-135.php
+  [Worker 6] [-] No stream URL found for channel Arena 2 Premium Serbia (ID: 135)
+[Worker 6] [51/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Hub Premier (ID: 5)...
+  [*] Cache entry for channel 5 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-5.php
+  [*] Filtered out non-m3u/css stream URL for channel 623: https://dlstreams.top/stream/stream-623.php
+  [Worker 3] [-] No stream URL found for channel Cosmote Sport 2 Greece (ID: 623)
+[Worker 3] [52/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Peacock Feed (ID: 6)...
+  [*] Cache entry for channel 6 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-6.php
+  [*] Filtered out non-m3u/css stream URL for channel 474: https://dlstreams.top/stream/stream-474.php
+  [Worker 1] [-] No stream URL found for channel MAX Sport 3 Bulgaria (ID: 474)
+[Worker 1] [53/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - USA Network (ID: 343)...
+  [*] Cache hit for channel 343
+  [Worker 1] [v] Successfully added channel.
+[Worker 1] [54/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sports Main Event UK (ID: 38)...
+  [*] Cache entry for channel 38 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-38.php
+  [*] Filtered out non-m3u/css stream URL for channel 433: https://dlstreams.top/stream/stream-433.php
+  [Worker 7] [-] No stream URL found for channel Arena Sport 2 Croatia (ID: 433)
+[Worker 7] [55/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sports Premier League UK (ID: 130)...
+  [*] Cache entry for channel 130 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-130.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [56/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sport 8 NZ (ID: 595)...
+  [*] Cache entry for channel 595 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-595.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/dokko1/premium595/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 116: https://dlstreams.top/stream/stream-116.php
+  [Worker 4] [-] No stream URL found for channel beIN Sports 1 France (ID: 116)
+[Worker 4] [57/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - beIN Sports 3 Turkey (ID: 64)...
+  [*] Cache entry for channel 64 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-64.php
+  [*] Filtered out non-m3u/css stream URL for channel 4009: https://dlstreams.top/stream/stream-4009.php
+  [Worker 5] [-] No stream URL found for channel Backup Stream (ID: 4009)
+[Worker 5] [58/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sport Premier League DE (ID: 7)...
+  [*] Cache entry for channel 7 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-7.php
+  [*] Filtered out non-m3u/css stream URL for channel 94: https://dlstreams.top/stream/stream-94.php
+  [Worker 2] [-] No stream URL found for channel beIN Sports MENA 4 (ID: 94)
+[Worker 2] [59/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sport Top Event DE (ID: 556)...
+  [*] Cache entry for channel 556 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-556.php
+  [*] Filtered out non-m3u/css stream URL for channel 5: https://dlstreams.top/stream/stream-5.php
+  [Worker 6] [-] No stream URL found for channel Hub Premier (ID: 5)
+[Worker 6] [60/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - DAZN Eleven 1 Portugal (ID: 455)...
+  [*] Cache entry for channel 455 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-455.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [61/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Canal+ Extra 1 Poland (ID: 983)...
+  [*] Cache hit for channel 983
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [62/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - DAZN1 Spain (ID: 445)...
+  [*] Cache entry for channel 445 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-445.php
+  [*] Filtered out non-m3u/css stream URL for channel 38: https://dlstreams.top/stream/stream-38.php
+  [Worker 1] [-] No stream URL found for channel Sky Sports Main Event UK (ID: 38)
+[Worker 1] [63/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - See Denmark (ID: 811)...
+  [*] Cache entry for channel 811 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-811.php
+  [*] Filtered out non-m3u/css stream URL for channel 6: https://dlstreams.top/stream/stream-6.php
+  [Worker 3] [-] No stream URL found for channel Peacock Feed (ID: 6)
+[Worker 3] [64/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Canal+ Foot France (ID: 463)...
+  [*] Cache entry for channel 463 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-463.php
+  [*] Filtered out non-m3u/css stream URL for channel 130: https://dlstreams.top/stream/stream-130.php
+  [Worker 7] [-] No stream URL found for channel Sky Sports Premier League UK (ID: 130)
+[Worker 7] [65/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Canal+ Sport 3 Afrique (ID: 488)...
+  [*] Cache entry for channel 488 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-488.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/wind/premium445/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 556: https://dlstreams.top/stream/stream-556.php
+  [Worker 2] [-] No stream URL found for channel Sky Sport Top Event DE (ID: 556)
+[Worker 2] [66/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sky Sport Calcio IT (ID: 870)...
+  [*] Filtered out non-m3u/css stream URL for channel 7: https://dlstreams.top/stream/stream-7.php
+  [Worker 5] [-] No stream URL found for channel Sky Sport Premier League DE (ID: 7)
+[Worker 5] [67/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Astro Premier League (ID: 125)...
+  [*] Cache entry for channel 125 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-125.php
+  [*] Filtered out non-m3u/css stream URL for channel 64: https://dlstreams.top/stream/stream-64.php
+  [Worker 4] [-] No stream URL found for channel beIN Sports 3 Turkey (ID: 64)
+[Worker 4] [68/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Astro Grandstand (ID: 123)...
+  [*] Cache entry for channel 123 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-123.php
+  [*] Filtered out non-m3u/css stream URL for channel 455: https://dlstreams.top/stream/stream-455.php
+  [Worker 6] [-] No stream URL found for channel DAZN Eleven 1 Portugal (ID: 455)
+[Worker 6] [69/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Canal+ Sport SK (ID: 1063)...
+  [*] Cache entry for channel 1063 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1063.php
+  [*] Filtered out non-m3u/css stream URL for channel 811: https://dlstreams.top/stream/stream-811.php
+  [Worker 1] [-] No stream URL found for channel See Denmark (ID: 811)
+[Worker 1] [70/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Canal+ Sport CZ (ID: 1020)...
+  [*] Cache entry for channel 1020 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1020.php
+  [*] Filtered out non-m3u/css stream URL for channel 463: https://dlstreams.top/stream/stream-463.php
+  [Worker 3] [-] No stream URL found for channel Canal+ Foot France (ID: 463)
+[Worker 3] [71/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Arena 1 Premium Serbia (ID: 134)...
+  [*] Cache entry for channel 134 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-134.php
+  [*] Filtered out non-m3u/css stream URL for channel 488: https://dlstreams.top/stream/stream-488.php
+  [Worker 7] [-] No stream URL found for channel Canal+ Sport 3 Afrique (ID: 488)
+[Worker 7] [72/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Nova Sports Premier League Greece (ID: 599)...
+  [*] Cache entry for channel 599 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-599.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [73/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - V Sport Premium (ID: 8)...
+  [*] Cache entry for channel 8 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-8.php
+  [*] Filtered out non-m3u/css stream URL for channel 125: https://dlstreams.top/stream/stream-125.php
+  [Worker 5] [-] No stream URL found for channel Astro Premier League (ID: 125)
+[Worker 5] [74/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Arena Sport 1 Croatia (ID: 432)...
+  [*] Cache entry for channel 432 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-432.php
+  [*] Filtered out non-m3u/css stream URL for channel 870: https://dlstreams.top/stream/stream-870.php
+  [Worker 2] [-] No stream URL found for channel Sky Sport Calcio IT (ID: 870)
+[Worker 2] [75/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - ESPN2 Argentina (ID: 150)...
+  [*] Cache entry for channel 150 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-150.php
+  [*] Filtered out non-m3u/css stream URL for channel 1063: https://dlstreams.top/stream/stream-1063.php
+  [Worker 6] [-] No stream URL found for channel Canal+ Sport SK (ID: 1063)
+[Worker 6] [76/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Diema Sport 2 Bulgaria (ID: 466)...
+  [*] Cache entry for channel 466 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-466.php
+  [*] Filtered out non-m3u/css stream URL for channel 123: https://dlstreams.top/stream/stream-123.php
+  [Worker 4] [-] No stream URL found for channel Astro Grandstand (ID: 123)
+[Worker 4] [77/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - SuperSport MaXimo 1 (ID: 572)...
+  [*] Cache entry for channel 572 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-572.php
+  [*] Filtered out non-m3u/css stream URL for channel 1020: https://dlstreams.top/stream/stream-1020.php
+  [Worker 1] [-] No stream URL found for channel Canal+ Sport CZ (ID: 1020)
+[Worker 1] [78/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - SuperSport Premier League (ID: 414)...
+  [*] Cache hit for channel 414
+  [Worker 1] [v] Successfully added channel.
+[Worker 1] [79/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Supersport Grandstand (ID: 412)...
+  [*] Cache entry for channel 412 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-412.php
+  [*] Filtered out non-m3u/css stream URL for channel 134: https://dlstreams.top/stream/stream-134.php
+  [Worker 3] [-] No stream URL found for channel Arena 1 Premium Serbia (ID: 134)
+[Worker 3] [80/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - beIN Sports MENA 1 (ID: 91)...
+  [*] Cache entry for channel 91 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-91.php
+  [*] Filtered out non-m3u/css stream URL for channel 599: https://dlstreams.top/stream/stream-599.php
+  [Worker 7] [-] No stream URL found for channel Nova Sports Premier League Greece (ID: 599)
+[Worker 7] [81/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - beIN Sports MENA English 1 (ID: 61)...
+  [*] Cache entry for channel 61 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-61.php
+  [*] Filtered out non-m3u/css stream URL for channel 8: https://dlstreams.top/stream/stream-8.php
+  [Worker 8] [-] No stream URL found for channel V Sport Premium (ID: 8)
+[Worker 8] [82/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Sport 1 Israel (ID: 140)...
+  [*] Cache entry for channel 140 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-140.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/zeko/premium140/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 150: https://dlstreams.top/stream/stream-150.php
+  [Worker 2] [-] No stream URL found for channel ESPN2 Argentina (ID: 150)
+[Worker 2] [83/120] Processing: England - Premier League : Brentford vs Wolverhampton Wanderers - Backup Stream (ID: 4001)...
+  [*] Cache entry for channel 4001 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-4001.php
+  [*] Filtered out non-m3u/css stream URL for channel 466: https://dlstreams.top/stream/stream-466.php
+  [Worker 6] [-] No stream URL found for channel Diema Sport 2 Bulgaria (ID: 466)
+[Worker 6] [84/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - M+ LALIGA TV (ID: 84)...
+  [*] Cache entry for channel 84 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-84.php
+  [*] Filtered out non-m3u/css stream URL for channel 432: https://dlstreams.top/stream/stream-432.php
+  [Worker 5] [-] No stream URL found for channel Arena Sport 1 Croatia (ID: 432)
+[Worker 5] [85/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - ESPN+ USA (ID: 9)...
+  [*] Cache entry for channel 9 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-9.php
+  [*] Filtered out non-m3u/css stream URL for channel 572: https://dlstreams.top/stream/stream-572.php
+  [Worker 4] [-] No stream URL found for channel SuperSport MaXimo 1 (ID: 572)
+[Worker 4] [86/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - LaLiga TV UK (ID: 276)...
+  [*] Cache hit for channel 276
+  [Worker 4] [v] Successfully added channel.
+[Worker 4] [87/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Viaplay Sports 1 UK (ID: 451)...
+  [*] Cache entry for channel 451 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-451.php
+  [*] Filtered out non-m3u/css stream URL for channel 412: https://dlstreams.top/stream/stream-412.php
+  [Worker 1] [-] No stream URL found for channel Supersport Grandstand (ID: 412)
+[Worker 1] [88/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Premier Sports 1 Ireland (ID: 771)...
+  [*] Cache entry for channel 771 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-771.php
+  [*] Filtered out non-m3u/css stream URL for channel 91: https://dlstreams.top/stream/stream-91.php
+  [Worker 3] [-] No stream URL found for channel beIN Sports MENA 1 (ID: 91)
+[Worker 3] [89/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - DAZN1 DE (ID: 426)...
+  [*] Cache entry for channel 426 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-426.php
+  [*] Filtered out non-m3u/css stream URL for channel 61: https://dlstreams.top/stream/stream-61.php
+  [Worker 7] [-] No stream URL found for channel beIN Sports MENA English 1 (ID: 61)
+[Worker 7] [90/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - DAZN Eleven 2 Portugal (ID: 456)...
+  [*] Cache entry for channel 456 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-456.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [91/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Eleven Sports 2 Poland (ID: 72)...
+  [*] Cache entry for channel 72 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-72.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/wind/premium72/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 9: https://dlstreams.top/stream/stream-9.php
+  [Worker 5] [-] No stream URL found for channel ESPN+ USA (ID: 9)
+[Worker 5] [92/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - beIN Sports 2 France (ID: 117)...
+  [*] Cache entry for channel 117 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-117.php
+  [*] Filtered out non-m3u/css stream URL for channel 84: https://dlstreams.top/stream/stream-84.php
+  [Worker 6] [-] No stream URL found for channel M+ LALIGA TV (ID: 84)
+[Worker 6] [93/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Nova Sport 4 SK (ID: 1061)...
+  [*] Cache entry for channel 1061 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1061.php
+  [*] Filtered out non-m3u/css stream URL for channel 451: https://dlstreams.top/stream/stream-451.php
+  [Worker 4] [-] No stream URL found for channel Viaplay Sports 1 UK (ID: 451)
+[Worker 4] [94/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Nova Sport 4 CZ (ID: 1024)...
+  [*] Cache entry for channel 1024 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1024.php
+  [*] Filtered out non-m3u/css stream URL for channel 771: https://dlstreams.top/stream/stream-771.php
+  [Worker 1] [-] No stream URL found for channel Premier Sports 1 Ireland (ID: 771)
+[Worker 1] [95/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Match! Football 2 Russia (ID: 137)...
+  [*] Cache entry for channel 137 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-137.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [96/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - ESPN Deportes (ID: 375)...
+  [*] Cache entry for channel 375 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-375.php
+  [*] Filtered out non-m3u/css stream URL for channel 426: https://dlstreams.top/stream/stream-426.php
+  [Worker 3] [-] No stream URL found for channel DAZN1 DE (ID: 426)
+[Worker 3] [97/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - beIN Sports Malaysia (ID: 712)...
+  [*] Cache entry for channel 712 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-712.php
+  [*] Filtered out non-m3u/css stream URL for channel 456: https://dlstreams.top/stream/stream-456.php
+  [Worker 7] [-] No stream URL found for channel DAZN Eleven 2 Portugal (ID: 456)
+[Worker 7] [98/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Ziggo Sport 2 NL (ID: 398)...
+  [*] Cache entry for channel 398 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-398.php
+  [*] Filtered out non-m3u/css stream URL for channel 4001: https://dlstreams.top/stream/stream-4001.php
+  [Worker 2] [-] No stream URL found for channel Backup Stream (ID: 4001)
+[Worker 2] [99/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Digi Sport 2 Romania (ID: 401)...
+  [*] Cache entry for channel 401 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-401.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/zeko/premium375/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 117: https://dlstreams.top/stream/stream-117.php
+  [Worker 5] [-] No stream URL found for channel beIN Sports 2 France (ID: 117)
+[Worker 5] [100/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Prima Sport 2 Romania (ID: 584)...
+  [*] Cache entry for channel 584 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-584.php
+  [*] Filtered out non-m3u/css stream URL for channel 1061: https://dlstreams.top/stream/stream-1061.php
+  [Worker 6] [-] No stream URL found for channel Nova Sport 4 SK (ID: 1061)
+[Worker 6] [101/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Nova Sports 1 Greece (ID: 631)...
+  [*] Cache entry for channel 631 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-631.php
+  [*] Filtered out non-m3u/css stream URL for channel 1024: https://dlstreams.top/stream/stream-1024.php
+  [Worker 4] [-] No stream URL found for channel Nova Sport 4 CZ (ID: 1024)
+[Worker 4] [102/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - TV2 Sport Denmark (ID: 810)...
+  [*] Cache hit for channel 810
+  [Worker 4] [v] Successfully added channel.
+[Worker 4] [103/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Arena 3 Premium Serbia (ID: 139)...
+  [*] Cache entry for channel 139 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-139.php
+  [Worker 8] [v] Successfully added channel.
+[Worker 8] [104/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Arena Sport 3 Croatia (ID: 434) [CACHED]
+  [Worker 8] [-] No stream URL found for channel Arena Sport 3 Croatia (ID: 434)
+[Worker 8] [105/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - MAX Sport 4 Bulgaria (ID: 475)...
+  [*] Cache entry for channel 475 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-475.php
+  [*] Filtered out non-m3u/css stream URL for channel 137: https://dlstreams.top/stream/stream-137.php
+  [Worker 1] [-] No stream URL found for channel Match! Football 2 Russia (ID: 137)
+[Worker 1] [106/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - ESPN4 Brazil (ID: 85)...
+  [*] Cache entry for channel 85 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-85.php
+  [*] Filtered out non-m3u/css stream URL for channel 401: https://dlstreams.top/stream/stream-401.php
+  [Worker 2] [-] No stream URL found for channel Digi Sport 2 Romania (ID: 401)
+[Worker 2] [107/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - ESPN3 Argentina (ID: 798)...
+  [*] Cache entry for channel 798 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-798.php
+  [*] Filtered out non-m3u/css stream URL for channel 712: https://dlstreams.top/stream/stream-712.php
+  [Worker 3] [-] No stream URL found for channel beIN Sports Malaysia (ID: 712)
+[Worker 3] [108/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - SuperSport Laliga (ID: 415)...
+  [*] Cache entry for channel 415 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-415.php
+  [*] Filtered out non-m3u/css stream URL for channel 398: https://dlstreams.top/stream/stream-398.php
+  [Worker 7] [-] No stream URL found for channel Ziggo Sport 2 NL (ID: 398)
+[Worker 7] [109/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - beIN Sports MENA 3 (ID: 93)...
+  [*] Cache entry for channel 93 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-93.php
+  [+] Intercepted: https://chevy.soyspace.cyou/proxy/wind/premium475/mono.css
+  [*] Filtered out non-m3u/css stream URL for channel 584: https://dlstreams.top/stream/stream-584.php
+  [Worker 5] [-] No stream URL found for channel Prima Sport 2 Romania (ID: 584)
+[Worker 5] [110/120] Processing: Spain - La Liga : Rayo Vallecano vs Levante - Backup Stream (ID: 4006)...
+  [*] Cache entry for channel 4006 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-4006.php
+  [*] Filtered out non-m3u/css stream URL for channel 631: https://dlstreams.top/stream/stream-631.php
+  [Worker 6] [-] No stream URL found for channel Nova Sports 1 Greece (ID: 631)
+[Worker 6] [111/120] Processing: England - Championship : Portsmouth vs Derby County - Sky Sports Football UK (ID: 35)...
+  [*] Cache hit for channel 35
+  [Worker 6] [v] Successfully added channel.
+[Worker 6] [112/120] Processing: England - Championship : Portsmouth vs Derby County - Nova Sport 6 CZ (ID: 1026)...
+  [*] Cache entry for channel 1026 is not m3u/css; ignoring: https://dlstreams.top/stream/stream-1026.php
+  [*] Filtered out non-m3u/css stream URL for channel 139: https://dlstreams.top/stream/stream-139.php
+  [Worker 4] [-] No stream URL found for channel Arena 3 Premium Serbia (ID: 139)
+[Worker 4] [113/120] Processing: England - Championship : Portsmouth vs Derby County - Astro Football (ID: 124)...
+  [*] Cache hit for channel 124
+  [Worker 4] [v] Successfully added channel.
+  [*] Filtered out non-m3u/css stream URL for channel 85: https://dlstreams.top/stream/stream-85.php
+  [Worker 1] [-] No stream URL found for channel ESPN4 Brazil (ID: 85)
+  [*] Filtered out non-m3u/css stream URL for channel 93: https://dlstreams.top/stream/stream-93.php
+  [Worker 7] [-] No stream URL found for channel beIN Sports MENA 3 (ID: 93)
+  [*] Filtered out non-m3u/css stream URL for channel 415: https://dlstreams.top/stream/stream-415.php
+  [Worker 3] [-] No stream URL found for channel SuperSport Laliga (ID: 415)
+  [*] Filtered out non-m3u/css stream URL for channel 798: https://dlstreams.top/stream/stream-798.php
+  [Worker 2] [-] No stream URL found for channel ESPN3 Argentina (ID: 798)
+  [Worker 8] [v] Successfully added channel.
+  [*] Filtered out non-m3u/css stream URL for channel 1026: https://dlstreams.top/stream/stream-1026.php
+  [Worker 6] [-] No stream URL found for channel Nova Sport 6 CZ (ID: 1026)
+  [*] Filtered out non-m3u/css stream URL for channel 4006: https://dlstreams.top/stream/stream-4006.php
+  [Worker 5] [-] No stream URL found for channel Backup Stream (ID: 4006)
+[*] Successfully saved playlist with 50 entries to: D:\workvscode\nodetv\data\scraper\dlstreams.m3u

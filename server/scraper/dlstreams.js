@@ -38,144 +38,27 @@ const HISTORY_FILE = path.join(DATA_DIR, "dlstreams_history.json");
  */
 async function parseSchedule(page) {
     console.log(`[*] Fetching schedule from ${SCHEDULE_URL}...`);
-    await page.goto(SCHEDULE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-
-    // Extract events from the schedule HTML
-    const events = await page.evaluate((baseUrl) => {
-        const results = [];
-        const eventNodes = document.querySelectorAll('.schedule__event');
-        
-        for (const ev of eventNodes) {
-            // Get category
-            const catEl = ev.closest('.schedule__category')?.querySelector('.card__meta');
-            const category = catEl ? catEl.textContent.trim() : 'Events';
-            
-            const timeEl = ev.querySelector('.schedule__time');
-            const titleEl = ev.querySelector('.schedule__eventTitle');
-            
-            const time = timeEl ? timeEl.textContent.trim() : '';
-            const title = titleEl ? titleEl.textContent.trim() : 'Unknown Event';
-            
-            const channelLinks = ev.querySelectorAll('.schedule__channels a[href*="watch.php"]');
-            const channels = [];
-            
-            channelLinks.forEach(link => {
-                const href = link.getAttribute('href');
-                const idMatch = href.match(/id=(\d+)/);
-                if (idMatch) {
-                    channels.push({
-                        name: link.textContent.trim(),
-                        id: idMatch[1],
-                        url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
-                    });
-                }
-            });
-            
-            if (channels.length > 0) {
-                results.push({ category, title, time, channels });
-            }
-        }
-        
-        // Fallback for old table structure just in case
-        if (results.length === 0) {
-            const rows = document.querySelectorAll('tr');
-            let currentCategory = 'Events';
-
-            for (const row of rows) {
-                const categoryHeader = row.querySelector('td.competition-cell, td[colspan]');
-                if (categoryHeader) {
-                    const catText = categoryHeader.textContent.trim();
-                    if (catText && !catText.includes('Time') && catText.length > 1 && catText.length < 100) {
-                        currentCategory = catText;
-                        continue;
-                    }
-                }
-
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 2) continue;
-
-                let time = '';
-                let eventTitle = '';
-                const channels = [];
-
-                for (const cell of cells) {
-                    const text = cell.textContent.trim();
-                    if (/^\d{1,2}:\d{2}/.test(text) && !time) {
-                        time = text.match(/\d{1,2}:\d{2}/)[0];
-                        continue;
-                    }
-                    const links = cell.querySelectorAll('a[href*="watch.php"]');
-                    if (links.length > 0) {
-                        links.forEach(link => {
-                            const href = link.getAttribute('href');
-                            const idMatch = href.match(/id=(\d+)/);
-                            if (idMatch) {
-                                channels.push({
-                                    name: link.textContent.trim(),
-                                    id: idMatch[1],
-                                    url: href.startsWith('http') ? href : baseUrl + '/' + href.replace(/^\//, '')
-                                });
-                            }
-                        });
-                        continue;
-                    }
-                    if (text && text.length > 2 && !time && channels.length === 0) {
-                        eventTitle = text;
-                    }
-                }
-
-                if (!eventTitle && cells.length >= 2) {
-                    eventTitle = cells[1]?.textContent?.trim() || cells[0]?.textContent?.trim() || '';
-                    channels.forEach(ch => {
-                        eventTitle = eventTitle.replace(ch.name, '').trim();
-                    });
-                }
-
-                if (channels.length > 0) {
-                    results.push({
-                        category: currentCategory,
-                        title: eventTitle || 'Unknown Event',
-                        time: time || '',
-                        channels
-                    });
-                }
-            }
-        }
-        
-        return results;
-    }, BASE_URL);
-
+    await page.goto(SCHEDULE_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const events = await extractEvents(page);
     console.log(`[*] Found ${events.length} events with channels.`);
     return events;
 }
 
-/**
- * Parse a specific category page
- */
-async function parseCategoryPage(page, categorySlug) {
-    const catUrl = `${BASE_URL}/index.php?cat=${encodeURIComponent(categorySlug).replace(/%20/g, '+')}`;
-    console.log(`[*] Fetching category: ${categorySlug} from ${catUrl}...`);
-
-    // Temporarily override the SCHEDULE_URL for parseSchedule-like logic
-    await page.goto(catUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-
-    const events = await page.evaluate((baseUrl) => {
+async function extractEvents(page) {
+    return await page.evaluate((baseUrl) => {
         const results = [];
         const eventNodes = document.querySelectorAll('.schedule__event');
-        
+
         for (const ev of eventNodes) {
             const catEl = ev.closest('.schedule__category')?.querySelector('.card__meta');
             const category = catEl ? catEl.textContent.trim() : 'Events';
-            
             const timeEl = ev.querySelector('.schedule__time');
             const titleEl = ev.querySelector('.schedule__eventTitle');
-            
             const time = timeEl ? timeEl.textContent.trim() : '';
             const title = titleEl ? titleEl.textContent.trim() : 'Unknown Event';
-            
             const channelLinks = ev.querySelectorAll('.schedule__channels a[href*="watch.php"]');
             const channels = [];
-            
+
             channelLinks.forEach(link => {
                 const href = link.getAttribute('href');
                 const idMatch = href.match(/id=(\d+)/);
@@ -187,16 +70,16 @@ async function parseCategoryPage(page, categorySlug) {
                     });
                 }
             });
-            
+
             if (channels.length > 0) {
                 results.push({ category, title, time, channels });
             }
         }
 
-        // Fallback table parser
         if (results.length === 0) {
             const rows = document.querySelectorAll('tr');
             let currentCategory = 'Events';
+
             for (const row of rows) {
                 const categoryHeader = row.querySelector('td.competition-cell, td[colspan]');
                 if (categoryHeader) {
@@ -206,11 +89,14 @@ async function parseCategoryPage(page, categorySlug) {
                         continue;
                     }
                 }
+
                 const cells = row.querySelectorAll('td');
                 if (cells.length < 2) continue;
+
                 let time = '';
                 let eventTitle = '';
                 const channels = [];
+
                 for (const cell of cells) {
                     const text = cell.textContent.trim();
                     if (/^\d{1,2}:\d{2}/.test(text) && !time) {
@@ -236,10 +122,12 @@ async function parseCategoryPage(page, categorySlug) {
                         eventTitle = text;
                     }
                 }
+
                 if (!eventTitle && cells.length >= 2) {
                     eventTitle = cells[1]?.textContent?.trim() || cells[0]?.textContent?.trim() || '';
                     channels.forEach(ch => { eventTitle = eventTitle.replace(ch.name, '').trim(); });
                 }
+
                 if (channels.length > 0) {
                     results.push({ category: currentCategory, title: eventTitle || 'Unknown Event', time: time || '', channels });
                 }
@@ -248,11 +136,19 @@ async function parseCategoryPage(page, categorySlug) {
 
         return results;
     }, BASE_URL);
+}
 
+/**
+ * Parse a specific category page
+ */
+async function parseCategoryPage(page, categorySlug) {
+    const catUrl = `${BASE_URL}/index.php?cat=${encodeURIComponent(categorySlug).replace(/%20/g, '+')}`;
+    console.log(`[*] Fetching category: ${categorySlug} from ${catUrl}...`);
+    await page.goto(catUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const events = await extractEvents(page);
     console.log(`[*] Found ${events.length} events for category: ${categorySlug}`);
     return events;
 }
-
 
 async function scrape() {
     const startTime = Date.now();
@@ -285,6 +181,10 @@ async function scrape() {
         browser = await puppeteer.launch(launchOptions);
         const mainPage = await browser.newPage();
         await mainPage.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await mainPage.setDefaultNavigationTimeout(20000);
+
+        // Step 0.5: rapid guardrails
+        const MAX_TASKS = parseInt(process.env.SCRAPER_MAX_TASKS || '120', 10);
 
         // Step 1: Parse schedule — either per-category or all
         let events = [];
@@ -302,6 +202,11 @@ async function scrape() {
         // Step 2: Filter and flatten tasks
         const m3uLines = ["#EXTM3U"];
         const processedChannels = new Map(); // Avoid duplicate channel visits
+        const validStreamUrlRegex = /\.(m3u8|css)(\?|$)/i;
+
+        function isValidStreamUrl(url) {
+            return !!url && validStreamUrlRegex.test(url);
+        }
         
         // Filter criteria:
         // 1. Time-based: Events within -2 to +3 hours of current UK GMT time
@@ -346,6 +251,11 @@ async function scrape() {
             });
         });
 
+        if (tasks.length > MAX_TASKS) {
+            console.log(`[*] Task cap: trimming ${tasks.length} tasks to ${MAX_TASKS}`);
+            tasks.length = MAX_TASKS;
+        }
+
         console.log(`[*] Filtered schedule: skipped ${skippedByDate} future dates, ${skippedByTime} out-of-window events.`);
         console.log(`[*] Flattened into ${tasks.length} active channel tasks.`);
 
@@ -363,6 +273,7 @@ async function scrape() {
             // Give each worker its own page
             const page = await browser.newPage();
             await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+            page.setDefaultNavigationTimeout(20000);
             
             while (taskIndex < tasks.length) {
                 const currentTaskIndex = taskIndex++;
@@ -393,6 +304,11 @@ async function scrape() {
                             if (finalUrl.includes("#")) {
                                 finalUrl = finalUrl.split("#")[1];
                             }
+                        }
+
+                        if (!isValidStreamUrl(finalUrl)) {
+                            console.log(`  [Worker ${workerId}] [!] Skipping non-m3u/css stream URL: ${finalUrl}`);
+                            continue;
                         }
 
                         // Decode DRM keys

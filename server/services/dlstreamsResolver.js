@@ -25,6 +25,20 @@ const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
 let urlCache = new Map();
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const VALID_STREAM_URL_REGEX = /\.(m3u8|css)(\?|$)/i;
+
+function isValidStreamUrl(url) {
+    return !!url && VALID_STREAM_URL_REGEX.test(url);
+}
+
+const STREAM_WRAPPER_REGEX = /\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
+
+function findStreamUrlInText(text) {
+    if (!text) return null;
+    const m3u8Maybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~#]+?\.(?:m3u8|mpd|css|csv)(?:\?[\w\-.:@%?&=\/\+~#]*)?/i);
+    if (m3u8Maybe) return m3u8Maybe[0];
+    return null;
+}
 
 // Cache for failures (channelId -> { timestamp, error })
 const failureCache = new Map();
@@ -126,6 +140,76 @@ function getLaunchOptions() {
     return opts;
 }
 
+async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set()) {
+    if (!candidateUrl || visited.has(candidateUrl) || visited.size > 6) {
+        return null;
+    }
+    visited.add(candidateUrl);
+
+    if (isValidStreamUrl(candidateUrl)) {
+        return candidateUrl;
+    }
+
+    if (!STREAM_WRAPPER_REGEX.test(candidateUrl)) {
+        return null;
+    }
+
+    let resultUrl = null;
+    const fallbackUrl = candidateUrl;
+
+    await page.setRequestInterception(true);
+    const requestHandler = req => {
+        const url = req.url();
+        const type = req.resourceType();
+
+        if (!resultUrl && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
+            resultUrl = url;
+        }
+
+        if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
+            url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') ||
+            url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') ||
+            url.includes('chatango') || url.includes('disqus') ||
+            ['image', 'font', 'stylesheet'].includes(type)) {
+            return req.abort().catch(() => {});
+        }
+        req.continue().catch(() => {});
+    };
+
+    const consoleHandler = msg => {
+        const text = msg.text();
+        if (!resultUrl && text.startsWith('INTERCEPT_URL:')) {
+            resultUrl = text.replace('INTERCEPT_URL:', '');
+        }
+    };
+
+    page.on('request', requestHandler);
+    page.on('console', consoleHandler);
+    try {
+        await page.goto(fallbackUrl, { waitUntil: 'networkidle2', timeout: 40000 }).catch(() => {});
+
+        if (!resultUrl) {
+            try {
+                const content = await page.content();
+                resultUrl = findStreamUrlInText(content);
+            } catch (e) {}
+        }
+
+        if (resultUrl && STREAM_WRAPPER_REGEX.test(resultUrl)) {
+            const nested = await resolveRedirectedStreamUrl(page, resultUrl, visited);
+            if (nested) resultUrl = nested;
+        }
+    } catch (_) {
+        // ignore
+    } finally {
+        page.off('request', requestHandler);
+        page.off('console', consoleHandler);
+        await page.setRequestInterception(false).catch(() => {});
+    }
+
+    return resultUrl;
+}
+
 /**
  * Visit a player page and intercept stream URL (m3u8/mpd)
  */
@@ -133,8 +217,12 @@ async function extractStreamUrl(page, channelId) {
     // 1. Check cache first
     const cached = urlCache.get(channelId);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
-        console.log(`  [*] Cache hit for channel ${channelId}`);
-        return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
+        if (isValidStreamUrl(cached.streamUrl)) {
+            console.log(`  [*] Cache hit for channel ${channelId}`);
+            return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
+        }
+        console.log(`  [*] Cache entry for channel ${channelId} is not m3u/css; ignoring: ${cached.streamUrl}`);
+        urlCache.delete(channelId);
     }
 
     // 2. Check failure cache
@@ -146,7 +234,10 @@ async function extractStreamUrl(page, channelId) {
 
     const playerUrl = channelId.startsWith('http') ? channelId : `${BASE_URL}/watch.php?id=${channelId}`;
     let streamUrl = null;
+    let wrapperUrl = null;
     let ckParam = null;
+
+    page.setDefaultNavigationTimeout(20000);
 
     try {
         // Intercept network requests
@@ -164,6 +255,8 @@ async function extractStreamUrl(page, channelId) {
                         if (parts.length > 1) ckParam = parts[1].split('&')[0];
                     } catch (e) { }
                 }
+            } else if (!wrapperUrl && STREAM_WRAPPER_REGEX.test(url)) {
+                wrapperUrl = url;
             }
 
             if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
@@ -210,10 +303,14 @@ async function extractStreamUrl(page, channelId) {
             for (const frame of frames) {
                 try {
                     const src = frame.url();
-                    if (src && !src.includes('about:blank') && !src.includes('s3.dualstack') && 
-                        (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css'))) {
+                    if (!src || src.includes('about:blank') || src.includes('s3.dualstack')) continue;
+
+                    if (src.includes('.mpd') || src.includes('.m3u8') || src.includes('mono.css') || src.includes('mono.csv')) {
                         streamUrl = src;
                         break;
+                    }
+                    if (!wrapperUrl && STREAM_WRAPPER_REGEX.test(src)) {
+                        wrapperUrl = src;
                     }
                 } catch (e) {}
             }
@@ -229,24 +326,42 @@ async function extractStreamUrl(page, channelId) {
             if (!streamUrl) console.log(`  [!] Navigation warning: ${err.message}`);
         }
 
-        // 2. Polling loop with enhanced detection
+        // 2. Try direct response capture first (faster than repeated polling)
+        try {
+            const fastResponse = await page.waitForResponse(res => {
+                const u = res.url();
+                return !streamUrl && /\.(mpd|m3u8|css|csv)(\?|$)/.test(u) && !u.includes('s3.dualstack');
+            }, { timeout: 12000 });
+
+            if (fastResponse) {
+                const url = fastResponse.url();
+                console.log(`  [+] Quick-intercept response: ${url}`);
+                streamUrl = url;
+                if (url.includes('ck=')) {
+                    try { ckParam = url.split('ck=')[1].split('&')[0]; } catch (e) {}
+                }
+            }
+        } catch (e) {
+            // continue to more robust polling if needed
+        }
+
+        // 3. Polling loop with enhanced detection (fallback)
         let poll = 0;
         let rateLimitWait = false;
-        
-        while (!streamUrl && poll < 40) { // Increased poll count
-            // Check for 429 or 404
+
+        while (!streamUrl && poll < 20) {
             const pageState = await page.evaluate(() => {
-                const text = document.body.innerText;
+                const text = document.body.innerText || '';
                 if (text.includes('429 Too Many Requests')) return '429';
                 if (text.includes('404 Page Not Found')) return '404';
                 return 'ok';
             }).catch(() => 'error');
 
             if (pageState === '429' && !rateLimitWait) {
-                console.log('  [!] Rate limited (429). Waiting 15s...');
+                console.log('  [!] Rate limited (429). Waiting 8s...');
                 rateLimitWait = true;
-                await new Promise(r => setTimeout(r, 15000));
-                await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
+                await new Promise(r => setTimeout(r, 8000));
+                await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
                 continue;
             }
 
@@ -255,35 +370,43 @@ async function extractStreamUrl(page, channelId) {
                 break;
             }
 
-            // Check if player iframe is present and try to get source
             const frameSrc = await page.evaluate(() => {
                 const ifr = document.querySelector('iframe[src*="stream-"]');
-                return ifr ? ifr.src : null;
+                if (ifr && ifr.src) return ifr.src;
+                const alt = document.querySelector('iframe[src*="watch.php"]');
+                return alt ? alt.src : null;
             }).catch(() => null);
 
-            if (frameSrc && !streamUrl) {
-                // If we found the stream iframe but no URL yet, maybe it's in a script inside that frame
-                // We'll let the interceptor catch it, but we can also try to look for it
+            if (frameSrc) {
+                if (isValidStreamUrl(frameSrc)) {
+                    streamUrl = frameSrc;
+                } else if (!wrapperUrl) {
+                    wrapperUrl = frameSrc;
+                }
             }
 
             await checkFrames();
             if (streamUrl) break;
 
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 800));
             poll++;
 
-            // Click interaction to trigger potential hidden loads
-            if (poll === 10) {
+            if (poll === 8) {
                 try {
-                    const dimensions = await page.evaluate(() => ({
-                        width: window.innerWidth,
-                        height: window.innerHeight
-                    }));
+                    const dimensions = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
                     await page.mouse.click(dimensions.width / 2, dimensions.height / 2).catch(() => {});
-                } catch(e) {}
+                } catch (e) {}
             }
         }
         // 3. Diagnostic dump on failure
+        if (!streamUrl && wrapperUrl) {
+            const wrapperResolved = await resolveRedirectedStreamUrl(page, wrapperUrl).catch(() => null);
+            if (wrapperResolved && isValidStreamUrl(wrapperResolved)) {
+                console.log(`  [*] Resolved wrapper URL via fallback helper: ${wrapperResolved}`);
+                streamUrl = wrapperResolved;
+            }
+        }
+
         if (!streamUrl) {
             const diagPath = path.join(DATA_DIR, `fail_${channelId}.html`);
             try {
@@ -297,12 +420,35 @@ async function extractStreamUrl(page, channelId) {
         page.off('request', requestHandler);
         page.off('console', consoleHandler);
 
-        // 3. Cache result or failure
+        if (streamUrl && !isValidStreamUrl(streamUrl)) {
+            // Follow potential wrapper pages like stream-xxx.php / watch.php
+            const resolved = await resolveRedirectedStreamUrl(page, streamUrl).catch(() => null);
+            if (resolved && isValidStreamUrl(resolved)) {
+                console.log(`  [*] Resolved wrapper URL to actual stream URL: ${resolved}`);
+                streamUrl = resolved;
+            } else {
+                console.log(`  [*] Filtered out non-m3u/css stream URL for channel ${channelId}: ${streamUrl}`);
+                streamUrl = null;
+            }
+        }
+
+        if (!streamUrl) {
+            // Final fallback: scan page HTML for .m3u8/.mpd/.css/.csv
+            try {
+                const html = await page.content();
+                const fallback = findStreamUrlInText(html);
+                if (fallback && isValidStreamUrl(fallback)) {
+                    console.log(`  [*] Found stream URL in page HTML fallback: ${fallback}`);
+                    streamUrl = fallback;
+                }
+            } catch (e) { }
+        }
+
         if (streamUrl) {
             urlCache.set(channelId, { streamUrl, ckParam, timestamp: Date.now() });
             saveUrlCache();
         } else {
-            failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout" });
+            failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout or no m3u/css URL found" });
         }
 
     } catch (err) {

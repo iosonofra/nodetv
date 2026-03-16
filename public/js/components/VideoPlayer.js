@@ -975,6 +975,7 @@ class VideoPlayer {
      */
     async play(channel, streamUrl) {
         this.currentChannel = channel;
+        this._dlstreamsRefreshAttempted = false;
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1246,6 +1247,11 @@ class VideoPlayer {
                     if (data.fatal) {
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
+                        const isManifest404 = data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                            data.details === 'manifestLoadError' &&
+                            data.response &&
+                            Number(data.response.code) === 404;
+                        const isDlstreamsChannel = !!(channel && channel.tvgId && String(channel.tvgId).startsWith('dl_'));
 
                         // Don't proxy if it's already a local API URL
                         const isLocalApi = this.currentUrl.startsWith('/api/');
@@ -1255,6 +1261,32 @@ class VideoPlayer {
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId));
                             this.hls.startLoad();
+                        } else if (isManifest404 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
+                            this._dlstreamsRefreshAttempted = true;
+                            const dlChannelId = String(channel.tvgId).replace('dl_', '');
+                            console.log(`[Player] DLStreams manifest 404 on proxied URL. Forcing re-resolve for channel ${dlChannelId}...`);
+
+                            fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?force=1`)
+                                .then(async (r) => {
+                                    if (!r.ok) {
+                                        const e = await r.json().catch(() => ({}));
+                                        throw new Error(e.error || `Resolve failed (${r.status})`);
+                                    }
+                                    return r.json();
+                                })
+                                .then((resolved) => {
+                                    if (!resolved || !resolved.streamUrl) {
+                                        throw new Error('Empty streamUrl from force resolve');
+                                    }
+                                    this.currentUrl = resolved.streamUrl;
+                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId);
+                                    console.log('[Player] DLStreams token refreshed. Retrying manifest via proxy...');
+                                    this.hls.loadSource(refreshedProxyUrl);
+                                    this.hls.startLoad();
+                                })
+                                .catch((err) => {
+                                    console.error('[Player] DLStreams force re-resolve failed:', err.message || err);
+                                });
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             // Fatal media error - try recovery with cooldown
                             const now = Date.now();

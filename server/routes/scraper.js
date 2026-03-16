@@ -212,12 +212,13 @@ router.put('/dlstreams/categories', async (req, res) => {
 router.get('/dlstreams/resolve/:channelId', async (req, res) => {
     try {
         const { channelId } = req.params;
+        const forceRefresh = req.query.force === '1' || req.query.force === 'true';
 
         if (!channelId || !/^\d+$/.test(channelId)) {
             return res.status(400).json({ error: 'Valid numeric channelId required' });
         }
 
-        const result = await dlstreamsService.resolveStreamUrl(channelId);
+        const result = await dlstreamsService.resolveStreamUrl(channelId, { forceRefresh });
 
         if (!result.streamUrl) {
             return res.status(404).json({ error: 'Could not resolve stream URL', channelId });

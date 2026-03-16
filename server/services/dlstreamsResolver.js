@@ -225,21 +225,24 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
 /**
  * Visit a player page and intercept stream URL (m3u8/mpd)
  */
-async function extractStreamUrl(page, channelId) {
+async function extractStreamUrl(page, channelId, options = {}) {
+    const forceRefresh = options.forceRefresh === true;
     // 1. Check cache first
     const cached = urlCache.get(channelId);
-    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+    if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
         if (isValidStreamUrl(cached.streamUrl)) {
             console.log(`  [*] Cache hit for channel ${channelId}`);
             return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
         }
         console.log(`  [*] Cache entry for channel ${channelId} is not m3u/css; ignoring: ${cached.streamUrl}`);
         urlCache.delete(channelId);
+    } else if (forceRefresh && cached) {
+        console.log(`  [*] Force refresh requested for channel ${channelId}; bypassing cache.`);
     }
 
     // 2. Check failure cache
     const failure = failureCache.get(channelId);
-    if (failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
+    if (!forceRefresh && failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
         console.log(`  [*] Skipping channel ${channelId} due to recent failure.`);
         return { streamUrl: null, ckParam: null, cached: false };
     }
@@ -478,7 +481,7 @@ async function extractStreamUrl(page, channelId) {
 /**
  * Resolve a single channel URL on-demand (delegates to extractStreamUrl)
  */
-async function resolveChannelUrl(channelId) {
+async function resolveChannelUrl(channelId, options = {}) {
     console.log(`[DLStreams Resolver] Resolving channel ${channelId}...`);
     let browser;
     try {
@@ -486,7 +489,7 @@ async function resolveChannelUrl(channelId) {
         const page = await browser.newPage();
         await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
         
-        const result = await extractStreamUrl(page, channelId);
+        const result = await extractStreamUrl(page, channelId, options);
 
         if (result.streamUrl && result.streamUrl.startsWith("chrome-extension://")) {
             if (result.streamUrl.includes("#")) result.streamUrl = result.streamUrl.split("#")[1];

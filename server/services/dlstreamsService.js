@@ -343,9 +343,9 @@ class DlstreamsService {
      * @param {string} channelId - DLStreams channel ID (numeric string)
      * @returns {{ streamUrl: string|null, clearKeys: string|null, cached: boolean }}
      */
-    async resolveStreamUrl(channelId) {
+    async resolveStreamUrl(channelId, options = {}) {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
-        const result = await resolveChannelUrl(channelId);
+        const result = await resolveChannelUrl(channelId, options);
 
         // Decode ClearKey if present
         let clearKeys = null;

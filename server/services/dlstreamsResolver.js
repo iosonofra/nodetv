@@ -8,6 +8,9 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
+const fetch = require('node-fetch');
 
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
@@ -21,6 +24,9 @@ const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 const ROOT_DIR = path.resolve(__dirname, "../../");
 const DATA_DIR = path.join(ROOT_DIR, "data", "scraper");
 const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
+const CACHE_VALIDATE_TIMEOUT_MS = 10000;
+const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+const globalHttpAgent = new http.Agent();
 
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
 let urlCache = new Map();
@@ -37,6 +43,65 @@ function isValidStreamUrl(url) {
     const clean = url.split('#')[0]; // strip fragment
     return /\.(m3u8|mpd)(\?|$)/i.test(clean) ||
            /\/mono\.(css|csv)(\?|$)/i.test(clean);
+}
+
+function sanitizeProxyHeaders(headers) {
+    if (!headers || typeof headers !== 'object') return null;
+    const allowed = new Set([
+        'user-agent',
+        'origin',
+        'referer',
+        'cookie',
+        'accept',
+        'accept-language'
+    ]);
+    const out = {};
+    for (const [k, v] of Object.entries(headers)) {
+        if (!k || !allowed.has(String(k).toLowerCase())) continue;
+        if (v == null) continue;
+        const sv = String(v).trim();
+        if (!sv) continue;
+        out[k] = sv;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+}
+
+async function validateStreamUrlFast(url) {
+    if (!isValidStreamUrl(url)) return false;
+    const cleanUrl = url.split('#')[0];
+
+    const profiles = [
+        {},
+        { Origin: BASE_URL, Referer: `${BASE_URL}/` }
+    ];
+
+    for (const profile of profiles) {
+        try {
+            const response = await fetch(cleanUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
+                    ...profile
+                },
+                agent: cleanUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+                timeout: CACHE_VALIDATE_TIMEOUT_MS
+            });
+
+            if (!response.ok) {
+                continue;
+            }
+
+            const body = await response.text();
+            const trimmed = body.trimStart();
+            if (trimmed.startsWith('#EXTM3U')) return true;
+            if (trimmed.startsWith('<?xml') || trimmed.startsWith('<MPD')) return true;
+        } catch (_) {
+            // try next profile
+        }
+    }
+
+    return false;
 }
 
 const STREAM_WRAPPER_REGEX = /\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
@@ -227,14 +292,26 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
  */
 async function extractStreamUrl(page, channelId, options = {}) {
     const forceRefresh = options.forceRefresh === true;
+    const validateCache = options.validateCache === true;
     // 1. Check cache first
     const cached = urlCache.get(channelId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
         if (isValidStreamUrl(cached.streamUrl)) {
-            console.log(`  [*] Cache hit for channel ${channelId}`);
-            return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
+            if (validateCache) {
+                const isAlive = await validateStreamUrlFast(cached.streamUrl);
+                if (!isAlive) {
+                    console.log(`  [*] Cache URL validation failed for channel ${channelId}; forcing fresh resolve.`);
+                    urlCache.delete(channelId);
+                } else {
+                    console.log(`  [*] Cache hit for channel ${channelId} (validated)`);
+                    return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+                }
+            } else {
+                console.log(`  [*] Cache hit for channel ${channelId}`);
+                return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+            }
         }
-        console.log(`  [*] Cache entry for channel ${channelId} is not m3u/css; ignoring: ${cached.streamUrl}`);
+        console.log(`  [*] Cache entry for channel ${channelId} is not a valid stream URL; ignoring: ${cached.streamUrl}`);
         urlCache.delete(channelId);
     } else if (forceRefresh && cached) {
         console.log(`  [*] Force refresh requested for channel ${channelId}; bypassing cache.`);
@@ -251,6 +328,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
     let streamUrl = null;
     let wrapperUrl = null;
     let ckParam = null;
+    let requestHeaders = null;
 
     page.setDefaultNavigationTimeout(20000);
 
@@ -264,6 +342,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
             if (!streamUrl && !url.includes('s3.dualstack') && isValidStreamUrl(url)) {
                 console.log(`  [+] Intercepted: ${url}`);
                 streamUrl = url;
+                requestHeaders = sanitizeProxyHeaders(req.headers());
                 if (url.includes('ck=')) {
                     try {
                         const parts = url.split('ck=');
@@ -464,7 +543,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
         }
 
         if (streamUrl) {
-            urlCache.set(channelId, { streamUrl, ckParam, timestamp: Date.now() });
+            urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });
             saveUrlCache();
         } else {
             failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout or no m3u/css URL found" });
@@ -475,7 +554,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
         failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
     }
 
-    return { streamUrl, ckParam };
+    return { streamUrl, ckParam, requestHeaders };
 }
 
 /**

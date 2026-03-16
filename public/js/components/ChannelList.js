@@ -1202,6 +1202,9 @@ class ChannelList {
                 }
                 const resolved = await res.json();
                 streamUrl = resolved.streamUrl;
+                if (resolved.proxyHeaders) {
+                    channel.proxyHeaders = resolved.proxyHeaders;
+                }
                 
                 // Force HLS detection for DaddyHD disguised URLs (e.g. mono.css)
                 if (streamUrl && !streamUrl.includes('.m3u8') && !streamUrl.includes('m3u8') && !streamUrl.includes('.mpd')) {

@@ -345,7 +345,11 @@ class DlstreamsService {
      */
     async resolveStreamUrl(channelId, options = {}) {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
-        const result = await resolveChannelUrl(channelId, options);
+        const resolveOptions = {
+            validateCache: true,
+            ...options
+        };
+        const result = await resolveChannelUrl(channelId, resolveOptions);
 
         // Decode ClearKey if present
         let clearKeys = null;
@@ -366,6 +370,7 @@ class DlstreamsService {
         return {
             streamUrl: result.streamUrl,
             clearKeys,
+            proxyHeaders: result.requestHeaders || null,
             cached: result.cached
         };
     }

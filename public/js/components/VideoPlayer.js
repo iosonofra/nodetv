@@ -1175,7 +1175,7 @@ class VideoPlayer {
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
-            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId) : streamUrl;
+            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders) : streamUrl;
             console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp, sourceId: channel.sourceId });
 
 
@@ -1259,7 +1259,7 @@ class VideoPlayer {
                         if (isCorsLikely && !this.isUsingProxy && !isLocalApi) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
-                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId));
+                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders));
                             this.hls.startLoad();
                         } else if (isManifest404 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
                             this._dlstreamsRefreshAttempted = true;
@@ -1278,8 +1278,11 @@ class VideoPlayer {
                                     if (!resolved || !resolved.streamUrl) {
                                         throw new Error('Empty streamUrl from force resolve');
                                     }
+                                    if (resolved.proxyHeaders) {
+                                        channel.proxyHeaders = resolved.proxyHeaders;
+                                    }
                                     this.currentUrl = resolved.streamUrl;
-                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId);
+                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders);
                                     console.log('[Player] DLStreams token refreshed. Retrying manifest via proxy...');
                                     this.hls.loadSource(refreshedProxyUrl);
                                     this.hls.startLoad();
@@ -1327,7 +1330,7 @@ class VideoPlayer {
                     console.log('Autoplay prevented, trying proxy if CORS error:', e);
                     if (!this.isUsingProxy) {
                         this.isUsingProxy = true;
-                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId);
+                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders);
                         this.video.play().catch(err => {
                             if (err.name !== 'AbortError') console.error('Proxy play failed:', err);
                         });
@@ -1527,9 +1530,16 @@ class VideoPlayer {
     /**
      * Get proxied URL for a stream
      */
-    getProxiedUrl(url, sourceId) {
+    getProxiedUrl(url, sourceId, extraHeaders) {
         let proxiedUrl = `/api/proxy/stream?url=${encodeURIComponent(url)}`;
         if (sourceId) proxiedUrl += `&sourceId=${sourceId}`;
+        if (extraHeaders && typeof extraHeaders === 'object') {
+            try {
+                proxiedUrl += `&headers=${encodeURIComponent(btoa(JSON.stringify(extraHeaders)))}`;
+            } catch (e) {
+                console.warn('[Player] Failed to encode proxy headers:', e.message);
+            }
+        }
         return proxiedUrl;
     }
 

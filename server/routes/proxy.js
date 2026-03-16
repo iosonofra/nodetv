@@ -811,6 +811,9 @@ router.get('/stream', async (req, res) => {
                 'Referer': getReferer()
             };
 
+            const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl);
+            const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com)/i.test(finalUrl);
+
             // Apply all other custom headers
             Object.entries(customHeaders).forEach(([k, v]) => {
                 const lowerK = k.toLowerCase();
@@ -830,7 +833,37 @@ router.get('/stream', async (req, res) => {
                 agent: proxyAgent || (finalUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
             };
 
-            const response = await fetch(finalUrl, fetchOptions);
+            let response = await fetch(finalUrl, fetchOptions);
+
+            // Some DLStreams CDNs return 403/404 unless Origin/Referer match dlstreams.top.
+            // Retry once with forced DLStreams headers only for manifest requests.
+            if (!response.ok && (response.status === 403 || response.status === 404) && isManifestRequest && isLikelyDlstreamsCdn) {
+                const fallbackHeaders = {
+                    ...headers,
+                    'Origin': 'https://dlstreams.top',
+                    'Referer': 'https://dlstreams.top/'
+                };
+                const fallbackOptions = {
+                    ...fetchOptions,
+                    headers: fallbackHeaders
+                };
+                console.log(`[Proxy] Retry manifest with DLStreams headers for ${finalUrl.substring(0, 120)}...`);
+                response = await fetch(finalUrl, fallbackOptions);
+            }
+
+            // Some origins reject explicit Origin/Referer headers from proxies.
+            // Final fallback: retry without Origin and Referer for manifest fetches.
+            if (!response.ok && (response.status === 403 || response.status === 404) && isManifestRequest) {
+                const noCorsHeaders = { ...headers };
+                delete noCorsHeaders.Origin;
+                delete noCorsHeaders.Referer;
+                const fallbackNoCorsOptions = {
+                    ...fetchOptions,
+                    headers: noCorsHeaders
+                };
+                console.log(`[Proxy] Retry manifest without Origin/Referer for ${finalUrl.substring(0, 120)}...`);
+                response = await fetch(finalUrl, fallbackNoCorsOptions);
+            }
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {

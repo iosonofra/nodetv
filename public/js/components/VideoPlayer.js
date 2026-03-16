@@ -1159,11 +1159,18 @@ class VideoPlayer {
             // 2. Protocol mismatch (Mixed Content): App on HTTPS, Stream on HTTP
             // 3. Known CORS-restricted domains (like Pluto TV)
             // Note: Xtream sources are NOT auto-proxied because many providers IP-lock streams
-            const proxyRequiredDomains = ['pluto.tv'];
+            const proxyRequiredDomains = [
+                'pluto.tv',
+                'dlstreams.top',
+                'zhdcdn.zip',
+                'hhkys.com'
+            ];
             const isPageHttps = window.location.protocol === 'https:';
             const isUrlHttp = streamUrl.startsWith('http:');
+            const isDlstreamsChannel = !!(channel && channel.tvgId && String(channel.tvgId).startsWith('dl_'));
             const needsProxy = this.settings.forceProxy ||
                 (channel && channel.useWarp) ||
+                isDlstreamsChannel ||
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;

@@ -4,13 +4,30 @@
  * Completely separate from the thisnotbusiness scraper
  */
 
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+let puppeteer;
 const fs = require('fs');
 const path = require('path');
 
-// Use stealth plugin to avoid detection
-puppeteer.use(StealthPlugin());
+// Stealth can be unstable on some Linux/CDP setups. Keep it optional.
+const isLinux = process.platform === 'linux';
+const useStealthPlugin = process.env.DISABLE_STEALTH_PLUGIN === '1'
+    ? false
+    : (process.env.ENABLE_STEALTH_PLUGIN === '1' ? true : !isLinux);
+
+if (useStealthPlugin) {
+    try {
+        puppeteer = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        puppeteer.use(StealthPlugin());
+        console.log('[DLStreams Scraper] Stealth plugin enabled.');
+    } catch (err) {
+        console.log(`[DLStreams Scraper] Stealth init failed, falling back to plain puppeteer-extra: ${err.message}`);
+        puppeteer = require('puppeteer-extra');
+    }
+} else {
+    puppeteer = require('puppeteer-extra');
+    console.log('[DLStreams Scraper] Stealth plugin disabled.');
+}
 
 // Import shared resolver functions
 const {

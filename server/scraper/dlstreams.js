@@ -349,14 +349,58 @@ async function scrape() {
             successSinceLastAdjustment = 0;
             console.log(`[*] Adaptive concurrency adjusted to ${currentConcurrencyTarget}/${concurrencyLimit} (${reason}).`);
         };
+
+        // Helper to create pages with error recovery
+        const createPageWithRetry = async (workerId, maxRetries = 3) => {
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const page = await Promise.race([
+                        browser.newPage(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timeout')), 12000))
+                    ]);
+                    
+                    // Wait a bit for stealth plugin evasions to complete
+                    await new Promise(r => setTimeout(r, 500));
+                    
+                    // Set up error handlers immediately to catch crashes
+                    page.on('close', () => {
+                        if (!page.isClosed()) console.log(`[Worker ${workerId}] [!] Page closed unexpectedly`);
+                    });
+                    page.on('error', (err) => {
+                        console.log(`[Worker ${workerId}] [!] Page error: ${err.message}`);
+                    });
+                    
+                    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+                    page.setDefaultNavigationTimeout(20000);
+                    
+                    return page;
+                } catch (err) {
+                    console.log(`[Worker ${workerId}] [!] Page creation failed (attempt ${attempt + 1}/${maxRetries}): ${err.message}`);
+                    if (attempt < maxRetries - 1) {
+                        await sleep(1000 + Math.random() * 2000);
+                    }
+                }
+            }
+            return null;
+        };
+
+        // Helper to check if page is usable and recreate if needed
+        const ensurePageReady = async (page, workerId) => {
+            if (!page || page.isClosed()) {
+                return await createPageWithRetry(workerId, 2);
+            }
+            return page;
+        };
         
         const workers = [];
         
         const workerFn = async (workerId) => {
-            // Give each worker its own page
-            const page = await browser.newPage();
-            await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
-            page.setDefaultNavigationTimeout(20000);
+            // Give each worker its own page with error recovery
+            let page = await createPageWithRetry(workerId);
+            if (!page) {
+                console.log(`[Worker ${workerId}] [!] Failed to create page, exiting worker`);
+                return;
+            }
 
             const startDelay = randomBetween(workerStartJitterMinMs, workerStartJitterMaxMs);
             console.log(`[Worker ${workerId}] [*] Initial stagger delay ${startDelay}ms.`);
@@ -386,6 +430,15 @@ async function scrape() {
                     console.log(`[Worker ${workerId}] [*] Global cooldown active (${cooldownLeft}ms), waiting...`);
                     await sleep(cooldownLeft);
                 }
+
+                // Ensure page is still valid
+                page = await ensurePageReady(page, workerId);
+                if (!page) {
+                    console.log(`[Worker ${workerId}] [!] Could not restore page for channel ${channel.id}, skipping task`);
+                    channelsFailedFinal++;
+                    completedChannels++;
+                    continue;
+                }
                 
                 try {
                     let streamUrl, ckParam;
@@ -401,20 +454,34 @@ async function scrape() {
                         let resolvedAfterRetry = false;
                         let lastWrapperDetectedButNoUrl = false;
                         for (let attempt = 0; attempt <= maxRetries; attempt++) {
-                            const result = await extractStreamUrl(page, channel.id, { forceRefresh: attempt > 0 });
-                            streamUrl = result.streamUrl;
-                            ckParam = result.ckParam;
-                            lastWrapperDetectedButNoUrl = result.wrapperDetectedButNoUrl || false;
-                            if (streamUrl) {
-                                if (attempt > 0) resolvedAfterRetry = true;
-                                break;
-                            }
-
-                            if (attempt < maxRetries) {
-                                const retryDelay = randomBetween(retryMinDelayMs, retryMaxDelayMs);
-                                retryAttemptsUsed++;
-                                console.log(`  [Worker ${workerId}] [!] Retry ${attempt + 1}/${maxRetries} for channel ${channel.id} in ${retryDelay}ms...`);
-                                await sleep(retryDelay);
+                            try {
+                                const result = await extractStreamUrl(page, channel.id, { forceRefresh: attempt > 0 });
+                                streamUrl = result.streamUrl;
+                                ckParam = result.ckParam;
+                                lastWrapperDetectedButNoUrl = result.wrapperDetectedButNoUrl || false;
+                                if (streamUrl) {
+                                    if (attempt > 0) resolvedAfterRetry = true;
+                                    break;
+                                }
+                            } catch (extractErr) {
+                                console.log(`[Worker ${workerId}] [!] Extract error on attempt ${attempt + 1}: ${extractErr.message}`);
+                                // If page was closed during extract, recreate and retry
+                                if (extractErr.message && (extractErr.message.includes('Session closed') || extractErr.message.includes('Protocol error'))) {
+                                    if (page) {
+                                        try { await page.close(); } catch (e) {}
+                                    }
+                                    page = await createPageWithRetry(workerId, 2);
+                                    if (!page && attempt < maxRetries) {
+                                        console.log(`[Worker ${workerId}] [!] Could not recreate page, skipping retry`);
+                                        break;
+                                    }
+                                }
+                                if (attempt < maxRetries && page) {
+                                    const retryDelay = randomBetween(retryMinDelayMs, retryMaxDelayMs);
+                                    retryAttemptsUsed++;
+                                    console.log(`  [Worker ${workerId}] [!] Retry ${attempt + 1}/${maxRetries} for channel ${channel.id} in ${retryDelay}ms...`);
+                                    await sleep(retryDelay);
+                                }
                             }
                         }
 
@@ -540,7 +607,9 @@ async function scrape() {
                 await sleep(taskGapDelay);
             }
             
-            await page.close();
+            if (page && !page.isClosed()) {
+                try { await page.close(); } catch (e) {}
+            }
         };
 
         const actualConcurrency = Math.min(concurrencyLimit, tasks.length);
@@ -564,9 +633,11 @@ async function scrape() {
             // Create a single worker for second pass
             const secondPassWorker = async () => {
                 try {
-                    const page = await browser.newPage();
-                    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
-                    page.setDefaultNavigationTimeout(20000);
+                    let page = await createPageWithRetry('second-pass', 3);
+                    if (!page) {
+                        console.log(`[*] Second pass: Failed to create page, skipping phase 2`);
+                        return;
+                    }
                     
                     for (const channelId of secondPassChannels) {
                         const elapsedSec = Math.floor((Date.now() - secondPassStart) / 1000);
@@ -574,15 +645,26 @@ async function scrape() {
                             console.log(`[*] Second pass duration limit reached (${elapsedSec}s)`);
                             break;
                         }
+
+                        // Check page state before each retry
+                        if (page && page.isClosed()) {
+                            console.log(`[Second Pass] Page closed, recreating...`);
+                            page = await createPageWithRetry('second-pass', 2);
+                            if (!page) {
+                                console.log(`[Second Pass] Failed to recreate page, aborting remaining retries`);
+                                break;
+                            }
+                        }
                         
                         console.log(`[Second Pass] Retrying channel ${channelId} with cache validation...`);
-                        const result = await extractStreamUrl(page, channelId, { 
-                            forceRefresh: true, 
-                            validateCache: true 
-                        });
-                        
-                        if (result.streamUrl && isValidStreamUrl(result.streamUrl)) {
-                            console.log(`[Second Pass] [+] SUCCESS! Channel ${channelId} recovered!`);
+                        try {
+                            const result = await extractStreamUrl(page, channelId, { 
+                                forceRefresh: true, 
+                                validateCache: true 
+                            });
+                            
+                            if (result.streamUrl && isValidStreamUrl(result.streamUrl)) {
+                                console.log(`[Second Pass] [+] SUCCESS! Channel ${channelId} recovered!`);
                             
                             // Find corresponding event and channel from original tasks
                             let event = null;
@@ -653,6 +735,16 @@ async function scrape() {
                         } else {
                             console.log(`[Second Pass] [-] Channel ${channelId} still unresolved`);
                         }
+                        } catch (extractErr) {
+                            console.log(`[Second Pass] [!] Error extracting channel ${channelId}: ${extractErr.message}`);
+                            // If page/session closed, recreate will happen on next iteration
+                            if (extractErr.message && (extractErr.message.includes('Session closed') || extractErr.message.includes('Protocol error'))) {
+                                if (page) {
+                                    try { await page.close(); } catch (e) {}
+                                }
+                                page = null; // Force recreation on next iteration
+                            }
+                        }
                         
                         // Long delay between second pass retries
                         if (secondPassChannels.indexOf(channelId) < secondPassChannels.length - 1) {
@@ -662,7 +754,9 @@ async function scrape() {
                         }
                     }
                     
-                    await page.close();
+                    if (page && !page.isClosed()) {
+                        try { await page.close(); } catch (e) {}
+                    }
                 } catch (err) {
                     console.error(`[!] Second pass error: ${err.message}`);
                 }

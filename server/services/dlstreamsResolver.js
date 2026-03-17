@@ -398,6 +398,8 @@ async function extractStreamUrl(page, channelId, options = {}) {
     let wrapperUrl = null;
     let ckParam = null;
     let requestHeaders = null;
+    let blockPageDetected = false;
+    let blockPageHits = 0;
 
     page.setDefaultNavigationTimeout(20000);
 
@@ -535,11 +537,22 @@ async function extractStreamUrl(page, channelId, options = {}) {
             }
 
             if (pageState === 'blocked' && !rateLimitWait) {
+                blockPageDetected = true;
+                blockPageHits++;
                 console.log('  [!] Block-like page detected. Waiting 10s before retry...');
                 rateLimitWait = true;
                 await new Promise(r => setTimeout(r, 10000));
                 await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
                 continue;
+            }
+
+            if (pageState === 'blocked') {
+                blockPageDetected = true;
+                blockPageHits++;
+                if (blockPageHits >= 2) {
+                    console.log('  [!] Block page still present after retry, aborting this resolve early.');
+                    break;
+                }
             }
 
             const frameSrc = await page.evaluate(() => {
@@ -647,7 +660,9 @@ async function extractStreamUrl(page, channelId, options = {}) {
         streamUrl, 
         ckParam, 
         requestHeaders,
-        wrapperDetectedButNoUrl: !streamUrl && wrapperUrl ? true : false
+        wrapperDetectedButNoUrl: !streamUrl && wrapperUrl ? true : false,
+        blockPageDetected,
+        blockPageHits
     };
 }
 

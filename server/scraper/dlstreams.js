@@ -299,6 +299,9 @@ async function scrape() {
         const backoffTriggerFailures = parseInt(process.env.SCRAPER_BACKOFF_TRIGGER_FAILURES || '3', 10);
         const backoffMinMs = parseInt(process.env.SCRAPER_BACKOFF_MIN_MS || '10000', 10);
         const backoffMaxMs = parseInt(process.env.SCRAPER_BACKOFF_MAX_MS || '20000', 10);
+        const blockStormTrigger = parseInt(process.env.SCRAPER_BLOCK_STORM_TRIGGER || '2', 10);
+        const blockStormCooldownMinMs = parseInt(process.env.SCRAPER_BLOCK_STORM_COOLDOWN_MIN_MS || '45000', 10);
+        const blockStormCooldownMaxMs = parseInt(process.env.SCRAPER_BLOCK_STORM_COOLDOWN_MAX_MS || '90000', 10);
         const workerStartJitterMinMs = parseInt(process.env.SCRAPER_WORKER_JITTER_MIN_MS || '1500', 10);
         const workerStartJitterMaxMs = parseInt(process.env.SCRAPER_WORKER_JITTER_MAX_MS || '5000', 10);
         const taskJitterMinMs = parseInt(process.env.SCRAPER_TASK_JITTER_MIN_MS || '250', 10);
@@ -318,6 +321,8 @@ async function scrape() {
         let retryRecoveredChannels = 0;
         let cooldownActivations = 0;
         let channelsFailedFinal = 0;
+        let blockedPageEventsTotal = 0;
+        let blockedPageEventsWindow = 0;
         let concurrencyReductions = 0;
         let concurrencyIncreases = 0;
         let stoppedEarly = false;
@@ -337,6 +342,7 @@ async function scrape() {
         console.log(`[*] Adaptive concurrency: ${adaptiveConcurrencyEnabled ? 'enabled' : 'disabled'} (min ${Math.min(minConcurrencyLimit, concurrencyLimit)}, max ${concurrencyLimit}, ramp-up threshold ${successThresholdForRampUp}).`);
         console.log(`[*] Retry policy: ${maxRetries} retry, jitter ${retryMinDelayMs}-${retryMaxDelayMs}ms.`);
         console.log(`[*] Backoff policy: trigger ${backoffTriggerFailures} fails, cooldown ${backoffMinMs}-${backoffMaxMs}ms.`);
+        console.log(`[*] Block-storm policy: trigger ${blockStormTrigger} blocked channels, cooldown ${blockStormCooldownMinMs}-${blockStormCooldownMaxMs}ms.`);
         console.log(`[*] Timing jitter: workerStart ${workerStartJitterMinMs}-${workerStartJitterMaxMs}ms, taskGap ${taskJitterMinMs}-${taskJitterMaxMs}ms.`);
         console.log(`[*] Guardrails: maxDuration=${Math.round(maxRunDurationMs / 60000)}m, maxCooldowns=${maxCooldownActivations}.`);
         
@@ -459,6 +465,7 @@ async function scrape() {
                 
                 try {
                     let streamUrl, ckParam;
+                    let channelBlockedDuringAttempts = false;
                     
                     // Use cached data if we already processed this channel ID
                     if (processedChannels.has(channel.id)) {
@@ -476,6 +483,13 @@ async function scrape() {
                                 streamUrl = result.streamUrl;
                                 ckParam = result.ckParam;
                                 lastWrapperDetectedButNoUrl = result.wrapperDetectedButNoUrl || false;
+                                channelBlockedDuringAttempts = channelBlockedDuringAttempts || (result.blockPageDetected === true);
+
+                                if (!streamUrl && result.blockPageDetected) {
+                                    console.log(`  [Worker ${workerId}] [!] Block page detected for channel ${channel.id}, deferring retries to cooldown/second-pass.`);
+                                    break;
+                                }
+
                                 if (streamUrl) {
                                     if (attempt > 0) resolvedAfterRetry = true;
                                     break;
@@ -512,6 +526,24 @@ async function scrape() {
                             // Queue for second pass: wrapper was detected but final URL not found (transient failure)
                             transientFailures.add(channel.id);
                             console.log(`  [Worker ${workerId}] [!] Channel ${channel.id} queued for second pass (wrapper detected, will retry)`);
+                        }
+
+                        if (!streamUrl && channelBlockedDuringAttempts) {
+                            blockedPageEventsTotal++;
+                            blockedPageEventsWindow++;
+                            if (blockedPageEventsWindow >= blockStormTrigger) {
+                                const cooldownMs = randomBetween(blockStormCooldownMinMs, blockStormCooldownMaxMs);
+                                globalCooldownUntil = Math.max(globalCooldownUntil, Date.now() + cooldownMs);
+                                cooldownActivations++;
+                                console.log(`  [Worker ${workerId}] [!] Block storm detected (${blockedPageEventsWindow} blocked channels), applying extended cooldown for ${cooldownMs}ms.`);
+                                if (adaptiveConcurrencyEnabled && currentConcurrencyTarget > 1) {
+                                    setConcurrencyTarget(1, `block storm after channel ${channel.id}`);
+                                }
+                                blockedPageEventsWindow = 0;
+                                if (cooldownActivations >= maxCooldownActivations) {
+                                    triggerEarlyStop(`too many cooldowns (${cooldownActivations})`);
+                                }
+                            }
                         }
                     }
 
@@ -582,7 +614,11 @@ async function scrape() {
                     } else {
                         console.log(`  [Worker ${workerId}] [-] No stream URL found for channel ${channel.name} (ID: ${channel.id})`);
                         channelsFailedFinal++;
-                        consecutiveFailures++;
+                        if (!channelBlockedDuringAttempts) {
+                            consecutiveFailures++;
+                        } else {
+                            consecutiveFailures = 0;
+                        }
                         successSinceLastAdjustment = 0;
                         if (consecutiveFailures >= backoffTriggerFailures) {
                             const cooldownMs = randomBetween(backoffMinMs, backoffMaxMs);
@@ -793,7 +829,7 @@ async function scrape() {
             console.log(`[*] Saved empty playlist to: ${PLAYLIST_FILE}`);
         }
 
-        console.log(`[*] Runtime metrics: retries_used=${retryAttemptsUsed}, retry_recovered=${retryRecoveredChannels}, cooldowns=${cooldownActivations}, final_failures=${channelsFailedFinal}, second_pass_recovered=${secondPhaseRecoveredChannels}, concurrency_down=${concurrencyReductions}, concurrency_up=${concurrencyIncreases}, final_concurrency=${currentConcurrencyTarget}`);
+        console.log(`[*] Runtime metrics: retries_used=${retryAttemptsUsed}, retry_recovered=${retryRecoveredChannels}, blocked_events=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, final_failures=${channelsFailedFinal}, second_pass_recovered=${secondPhaseRecoveredChannels}, concurrency_down=${concurrencyReductions}, concurrency_up=${concurrencyIncreases}, final_concurrency=${currentConcurrencyTarget}`);
 
         // Save History
         const duration = Math.floor((Date.now() - startTime) / 1000);
@@ -809,6 +845,7 @@ async function scrape() {
             metrics: {
                 retriesUsed: retryAttemptsUsed,
                 retryRecoveredChannels,
+                blockedPageEvents: blockedPageEventsTotal,
                 cooldownActivations,
                 finalFailures: channelsFailedFinal,
                 secondPhaseRecoveredChannels,
@@ -822,7 +859,7 @@ async function scrape() {
                 processedTasks: completedChannels,
                 totalTasks: tasks.length
             },
-            message: `${stoppedEarly ? 'Partially generated' : 'Generated'} ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}, secondPhaseRecovered=${secondPhaseRecoveredChannels}, concurrency=${currentConcurrencyTarget}/${concurrencyLimit}${stoppedEarly ? `, stopReason=${stopReason}` : ''}.`
+            message: `${stoppedEarly ? 'Partially generated' : 'Generated'} ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, blockedEvents=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}, secondPhaseRecovered=${secondPhaseRecoveredChannels}, concurrency=${currentConcurrencyTarget}/${concurrencyLimit}${stoppedEarly ? `, stopReason=${stopReason}` : ''}.`
         };
 
         updateHistory(runData);

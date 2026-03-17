@@ -279,6 +279,8 @@ async function scrape() {
         const backoffTriggerFailures = parseInt(process.env.SCRAPER_BACKOFF_TRIGGER_FAILURES || '3', 10);
         const backoffMinMs = parseInt(process.env.SCRAPER_BACKOFF_MIN_MS || '10000', 10);
         const backoffMaxMs = parseInt(process.env.SCRAPER_BACKOFF_MAX_MS || '20000', 10);
+        const maxRunDurationMs = parseInt(process.env.SCRAPER_MAX_DURATION_MS || '2700000', 10); // 45m
+        const maxCooldownActivations = parseInt(process.env.SCRAPER_MAX_COOLDOWNS || '20', 10);
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         const randomBetween = (min, max) => {
@@ -292,14 +294,25 @@ async function scrape() {
         let retryRecoveredChannels = 0;
         let cooldownActivations = 0;
         let channelsFailedFinal = 0;
+        let stoppedEarly = false;
+        let stopReason = null;
 
         console.log(`[*] Proceeding with concurrency limit: ${concurrencyLimit}`);
         console.log(`[*] Retry policy: ${maxRetries} retry, jitter ${retryMinDelayMs}-${retryMaxDelayMs}ms.`);
         console.log(`[*] Backoff policy: trigger ${backoffTriggerFailures} fails, cooldown ${backoffMinMs}-${backoffMaxMs}ms.`);
+        console.log(`[*] Guardrails: maxDuration=${Math.round(maxRunDurationMs / 60000)}m, maxCooldowns=${maxCooldownActivations}.`);
         
         let completedChannels = 0;
         let activeWorkers = 0;
         let taskIndex = 0;
+
+        const triggerEarlyStop = (reason) => {
+            if (stoppedEarly) return;
+            stoppedEarly = true;
+            stopReason = reason;
+            taskIndex = tasks.length;
+            console.log(`[*] Early stop triggered: ${reason}`);
+        };
         
         const workers = [];
         
@@ -310,6 +323,16 @@ async function scrape() {
             page.setDefaultNavigationTimeout(20000);
             
             while (taskIndex < tasks.length) {
+                if (Date.now() - startTime > maxRunDurationMs) {
+                    triggerEarlyStop(`max run duration reached (${maxRunDurationMs}ms)`);
+                    break;
+                }
+
+                if (cooldownActivations >= maxCooldownActivations) {
+                    triggerEarlyStop(`too many cooldowns (${cooldownActivations})`);
+                    break;
+                }
+
                 const currentTaskIndex = taskIndex++;
                 const { event, channel } = tasks[currentTaskIndex];
 
@@ -426,6 +449,9 @@ async function scrape() {
                             consecutiveFailures = 0;
                             cooldownActivations++;
                             console.log(`  [Worker ${workerId}] [!] High failure rate detected, applying global cooldown for ${cooldownMs}ms.`);
+                            if (cooldownActivations >= maxCooldownActivations) {
+                                triggerEarlyStop(`too many cooldowns (${cooldownActivations})`);
+                            }
                         }
                     }
                 } catch (e) {
@@ -438,6 +464,9 @@ async function scrape() {
                         consecutiveFailures = 0;
                         cooldownActivations++;
                         console.log(`  [Worker ${workerId}] [!] Error burst detected, applying global cooldown for ${cooldownMs}ms.`);
+                        if (cooldownActivations >= maxCooldownActivations) {
+                            triggerEarlyStop(`too many cooldowns (${cooldownActivations})`);
+                        }
                     }
                 }
                 
@@ -453,6 +482,10 @@ async function scrape() {
         }
         
         await Promise.all(workers);
+
+        if (stoppedEarly) {
+            console.log(`[*] Run ended early: ${stopReason}`);
+        }
 
         // Save Playlist
         fs.writeFileSync(PLAYLIST_FILE, m3uLines.join("\n"), 'utf8');
@@ -471,7 +504,7 @@ async function scrape() {
 
         const runData = {
             timestamp: new Date().toISOString(),
-            success: true,
+            success: !stoppedEarly,
             type: runType,
             duration: duration,
             channelsCount: count,
@@ -479,9 +512,13 @@ async function scrape() {
                 retriesUsed: retryAttemptsUsed,
                 retryRecoveredChannels,
                 cooldownActivations,
-                finalFailures: channelsFailedFinal
+                finalFailures: channelsFailedFinal,
+                stoppedEarly,
+                stopReason,
+                processedTasks: completedChannels,
+                totalTasks: tasks.length
             },
-            message: `Generated ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}.`
+            message: `${stoppedEarly ? 'Partially generated' : 'Generated'} ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}${stoppedEarly ? `, stopReason=${stopReason}` : ''}.`
         };
 
         updateHistory(runData);

@@ -1202,6 +1202,7 @@ class SettingsPage {
                 const m = status.latestMetrics || null;
                 if (m) {
                     const finalFailures = m.finalFailures ?? 0;
+                    const stoppedEarly = m.stoppedEarly === true;
                     const healthLabel = finalFailures > 0 ? 'DEGRADED' : 'HEALTHY';
                     const healthBg = finalFailures > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.12)';
                     const healthColor = finalFailures > 0 ? 'var(--color-error)' : '#22c55e';
@@ -1217,6 +1218,7 @@ class SettingsPage {
                             <div style="display: flex; justify-content: space-between;"><span class="hint">Cooldowns:</span><span style="font-weight: 600;">${m.cooldownActivations ?? 0}</span></div>
                             <div style="display: flex; justify-content: space-between;"><span class="hint">Final Failures:</span><span style="font-weight: 600; color: ${finalFailures > 0 ? 'var(--color-error)' : 'var(--color-text-primary)'};">${finalFailures}</span></div>
                         </div>
+                        ${stoppedEarly ? `<div style="margin-top: 8px; font-size: 0.76rem; color: var(--color-warning);">Run ended early: ${this.escapeHtml(m.stopReason || 'guardrail stop')}</div>` : ''}
                     `;
                     metricsInfo.style.display = 'block';
                 } else {
@@ -1334,6 +1336,7 @@ class SettingsPage {
                             </div>
                             <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
                             ${item.metrics ? `<div class="hint" style="font-size: 0.72rem;">Retries: ${item.metrics.retriesUsed ?? 0} | Recovered: ${item.metrics.retryRecoveredChannels ?? 0} | Cooldowns: ${item.metrics.cooldownActivations ?? 0} | Final Failures: ${item.metrics.finalFailures ?? 0}</div>` : ''}
+                            ${item.metrics?.stoppedEarly ? `<div class="hint" style="font-size: 0.72rem; color: var(--color-warning);">Partial run: ${this.escapeHtml(item.metrics.stopReason || 'guardrail stop')}</div>` : ''}
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                             <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">

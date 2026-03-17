@@ -1203,6 +1203,9 @@ class SettingsPage {
                 if (m) {
                     const finalFailures = m.finalFailures ?? 0;
                     const stoppedEarly = m.stoppedEarly === true;
+                    const concurrencySummary = m.initialConcurrency != null
+                        ? `${m.finalConcurrency ?? m.initialConcurrency}/${m.initialConcurrency}`
+                        : 'n/a';
                     const healthLabel = finalFailures > 0 ? 'DEGRADED' : 'HEALTHY';
                     const healthBg = finalFailures > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.12)';
                     const healthColor = finalFailures > 0 ? 'var(--color-error)' : '#22c55e';
@@ -1217,6 +1220,9 @@ class SettingsPage {
                             <div style="display: flex; justify-content: space-between;"><span class="hint">Retry Recovered:</span><span style="font-weight: 600; color: var(--color-accent);">${m.retryRecoveredChannels ?? 0}</span></div>
                             <div style="display: flex; justify-content: space-between;"><span class="hint">Cooldowns:</span><span style="font-weight: 600;">${m.cooldownActivations ?? 0}</span></div>
                             <div style="display: flex; justify-content: space-between;"><span class="hint">Final Failures:</span><span style="font-weight: 600; color: ${finalFailures > 0 ? 'var(--color-error)' : 'var(--color-text-primary)'};">${finalFailures}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Phase 2 Recovered:</span><span style="font-weight: 600; color: ${(m.secondPhaseRecoveredChannels ?? 0) > 0 ? 'var(--color-accent)' : 'var(--color-text-secondary)'};">${m.secondPhaseRecoveredChannels ?? 0}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Concurrency:</span><span style="font-weight: 600;">${concurrencySummary}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Adjustments:</span><span style="font-weight: 600;">-${m.concurrencyReductions ?? 0} / +${m.concurrencyIncreases ?? 0}</span></div>
                         </div>
                         ${stoppedEarly ? `<div style="margin-top: 8px; font-size: 0.76rem; color: var(--color-warning);">Run ended early: ${this.escapeHtml(m.stopReason || 'guardrail stop')}</div>` : ''}
                     `;
@@ -1335,7 +1341,8 @@ class SettingsPage {
                                 ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
                             </div>
                             <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
-                            ${item.metrics ? `<div class="hint" style="font-size: 0.72rem;">Retries: ${item.metrics.retriesUsed ?? 0} | Recovered: ${item.metrics.retryRecoveredChannels ?? 0} | Cooldowns: ${item.metrics.cooldownActivations ?? 0} | Final Failures: ${item.metrics.finalFailures ?? 0}</div>` : ''}
+                            ${item.metrics ? `<div class="hint" style="font-size: 0.72rem;">Retries: ${item.metrics.retriesUsed ?? 0} | Recovered: ${item.metrics.retryRecoveredChannels ?? 0} | Cooldowns: ${item.metrics.cooldownActivations ?? 0} | Phase2: ${item.metrics.secondPhaseRecoveredChannels ?? 0} | Final: ${item.metrics.finalFailures ?? 0}</div>` : ''}
+                            ${item.metrics?.initialConcurrency != null ? `<div class="hint" style="font-size: 0.72rem;">Concurrency: ${item.metrics.finalConcurrency ?? item.metrics.initialConcurrency}/${item.metrics.initialConcurrency} | Adjustments: -${item.metrics.concurrencyReductions ?? 0} / +${item.metrics.concurrencyIncreases ?? 0}</div>` : ''}
                             ${item.metrics?.stoppedEarly ? `<div class="hint" style="font-size: 0.72rem; color: var(--color-warning);">Partial run: ${this.escapeHtml(item.metrics.stopReason || 'guardrail stop')}</div>` : ''}
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">

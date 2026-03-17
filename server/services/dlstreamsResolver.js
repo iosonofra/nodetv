@@ -107,6 +107,36 @@ async function validateStreamUrlFast(url) {
 // Wrapper/player endpoints used by DLStreams pages before the final media URL appears.
 // Supports legacy forms like /stream-123.php and newer forms like /stream/stream-123.php.
 const STREAM_WRAPPER_REGEX = /\/(?:stream|cast|watch|plus|casting|player)\/stream-\d+\.php|\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
+const NOISY_RESOURCE_TYPES = new Set(['image', 'font', 'stylesheet', 'websocket', 'eventsource', 'manifest', 'texttrack']);
+const NOISY_URL_PATTERNS = [
+    'google-analytics',
+    'googletagmanager',
+    'googlesyndication',
+    'doubleclick',
+    'adsbygoogle',
+    'adsco.re',
+    'popads',
+    'onclickads',
+    'trafficjunky',
+    'histats',
+    'yandex.ru',
+    'adsystem',
+    'chatango',
+    'disqus',
+    'font-awesome',
+    'fonts.googleapis',
+    'fonts.gstatic',
+    'gstatic.com/recaptcha',
+    'xadsmart.com'
+];
+
+function shouldAbortNoisyRequest(url, resourceType) {
+    if (!url) return false;
+    if (!isValidStreamUrl(url) && NOISY_RESOURCE_TYPES.has(resourceType)) {
+        return true;
+    }
+    return NOISY_URL_PATTERNS.some(pattern => url.includes(pattern));
+}
 
 function findStreamUrlInText(text) {
     if (!text) return null;
@@ -269,11 +299,7 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
             resultUrl = url;
         }
 
-        if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
-            url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') ||
-            url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') ||
-            url.includes('chatango') || url.includes('disqus') ||
-            ['image', 'font', 'stylesheet'].includes(type)) {
+        if (shouldAbortNoisyRequest(url, type)) {
             return req.abort().catch(() => {});
         }
         req.continue().catch(() => {});
@@ -379,11 +405,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 wrapperUrl = url;
             }
 
-            if (url.includes('google-analytics') || url.includes('doubleclick') || url.includes('adsbygoogle') ||
-                url.includes('popads') || url.includes('onclickads') || url.includes('trafficjunky') || 
-                url.includes('histats') || url.includes('yandex.ru') || url.includes('adsystem') || 
-                url.includes('chatango') || url.includes('disqus') || 
-                ['image', 'font', 'stylesheet'].includes(type)) {
+            if (shouldAbortNoisyRequest(url, type)) {
                 return req.abort().catch(() => {});
             }
             req.continue().catch(() => {});
@@ -478,6 +500,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 const text = document.body.innerText || '';
                 if (text.includes('429 Too Many Requests')) return '429';
                 if (text.includes('404 Page Not Found')) return '404';
+                if (text.includes('Bypass the Block') || text.includes('Will Bypass the Block')) return 'blocked';
                 return 'ok';
             }).catch(() => 'error');
 
@@ -492,6 +515,14 @@ async function extractStreamUrl(page, channelId, options = {}) {
             if (pageState === '404') {
                 console.log('  [!] Channel not found (404)');
                 break;
+            }
+
+            if (pageState === 'blocked' && !rateLimitWait) {
+                console.log('  [!] Block-like page detected. Waiting 10s before retry...');
+                rateLimitWait = true;
+                await new Promise(r => setTimeout(r, 10000));
+                await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+                continue;
             }
 
             const frameSrc = await page.evaluate(() => {
@@ -595,7 +626,12 @@ async function extractStreamUrl(page, channelId, options = {}) {
         failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
     }
 
-    return { streamUrl, ckParam, requestHeaders };
+    return { 
+        streamUrl, 
+        ckParam, 
+        requestHeaders,
+        wrapperDetectedButNoUrl: !streamUrl && wrapperUrl ? true : false
+    };
 }
 
 /**

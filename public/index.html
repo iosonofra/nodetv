@@ -1019,7 +1019,7 @@
                     <span class="setting-label">Concurrency Limit</span>
                     <span class="setting-hint">Maximum number of concurrent pages to run stream scraping. Higher limit requires more CPU and memory but completes faster.</span>
                   </div>
-                  <input type="number" id="setting-dl-concurrency" class="form-input setting-number" min="1" max="25" value="5">
+                  <input type="number" id="setting-dl-concurrency" class="form-input setting-number" min="1" max="25" value="4">
                 </div>
                 <div class="setting-item">
                   <div class="setting-info" style="flex: 1;">
@@ -1081,6 +1081,9 @@
                   </div>
                 </div>
                 <div id="dl-cron-info"
+                  style="margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--color-border-subtle); display: none;">
+                </div>
+                <div id="dl-metrics-info"
                   style="margin-top: var(--space-sm); padding-top: var(--space-sm); border-top: 1px solid var(--color-border-subtle); display: none;">
                 </div>
               </div>

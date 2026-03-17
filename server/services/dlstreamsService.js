@@ -46,12 +46,22 @@ class DlstreamsService {
             nextRun = new Date(this.lastRun.getTime() + (intervalHours * 3600000));
         }
 
+        const history = this.getHistory();
+        const latestRun = history[0] || null;
+        const latestMetrics = latestRun?.metrics || {
+            retriesUsed: 0,
+            retryRecoveredChannels: 0,
+            cooldownActivations: 0,
+            finalFailures: 0
+        };
+
         return {
             isRunning: this.isRunning,
             lastRun: this.lastRun,
-            history: this.getHistory(),
+            history,
+            latestMetrics,
             fileInfo,
-            dlstreamsConcurrencyLimit: currentSettings.dlstreamsConcurrencyLimit || 5,
+            dlstreamsConcurrencyLimit: currentSettings.dlstreamsConcurrencyLimit || 4,
             dlstreamsHoursBefore: currentSettings.dlstreamsHoursBefore ?? 3,
             dlstreamsHoursAfter:  currentSettings.dlstreamsHoursAfter  ?? 3,
             autoRunInfo: {
@@ -100,7 +110,7 @@ class DlstreamsService {
             this.addLog('[*] No categories selected — scraping all events.');
         }
 
-        const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 5;
+        const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 4;
         this.addLog(`[*] Concurrency Limit: ${concurrencyLimit}`);
 
         const hoursBefore = parseInt(currentSettings.dlstreamsHoursBefore) || 3;

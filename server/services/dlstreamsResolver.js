@@ -104,7 +104,9 @@ async function validateStreamUrlFast(url) {
     return false;
 }
 
-const STREAM_WRAPPER_REGEX = /\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
+// Wrapper/player endpoints used by DLStreams pages before the final media URL appears.
+// Supports legacy forms like /stream-123.php and newer forms like /stream/stream-123.php.
+const STREAM_WRAPPER_REGEX = /\/(?:stream|cast|watch|plus|casting|player)\/stream-\d+\.php|\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
 
 function findStreamUrlInText(text) {
     if (!text) return null;
@@ -115,6 +117,30 @@ function findStreamUrlInText(text) {
     const monoMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/mono\.(?:css|csv)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
     if (monoMaybe) return monoMaybe[0];
     return null;
+}
+
+function findWrapperUrlInText(text) {
+    if (!text) return null;
+    const wrapperMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/(?:stream|cast|watch|plus|casting|player)\/stream-\d+\.php(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (wrapperMaybe) return wrapperMaybe[0];
+    const watchMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/watch\.php\?id=\d+(?:[\w\-.:@%?&=\/\+~]*)?/i);
+    if (watchMaybe) return watchMaybe[0];
+    return null;
+}
+
+function buildWrapperCandidates(wrapperUrl) {
+    if (!wrapperUrl || !STREAM_WRAPPER_REGEX.test(wrapperUrl)) return [];
+    const variants = ['stream', 'cast', 'watch', 'plus', 'casting', 'player'];
+    const set = new Set([wrapperUrl]);
+
+    const m = wrapperUrl.match(/\/(stream|cast|watch|plus|casting|player)\/(stream-\d+\.php(?:\?[\w\-.:@%?&=\/\+~]*)?)/i);
+    if (m) {
+        for (const v of variants) {
+            set.add(wrapperUrl.replace(/\/(stream|cast|watch|plus|casting|player)\/(stream-\d+\.php(?:\?[\w\-.:@%?&=\/\+~]*)?)/i, `/${v}/${m[2]}`));
+        }
+    }
+
+    return Array.from(set);
 }
 
 // Cache for failures (channelId -> { timestamp, error })
@@ -498,10 +524,13 @@ async function extractStreamUrl(page, channelId, options = {}) {
         }
         // 3. Diagnostic dump on failure
         if (!streamUrl && wrapperUrl) {
-            const wrapperResolved = await resolveRedirectedStreamUrl(page, wrapperUrl).catch(() => null);
-            if (wrapperResolved && isValidStreamUrl(wrapperResolved)) {
-                console.log(`  [*] Resolved wrapper URL via fallback helper: ${wrapperResolved}`);
-                streamUrl = wrapperResolved;
+            for (const candidate of buildWrapperCandidates(wrapperUrl)) {
+                const wrapperResolved = await resolveRedirectedStreamUrl(page, candidate).catch(() => null);
+                if (wrapperResolved && isValidStreamUrl(wrapperResolved)) {
+                    console.log(`  [*] Resolved wrapper URL via fallback helper: ${wrapperResolved}`);
+                    streamUrl = wrapperResolved;
+                    break;
+                }
             }
         }
 
@@ -538,6 +567,18 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 if (fallback && isValidStreamUrl(fallback)) {
                     console.log(`  [*] Found stream URL in page HTML fallback: ${fallback}`);
                     streamUrl = fallback;
+                } else {
+                    const wrapperFallback = findWrapperUrlInText(html);
+                    if (wrapperFallback && STREAM_WRAPPER_REGEX.test(wrapperFallback)) {
+                        for (const candidate of buildWrapperCandidates(wrapperFallback)) {
+                            const resolvedFromHtml = await resolveRedirectedStreamUrl(page, candidate).catch(() => null);
+                            if (resolvedFromHtml && isValidStreamUrl(resolvedFromHtml)) {
+                                console.log(`  [*] Resolved stream URL from HTML wrapper fallback: ${resolvedFromHtml}`);
+                                streamUrl = resolvedFromHtml;
+                                break;
+                            }
+                        }
+                    }
                 }
             } catch (e) { }
         }

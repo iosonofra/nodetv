@@ -116,7 +116,7 @@ function getDefaultSettings() {
     dlstreamsAutoRun: false,
     dlstreamsInterval: '1',        // hours
     dlstreamsSelectedCategories: [], // empty = scrape all categories
-    dlstreamsConcurrencyLimit: 5,  // default: 5 parallel pages
+    dlstreamsConcurrencyLimit: 4,  // default: 4 parallel pages
     dlstreamsHoursBefore: 3,       // include events that started up to N hours ago
     dlstreamsHoursAfter: 3,        // include events starting in the next N hours
     // Warp Settings

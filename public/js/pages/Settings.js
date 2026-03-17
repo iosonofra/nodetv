@@ -1096,10 +1096,10 @@ class SettingsPage {
 
         if (saveBtn) saveBtn.disabled = true;
 
-        let concurrency = 5;
+        let concurrency = 4;
         if (concurrencyInput) {
             concurrency = parseInt(concurrencyInput.value, 10);
-            if (isNaN(concurrency) || concurrency < 1) concurrency = 5;
+            if (isNaN(concurrency) || concurrency < 1) concurrency = 4;
         }
 
         let hoursBefore = 3;
@@ -1152,6 +1152,7 @@ class SettingsPage {
             const spinner = document.getElementById('dl-loading-spinner');
             const runBtn = document.getElementById('dl-run-scraper');
             const fileInfoContainer = document.getElementById('dl-file-info');
+            const metricsInfo = document.getElementById('dl-metrics-info');
 
             if (statusText) {
                 statusText.textContent = status.isRunning ? 'Running' : 'Idle';
@@ -1194,6 +1195,32 @@ class SettingsPage {
                     fileInfoContainer.style.display = 'block';
                     const actions = document.getElementById('dl-file-actions');
                     if (actions) actions.style.display = 'none';
+                }
+            }
+
+            if (metricsInfo) {
+                const m = status.latestMetrics || null;
+                if (m) {
+                    const finalFailures = m.finalFailures ?? 0;
+                    const healthLabel = finalFailures > 0 ? 'DEGRADED' : 'HEALTHY';
+                    const healthBg = finalFailures > 0 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.12)';
+                    const healthColor = finalFailures > 0 ? 'var(--color-error)' : '#22c55e';
+
+                    metricsInfo.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span class="hint" style="font-size: 0.78rem;">Latest Run Health</span>
+                            <span style="font-size: 0.68rem; font-weight: 700; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 999px; background: ${healthBg}; color: ${healthColor}; border: 1px solid ${healthColor};">${healthLabel}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; font-size: 0.8rem;">
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Retries Used:</span><span style="font-weight: 600;">${m.retriesUsed ?? 0}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Retry Recovered:</span><span style="font-weight: 600; color: var(--color-accent);">${m.retryRecoveredChannels ?? 0}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Cooldowns:</span><span style="font-weight: 600;">${m.cooldownActivations ?? 0}</span></div>
+                            <div style="display: flex; justify-content: space-between;"><span class="hint">Final Failures:</span><span style="font-weight: 600; color: ${finalFailures > 0 ? 'var(--color-error)' : 'var(--color-text-primary)'};">${finalFailures}</span></div>
+                        </div>
+                    `;
+                    metricsInfo.style.display = 'block';
+                } else {
+                    metricsInfo.style.display = 'none';
                 }
             }
 
@@ -1306,6 +1333,7 @@ class SettingsPage {
                                 ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
                             </div>
                             <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
+                            ${item.metrics ? `<div class="hint" style="font-size: 0.72rem;">Retries: ${item.metrics.retriesUsed ?? 0} | Recovered: ${item.metrics.retryRecoveredChannels ?? 0} | Cooldowns: ${item.metrics.cooldownActivations ?? 0} | Final Failures: ${item.metrics.finalFailures ?? 0}</div>` : ''}
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                             <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">

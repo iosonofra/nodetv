@@ -272,8 +272,30 @@ async function scrape() {
         console.log(`[*] Flattened into ${tasks.length} active channel tasks.`);
 
         // Worker Pool logic
-        const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY || '8', 10);
+        const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY || '4', 10);
+        const maxRetries = parseInt(process.env.SCRAPER_RETRY_COUNT || '1', 10);
+        const retryMinDelayMs = parseInt(process.env.SCRAPER_RETRY_MIN_DELAY_MS || '2000', 10);
+        const retryMaxDelayMs = parseInt(process.env.SCRAPER_RETRY_MAX_DELAY_MS || '6000', 10);
+        const backoffTriggerFailures = parseInt(process.env.SCRAPER_BACKOFF_TRIGGER_FAILURES || '3', 10);
+        const backoffMinMs = parseInt(process.env.SCRAPER_BACKOFF_MIN_MS || '10000', 10);
+        const backoffMaxMs = parseInt(process.env.SCRAPER_BACKOFF_MAX_MS || '20000', 10);
+
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        const randomBetween = (min, max) => {
+            if (max <= min) return min;
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        };
+
+        let consecutiveFailures = 0;
+        let globalCooldownUntil = 0;
+        let retryAttemptsUsed = 0;
+        let retryRecoveredChannels = 0;
+        let cooldownActivations = 0;
+        let channelsFailedFinal = 0;
+
         console.log(`[*] Proceeding with concurrency limit: ${concurrencyLimit}`);
+        console.log(`[*] Retry policy: ${maxRetries} retry, jitter ${retryMinDelayMs}-${retryMaxDelayMs}ms.`);
+        console.log(`[*] Backoff policy: trigger ${backoffTriggerFailures} fails, cooldown ${backoffMinMs}-${backoffMaxMs}ms.`);
         
         let completedChannels = 0;
         let activeWorkers = 0;
@@ -290,6 +312,12 @@ async function scrape() {
             while (taskIndex < tasks.length) {
                 const currentTaskIndex = taskIndex++;
                 const { event, channel } = tasks[currentTaskIndex];
+
+                const cooldownLeft = globalCooldownUntil - Date.now();
+                if (cooldownLeft > 0) {
+                    console.log(`[Worker ${workerId}] [*] Global cooldown active (${cooldownLeft}ms), waiting...`);
+                    await sleep(cooldownLeft);
+                }
                 
                 try {
                     let streamUrl, ckParam;
@@ -302,13 +330,35 @@ async function scrape() {
                         ckParam = cached.ckParam;
                     } else {
                         console.log(`[Worker ${workerId}] [${completedChannels + 1}/${tasks.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
-                        const result = await extractStreamUrl(page, channel.id);
-                        streamUrl = result.streamUrl;
-                        ckParam = result.ckParam;
-                        processedChannels.set(channel.id, { streamUrl, ckParam });
+                        let resolvedAfterRetry = false;
+                        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                            const result = await extractStreamUrl(page, channel.id, { forceRefresh: attempt > 0 });
+                            streamUrl = result.streamUrl;
+                            ckParam = result.ckParam;
+                            if (streamUrl) {
+                                if (attempt > 0) resolvedAfterRetry = true;
+                                break;
+                            }
+
+                            if (attempt < maxRetries) {
+                                const retryDelay = randomBetween(retryMinDelayMs, retryMaxDelayMs);
+                                retryAttemptsUsed++;
+                                console.log(`  [Worker ${workerId}] [!] Retry ${attempt + 1}/${maxRetries} for channel ${channel.id} in ${retryDelay}ms...`);
+                                await sleep(retryDelay);
+                            }
+                        }
+
+                        if (resolvedAfterRetry) {
+                            retryRecoveredChannels++;
+                        }
+
+                        if (streamUrl) {
+                            processedChannels.set(channel.id, { streamUrl, ckParam });
+                        }
                     }
 
                     if (streamUrl) {
+                        consecutiveFailures = 0;
                         let finalUrl = streamUrl;
 
                         // Handle chrome-extension wrapper
@@ -368,9 +418,27 @@ async function scrape() {
                         console.log(`  [Worker ${workerId}] [v] Successfully added channel.`);
                     } else {
                         console.log(`  [Worker ${workerId}] [-] No stream URL found for channel ${channel.name} (ID: ${channel.id})`);
+                        channelsFailedFinal++;
+                        consecutiveFailures++;
+                        if (consecutiveFailures >= backoffTriggerFailures) {
+                            const cooldownMs = randomBetween(backoffMinMs, backoffMaxMs);
+                            globalCooldownUntil = Date.now() + cooldownMs;
+                            consecutiveFailures = 0;
+                            cooldownActivations++;
+                            console.log(`  [Worker ${workerId}] [!] High failure rate detected, applying global cooldown for ${cooldownMs}ms.`);
+                        }
                     }
                 } catch (e) {
                     console.error(`  [Worker ${workerId}] [!] Error extracting channel ${channel.name} (ID: ${channel.id}): ${e.message}`);
+                    channelsFailedFinal++;
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= backoffTriggerFailures) {
+                        const cooldownMs = randomBetween(backoffMinMs, backoffMaxMs);
+                        globalCooldownUntil = Date.now() + cooldownMs;
+                        consecutiveFailures = 0;
+                        cooldownActivations++;
+                        console.log(`  [Worker ${workerId}] [!] Error burst detected, applying global cooldown for ${cooldownMs}ms.`);
+                    }
                 }
                 
                 completedChannels++;
@@ -394,6 +462,8 @@ async function scrape() {
             console.log(`[*] Saved empty playlist to: ${PLAYLIST_FILE}`);
         }
 
+        console.log(`[*] Runtime metrics: retries_used=${retryAttemptsUsed}, retry_recovered=${retryRecoveredChannels}, cooldowns=${cooldownActivations}, final_failures=${channelsFailedFinal}`);
+
         // Save History
         const duration = Math.floor((Date.now() - startTime) / 1000);
         let count = 0;
@@ -405,7 +475,13 @@ async function scrape() {
             type: runType,
             duration: duration,
             channelsCount: count,
-            message: `Generated ${count} channels from ${events.length} events.`
+            metrics: {
+                retriesUsed: retryAttemptsUsed,
+                retryRecoveredChannels,
+                cooldownActivations,
+                finalFailures: channelsFailedFinal
+            },
+            message: `Generated ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}.`
         };
 
         updateHistory(runData);

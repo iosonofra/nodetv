@@ -159,16 +159,10 @@ const NOISY_URL_PATTERNS = [
     'fonts.gstatic',
     'gstatic.com/recaptcha',
     'xadsmart.com',
-    // Cloudflare/CDN patterns (aggressive blocking)
+    // Cloudflare challenge endpoints (specific)
     'challenge-platform',
     'challenges.cloudflare',
     'cdn-cgi',
-    'cloudflare',
-    '/cdn/',
-    '/static/',
-    'ajax.googleapis.com',
-    'maxcdn',
-    'cloudflare-static',
     // Ad networks & trackers
     'rubiconproject',
     'openx.net',
@@ -187,10 +181,25 @@ const NOISY_URL_PATTERNS = [
 
 function shouldAbortNoisyRequest(url, resourceType) {
     if (!url) return false;
+
+    const lowerUrl = String(url).toLowerCase();
+    const isSameSite = /https?:\/\/([^\/]+\.)?dlstreams\.top/i.test(lowerUrl);
+
     if (!isValidStreamUrl(url) && NOISY_RESOURCE_TYPES.has(resourceType)) {
         return true;
     }
-    return NOISY_URL_PATTERNS.some(pattern => url.includes(pattern));
+
+    if (!NOISY_URL_PATTERNS.some(pattern => lowerUrl.includes(pattern))) {
+        return false;
+    }
+
+    // Never block same-site script/xhr/fetch resources by URL-pattern only.
+    // They can be required to build the final iframe or stream URL.
+    if (isSameSite && !NOISY_RESOURCE_TYPES.has(resourceType)) {
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -297,6 +306,25 @@ function findStreamUrlInText(text) {
     // Fallback: DLStreams-specific mono.css / mono.csv disguised streams
     const monoMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/mono\.(?:css|csv)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
     if (monoMaybe) return monoMaybe[0];
+
+    // Common inline-JS patterns used by players.
+    const jsPatterns = [
+        /(?:file|source|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.(?:m3u8|mpd)(?:\?[^"']*)?)["']/i,
+        /hls\.loadSource\(\s*["'](https?:\/\/[^"']+\.(?:m3u8)(?:\?[^"']*)?)["']\s*\)/i,
+        /dashjs\.[\w.]+\(\s*["'](https?:\/\/[^"']+\.(?:mpd)(?:\?[^"']*)?)["']\s*\)/i
+    ];
+    for (const rx of jsPatterns) {
+        const m = text.match(rx);
+        if (m && m[1]) return m[1];
+    }
+
+    // Sometimes links are escaped in inline JSON/JS.
+    const unescaped = text.replace(/\\\//g, '/');
+    if (unescaped !== text) {
+        const escMaybe = unescaped.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\.(?:m3u8|mpd)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+        if (escMaybe) return escMaybe[0];
+    }
+
     return null;
 }
 
@@ -679,7 +707,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
         let poll = 0;
         let rateLimitWait = false;
 
-        while (!streamUrl && poll < 12) {
+        while (!streamUrl && poll < 24) {
             const pageState = await page.evaluate(() => {
                 const text = document.body.innerText || '';
                 const html = document.documentElement.outerHTML || '';
@@ -727,7 +755,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
             await checkFrames();
             if (streamUrl) break;
 
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 700));
             poll++;
 
             if (poll === 5) {
@@ -794,6 +822,19 @@ async function extractStreamUrl(page, channelId, options = {}) {
                     console.log(`  [*] Found stream URL in page HTML fallback: ${fallback}`);
                     streamUrl = fallback;
                 } else {
+                    // Extra fallback: scan inline scripts text content
+                    const scriptInline = await page.evaluate(() => {
+                        return Array.from(document.scripts || [])
+                            .map(s => s && s.textContent ? s.textContent : '')
+                            .join('\n');
+                    }).catch(() => '');
+
+                    const scriptFallback = findStreamUrlInText(scriptInline);
+                    if (scriptFallback && isValidStreamUrl(scriptFallback)) {
+                        console.log(`  [*] Found stream URL in inline scripts fallback: ${scriptFallback}`);
+                        streamUrl = scriptFallback;
+                    }
+
                     const wrapperFallback = findWrapperUrlInText(html);
                     if (wrapperFallback && STREAM_WRAPPER_REGEX.test(wrapperFallback)) {
                         for (const candidate of buildWrapperCandidates(wrapperFallback)) {

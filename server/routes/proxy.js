@@ -1040,9 +1040,31 @@ router.get('/stream', async (req, res) => {
                 const buffer = Buffer.concat(chunks);
                 const finalUrl = response.url || url;
                 console.log(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
-                res.set('Content-Type', 'application/vnd.apple.mpegurl');
-
                 let manifest = buffer.toString('utf-8');
+
+                // Sanity-check HLS manifests. Some anti-bot endpoints return syntactically
+                // valid playlists that point mostly/all segments to image assets (.png/.jpg),
+                // which later crash the media pipeline.
+                const manifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
+                const uriLines = manifestLines.filter(l => !l.startsWith('#'));
+                const hasExtinf = manifestLines.some(l => l.startsWith('#EXTINF'));
+                const imageUriCount = uriLines.filter(l => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(l)).length;
+                const mediaUriCount = uriLines.filter(l => /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$)/i.test(l)).length;
+                const suspiciousImagePlaylist = hasExtinf && (
+                    (imageUriCount > 0 && mediaUriCount === 0) ||
+                    (imageUriCount >= 2 && imageUriCount > mediaUriCount)
+                );
+
+                if (suspiciousImagePlaylist) {
+                    console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);
+                    return res.status(502).json({
+                        error: 'Upstream returned invalid HLS playlist',
+                        reason: 'playlist contains image segments instead of media segments',
+                        url: finalUrl
+                    });
+                }
+
+                res.set('Content-Type', 'application/vnd.apple.mpegurl');
 
                 const finalUrlObj = new URL(finalUrl);
                 const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);

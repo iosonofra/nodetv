@@ -763,7 +763,9 @@ async function extractStreamUrl(page, channelId, options = {}) {
     const cached = urlCache.get(channelId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
         if (isValidStreamUrl(cached.streamUrl)) {
-            if (validateCache) {
+            // mono.css URLs are dynamic: always validate on cache hit to catch stale entries
+            const isCachedMono = /\/mono\.(css|csv)(\?|$)/i.test((cached.streamUrl || '').split('#')[0]);
+            if (validateCache || isCachedMono) {
                 const isAlive = await validateStreamUrlFast(cached.streamUrl);
                 if (!isAlive) {
                     console.log(`  [*] Cache URL validation failed for channel ${channelId}; forcing fresh resolve.`);

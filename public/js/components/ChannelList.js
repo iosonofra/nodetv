@@ -1249,6 +1249,37 @@ class ChannelList {
         } else if (window.app?.player) {
             // Default to HLS Player for .m3u8 and raw .ts
             window.app.player.play(channel, streamUrl);
+
+            // For DLStreams mono.css: if HLS fails to parse the manifest (server returned HTML
+            // instead of M3U8), force a fresh resolve and replay once automatically.
+            const isMonoCssStream = streamUrl && /\/mono\.(css|csv)/i.test(streamUrl);
+            if (isMonoCssStream && dlChannelId) {
+                const hlsPlayer = window.app.player.hls;
+                const HLS_ERROR_EVENT = window.Hls?.Events?.ERROR ?? 'hlsError';
+                if (hlsPlayer && typeof hlsPlayer.on === 'function') {
+                    const onManifestError = async (event, data) => {
+                        if (!data.fatal) return;
+                        if (data.details !== 'manifestParsingError' && data.details !== 'manifestLoadError') return;
+                        if (channel._monoRetried) return;
+                        channel._monoRetried = true;
+                        hlsPlayer.off(HLS_ERROR_EVENT, onManifestError);
+                        console.warn('[ChannelList] mono.css manifest parse failed, forcing re-resolve...');
+                        try {
+                            const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?forceRefresh=true`);
+                            if (!res.ok) return;
+                            const resolved = await res.json();
+                            if (!resolved.streamUrl) return;
+                            let freshUrl = resolved.streamUrl;
+                            if (!freshUrl.includes('.m3u8') && !freshUrl.includes('.mpd')) freshUrl += '#.m3u8';
+                            console.log('[ChannelList] Re-resolving with fresh URL:', freshUrl.substring(0, 80));
+                            window.app.player.play(channel, freshUrl);
+                        } catch (e) {
+                            console.error('[ChannelList] mono.css force re-resolve failed:', e.message);
+                        }
+                    };
+                    hlsPlayer.on(HLS_ERROR_EVENT, onManifestError);
+                }
+            }
         }
     }
 

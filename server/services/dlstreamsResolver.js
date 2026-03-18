@@ -138,6 +138,7 @@ async function validateStreamUrlFast(url) {
 // Wrapper/player endpoints used by DLStreams pages before the final media URL appears.
 // Supports legacy forms like /stream-123.php and newer forms like /stream/stream-123.php.
 const STREAM_WRAPPER_REGEX = /\/(?:stream|cast|watch|plus|casting|player)\/stream-\d+\.php|\/stream(?:-|\.)\d*\.php|\/stream\.php|\/watch\.php\?id=/i;
+const PREMIUMTV_WRAPPER_REGEX = /\/premiumtv\/daddyhd\.php\?id=\d+/i;
 const NOISY_RESOURCE_TYPES = new Set(['image', 'font', 'stylesheet', 'websocket', 'eventsource', 'manifest', 'texttrack']);
 const NOISY_URL_PATTERNS = [
     'google-analytics',
@@ -337,6 +338,168 @@ function findWrapperUrlInText(text) {
     return null;
 }
 
+function findPremiumTvUrlInText(text, baseUrl = null) {
+    if (!text) return null;
+
+    const absMatch = text.match(/https?:\/\/[^"'\s<>]+\/premiumtv\/daddyhd\.php\?id=\d+(?:[^"'\s<>]*)?/i);
+    if (absMatch) return absMatch[0];
+
+    const relMatch = text.match(/["']([^"']*\/premiumtv\/daddyhd\.php\?id=\d+[^"']*)["']/i);
+    if (!relMatch || !relMatch[1]) return null;
+
+    try {
+        if (baseUrl) {
+            return new URL(relMatch[1], baseUrl).href;
+        }
+        return relMatch[1];
+    } catch (_) {
+        return relMatch[1];
+    }
+}
+
+function isResolvableIntermediateUrl(url) {
+    if (!url) return false;
+    return STREAM_WRAPPER_REGEX.test(url) || PREMIUMTV_WRAPPER_REGEX.test(url);
+}
+
+function decodeEscapedUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    return url
+        .replace(/\\u002F/gi, '/')
+        .replace(/\\\//g, '/')
+        .replace(/&amp;/gi, '&')
+        .trim();
+}
+
+function extractChromeBlockedReloadUrl(text) {
+    if (!text) return null;
+
+    const reloadMatch = text.match(/"reloadUrl"\s*:\s*"(https?:[^"\\]+(?:\\.[^"\\]*)*)"/i);
+    if (reloadMatch && reloadMatch[1]) {
+        return decodeEscapedUrl(reloadMatch[1]);
+    }
+
+    const dataUrlMatch = text.match(/data-url\s*=\s*"(https?:[^"\\]+(?:\\.[^"\\]*)*)"/i);
+    if (dataUrlMatch && dataUrlMatch[1]) {
+        return decodeEscapedUrl(dataUrlMatch[1]);
+    }
+
+    return null;
+}
+
+async function resolvePremiumLookupFlow(pageHtml, pageUrl, refererUrl = null) {
+    if (!pageHtml || !pageUrl) return null;
+
+    const keyMatch = pageHtml.match(/CHANNEL_KEY\s*=\s*['\"]([^'\"]+)['\"]/i);
+    const serverMatch = pageHtml.match(/M3U8_SERVER\s*=\s*['\"]([^'\"]+)['\"]/i);
+    if (!keyMatch || !serverMatch) return null;
+
+    const channelKey = String(keyMatch[1] || '').trim();
+    const m3u8Server = String(serverMatch[1] || '').trim();
+    if (!channelKey || !m3u8Server) return null;
+
+    const lookupUrl = `https://${m3u8Server}/server_lookup?channel_id=${encodeURIComponent(channelKey)}`;
+
+    let pageOrigin = BASE_URL;
+    try {
+        pageOrigin = new URL(pageUrl).origin;
+    } catch (_) {}
+
+    let serverKey = null;
+    try {
+        const lookupResp = await fetch(lookupUrl, {
+            method: 'GET',
+            headers: {
+                'User-Agent': getRandomUA(),
+                'Accept': 'application/json,text/plain,*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': refererUrl || pageUrl,
+                'Origin': pageOrigin,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            agent: lookupUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+            timeout: 18000
+        });
+
+        const lookupJson = await lookupResp.json().catch(() => null);
+        serverKey = lookupJson && lookupJson.server_key ? String(lookupJson.server_key).trim() : null;
+    } catch (_) {
+        return null;
+    }
+
+    if (!serverKey) return null;
+
+    const monoUrl = serverKey === 'top1/cdn'
+        ? `https://${m3u8Server}/proxy/top1/cdn/${channelKey}/mono.css`
+        : `https://${m3u8Server}/proxy/${serverKey}/${channelKey}/mono.css`;
+
+    if (!isValidStreamUrl(monoUrl)) return null;
+
+    return monoUrl;
+}
+
+async function resolveViaHttpProbe(candidateUrl, visited = new Set(), refererUrl = null) {
+    if (!candidateUrl || visited.has(candidateUrl) || visited.size > 8) {
+        return null;
+    }
+    visited.add(candidateUrl);
+
+    if (isValidStreamUrl(candidateUrl)) return candidateUrl;
+
+    let origin = BASE_URL;
+    try {
+        origin = new URL(refererUrl || candidateUrl).origin;
+    } catch (_) {}
+
+    const headers = {
+        'User-Agent': getRandomUA(),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': refererUrl || `${BASE_URL}/`,
+        'Origin': origin
+    };
+
+    let body = '';
+    let finalUrl = candidateUrl;
+    try {
+        const response = await fetch(candidateUrl, {
+            method: 'GET',
+            headers,
+            redirect: 'follow',
+            timeout: 18000,
+            agent: candidateUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent
+        });
+
+        finalUrl = response && response.url ? response.url : candidateUrl;
+        if (isValidStreamUrl(finalUrl)) return finalUrl;
+
+        body = await response.text();
+    } catch (_) {
+        return null;
+    }
+
+    const mediaInBody = findStreamUrlInText(body);
+    if (mediaInBody && isValidStreamUrl(mediaInBody)) {
+        return mediaInBody;
+    }
+
+    const premiumResolved = await resolvePremiumLookupFlow(body, finalUrl, refererUrl || candidateUrl).catch(() => null);
+    if (premiumResolved && isValidStreamUrl(premiumResolved)) {
+        return premiumResolved;
+    }
+
+    const nextCandidate =
+        findWrapperUrlInText(body) ||
+        findPremiumTvUrlInText(body, finalUrl) ||
+        extractChromeBlockedReloadUrl(body);
+
+    if (nextCandidate && !visited.has(nextCandidate)) {
+        return resolveViaHttpProbe(nextCandidate, visited, finalUrl);
+    }
+
+    return null;
+}
+
 function buildWrapperCandidates(wrapperUrl) {
     if (!wrapperUrl || !STREAM_WRAPPER_REGEX.test(wrapperUrl)) return [];
     const variants = ['stream', 'cast', 'watch', 'plus', 'casting', 'player'];
@@ -470,7 +633,7 @@ function getLaunchOptions() {
     return opts;
 }
 
-async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set()) {
+async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(), refererUrl = null) {
     if (!candidateUrl || visited.has(candidateUrl) || visited.size > 6) {
         return null;
     }
@@ -480,8 +643,15 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
         return candidateUrl;
     }
 
-    if (!STREAM_WRAPPER_REGEX.test(candidateUrl)) {
+    if (!isResolvableIntermediateUrl(candidateUrl)) {
         return null;
+    }
+
+    if (PREMIUMTV_WRAPPER_REGEX.test(candidateUrl)) {
+        const httpResolved = await resolveViaHttpProbe(candidateUrl, new Set(visited), refererUrl || `${BASE_URL}/`).catch(() => null);
+        if (httpResolved && isValidStreamUrl(httpResolved)) {
+            return httpResolved;
+        }
     }
 
     let resultUrl = null;
@@ -512,17 +682,66 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
     page.on('request', requestHandler);
     page.on('console', consoleHandler);
     try {
+        if (refererUrl) {
+            let origin = BASE_URL;
+            try {
+                origin = new URL(refererUrl).origin;
+            } catch (_) {}
+            await page.setExtraHTTPHeaders({
+                'Referer': refererUrl,
+                'Origin': origin,
+                'Accept-Language': 'en-US,en;q=0.9'
+            }).catch(() => {});
+        }
+
         await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
 
         if (!resultUrl) {
             try {
                 const content = await page.content();
                 resultUrl = findStreamUrlInText(content);
+
+                if (!resultUrl) {
+                    const nestedCandidate =
+                        findWrapperUrlInText(content) ||
+                        findPremiumTvUrlInText(content, fallbackUrl);
+
+                    if (nestedCandidate && !visited.has(nestedCandidate)) {
+                        const nestedResolved = await resolveRedirectedStreamUrl(page, nestedCandidate, visited, fallbackUrl);
+                        if (nestedResolved) {
+                            resultUrl = nestedResolved;
+                        }
+                    }
+                }
             } catch (e) {}
         }
 
-        if (resultUrl && STREAM_WRAPPER_REGEX.test(resultUrl)) {
-            const nested = await resolveRedirectedStreamUrl(page, resultUrl, visited);
+        if (!resultUrl) {
+            try {
+                for (const frame of page.frames()) {
+                    const frameUrl = frame.url();
+                    if (!frameUrl || frameUrl.includes('about:blank')) continue;
+
+                    if (isValidStreamUrl(frameUrl)) {
+                        resultUrl = frameUrl;
+                        break;
+                    }
+
+                    if (isResolvableIntermediateUrl(frameUrl) && !visited.has(frameUrl)) {
+                        const nestedFromFrame = await resolveRedirectedStreamUrl(page, frameUrl, visited, fallbackUrl);
+                        if (nestedFromFrame) {
+                            resultUrl = nestedFromFrame;
+                            break;
+                        }
+                    }
+                }
+            } catch (_) {
+                // ignore frame traversal errors
+            }
+        }
+
+        if (resultUrl && isResolvableIntermediateUrl(resultUrl)) {
+            const nested = await resolveRedirectedStreamUrl(page, resultUrl, visited, fallbackUrl);
             if (nested) resultUrl = nested;
         }
     } catch (_) {
@@ -613,7 +832,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
                         if (parts.length > 1) ckParam = parts[1].split('&')[0];
                     } catch (e) { }
                 }
-            } else if (!wrapperUrl && STREAM_WRAPPER_REGEX.test(url)) {
+            } else if (!wrapperUrl && isResolvableIntermediateUrl(url)) {
                 wrapperUrl = url;
             }
 
@@ -670,8 +889,30 @@ async function extractStreamUrl(page, channelId, options = {}) {
                         streamUrl = src;
                         break;
                     }
-                    if (!wrapperUrl && STREAM_WRAPPER_REGEX.test(src)) {
+                    if (!wrapperUrl && isResolvableIntermediateUrl(src)) {
                         wrapperUrl = src;
+                    }
+
+                    // Deep same-origin frame scan: parse frame HTML for hidden stream/wrapper links.
+                    // Many providers inject URLs inside inline scripts rather than issuing direct media requests.
+                    let frameHtml = null;
+                    try {
+                        frameHtml = await frame.content();
+                    } catch (_) {
+                        frameHtml = null;
+                    }
+
+                    if (frameHtml) {
+                        const frameMedia = findStreamUrlInText(frameHtml);
+                        if (!streamUrl && frameMedia && isValidStreamUrl(frameMedia)) {
+                            streamUrl = frameMedia;
+                            break;
+                        }
+
+                        const frameWrapper = findWrapperUrlInText(frameHtml) || findPremiumTvUrlInText(frameHtml, src);
+                        if (!wrapperUrl && frameWrapper && isResolvableIntermediateUrl(frameWrapper)) {
+                            wrapperUrl = frameWrapper;
+                        }
                     }
                 } catch (e) {}
             }
@@ -765,10 +1006,49 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 } catch (e) {}
             }
         }
-        // 3. Diagnostic dump on failure
+        // 3a. Fallback: try all player button variants by switching iframe src in-page
+        if (!streamUrl) {
+            try {
+                const playerButtons = await page.evaluate(() => {
+                    return Array.from(document.querySelectorAll('.player-btn[data-url]'))
+                        .map(b => b.getAttribute('data-url'))
+                        .filter(Boolean);
+                }).catch(() => []);
+
+                const candidates = Array.from(new Set([
+                    ...(wrapperUrl ? buildWrapperCandidates(wrapperUrl) : []),
+                    ...playerButtons
+                ])).filter(u => isResolvableIntermediateUrl(u));
+
+                for (const candidate of candidates) {
+                    if (streamUrl) break;
+
+                    // Mimic user switching player variant from the watch page.
+                    await page.evaluate((u) => {
+                        const ifr = document.querySelector('#playerFrame');
+                        if (ifr) ifr.src = u;
+                    }, candidate).catch(() => {});
+
+                    await new Promise(r => setTimeout(r, 1800));
+                    await checkFrames();
+                    if (streamUrl) break;
+
+                    const resolvedVariant = await resolveRedirectedStreamUrl(page, candidate, new Set(), playerUrl).catch(() => null);
+                    if (resolvedVariant && isValidStreamUrl(resolvedVariant)) {
+                        console.log(`  [*] Resolved via player variant fallback: ${resolvedVariant}`);
+                        streamUrl = resolvedVariant;
+                        break;
+                    }
+                }
+            } catch (_) {
+                // ignore fallback errors
+            }
+        }
+
+        // 3b. Diagnostic dump on failure
         if (!streamUrl && wrapperUrl) {
             for (const candidate of buildWrapperCandidates(wrapperUrl)) {
-                const wrapperResolved = await resolveRedirectedStreamUrl(page, candidate).catch(() => null);
+                const wrapperResolved = await resolveRedirectedStreamUrl(page, candidate, new Set(), playerUrl).catch(() => null);
                 if (wrapperResolved && isValidStreamUrl(wrapperResolved)) {
                     console.log(`  [*] Resolved wrapper URL via fallback helper: ${wrapperResolved}`);
                     streamUrl = wrapperResolved;
@@ -803,7 +1083,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
 
         if (streamUrl && !isValidStreamUrl(streamUrl)) {
             // Follow potential wrapper pages like stream-xxx.php / watch.php
-            const resolved = await resolveRedirectedStreamUrl(page, streamUrl).catch(() => null);
+            const resolved = await resolveRedirectedStreamUrl(page, streamUrl, new Set(), playerUrl).catch(() => null);
             if (resolved && isValidStreamUrl(resolved)) {
                 console.log(`  [*] Resolved wrapper URL to actual stream URL: ${resolved}`);
                 streamUrl = resolved;
@@ -836,14 +1116,29 @@ async function extractStreamUrl(page, channelId, options = {}) {
                     }
 
                     const wrapperFallback = findWrapperUrlInText(html);
-                    if (wrapperFallback && STREAM_WRAPPER_REGEX.test(wrapperFallback)) {
-                        for (const candidate of buildWrapperCandidates(wrapperFallback)) {
-                            const resolvedFromHtml = await resolveRedirectedStreamUrl(page, candidate).catch(() => null);
+                    const premiumTvFallback = findPremiumTvUrlInText(html, playerUrl);
+                    const blockedReloadFallback = extractChromeBlockedReloadUrl(html);
+                    const wrapperOrPremium = wrapperFallback || premiumTvFallback || blockedReloadFallback;
+                    if (wrapperOrPremium && isResolvableIntermediateUrl(wrapperOrPremium)) {
+                        const fallbackCandidates = STREAM_WRAPPER_REGEX.test(wrapperOrPremium)
+                            ? buildWrapperCandidates(wrapperOrPremium)
+                            : [wrapperOrPremium];
+
+                        for (const candidate of fallbackCandidates) {
+                            const resolvedFromHtml = await resolveRedirectedStreamUrl(page, candidate, new Set(), playerUrl).catch(() => null);
                             if (resolvedFromHtml && isValidStreamUrl(resolvedFromHtml)) {
                                 console.log(`  [*] Resolved stream URL from HTML wrapper fallback: ${resolvedFromHtml}`);
                                 streamUrl = resolvedFromHtml;
                                 break;
                             }
+                        }
+                    }
+
+                    if (!streamUrl && blockedReloadFallback && isResolvableIntermediateUrl(blockedReloadFallback)) {
+                        const httpResolved = await resolveViaHttpProbe(blockedReloadFallback, new Set(), playerUrl).catch(() => null);
+                        if (httpResolved && isValidStreamUrl(httpResolved)) {
+                            console.log(`  [*] Resolved stream URL via HTTP probe fallback: ${httpResolved}`);
+                            streamUrl = httpResolved;
                         }
                     }
                 }

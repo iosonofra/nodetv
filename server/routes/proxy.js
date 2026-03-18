@@ -1079,8 +1079,10 @@ router.get('/stream', async (req, res) => {
             const firstChunk = Buffer.from(first.value);
 
             // Peek at first bytes to check for HLS manifest ({ #EXTM3U })
-            const textPrefix = firstChunk.subarray(0, 7).toString('utf8');
-            const contentLooksLikeHls = textPrefix === '#EXTM3U';
+            const firstChunkText = firstChunk.toString('utf8');
+            const contentLooksLikeHls =
+                firstChunkText.trimStart().startsWith('#EXTM3U') ||
+                (isManifestRequest && /mpegurl|vnd\.apple\.mpegurl|x-mpegurl/i.test(contentType));
 
             if (contentLooksLikeHls) {
                 // HLS Manifest: We must read the WHOLE manifest to rewrite it

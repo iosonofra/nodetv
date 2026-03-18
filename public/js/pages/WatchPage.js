@@ -362,6 +362,7 @@ class WatchPage {
     async loadVideo(url) {
         // Store the URL for copy functionality
         this.currentUrl = url;
+        this._monoRetryDone = false;
 
         // Stop any existing playback
         this.stop();
@@ -491,21 +492,38 @@ class WatchPage {
         }
 
         // Determine if proxy is needed
-        const proxyRequiredDomains = ['pluto.tv'];
+        const proxyRequiredDomains = ['pluto.tv', 'dlstreams.top', 'the-sunmoon.site', 'zhdcdn.zip', 'hhkys.com'];
         const isPageHttps = window.location.protocol === 'https:';
         const isUrlHttp = url.startsWith('http:');
         const needsProxy = settings.forceProxy ||
             (isPageHttps && isUrlHttp) ||
             proxyRequiredDomains.some(domain => url.includes(domain));
-        const finalUrl = needsProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
+        const sourceId = this.content?.sourceId;
+        const finalUrl = needsProxy
+            ? `/api/proxy/stream?url=${encodeURIComponent(url)}${sourceId ? `&sourceId=${sourceId}` : ''}`
+            : url;
 
         console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls, isPageHttps, isUrlHttp });
 
 
         // Use HLS.js for HLS streams
-        if (looksLikeHls && Hls.isSupported()) {
+        if (looksLikeHls && window.Hls && Hls.isSupported()) {
             this.updateTranscodeStatus('direct', 'Direct HLS');
             this.playHls(finalUrl);
+        } else if (looksLikeHls) {
+            const canPlayNativeHls = !!this.video?.canPlayType?.('application/vnd.apple.mpegurl');
+            if (canPlayNativeHls) {
+                this.updateTranscodeStatus('direct', 'Direct HLS');
+                this.video.src = finalUrl;
+                this.video.play().catch(e => {
+                    if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
+                });
+            } else {
+                this.updateTranscodeStatus('error', 'HLS Unsupported');
+                console.error('[WatchPage] HLS stream detected but Hls.js is unavailable and native HLS is not supported');
+                this.hideLoading();
+                return;
+            }
         } else {
             // Direct playback for mp4/mkv/avi
             this.updateTranscodeStatus('direct', 'Direct Play');
@@ -556,6 +574,29 @@ class WatchPage {
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (data.fatal) {
                 console.error('[WatchPage] HLS fatal error:', data);
+
+                const isManifestIssue = data.details === 'manifestLoadError' || data.details === 'manifestParsingError';
+                const monoMatch = (this.currentUrl || '').match(/premium(\d+)/i);
+                const monoChannelId = monoMatch && monoMatch[1] ? monoMatch[1] : null;
+
+                if (isManifestIssue && monoChannelId && !this._monoRetryDone) {
+                    this._monoRetryDone = true;
+                    console.warn(`[WatchPage] mono.css manifest failed; forcing fresh resolve for channel ${monoChannelId}...`);
+                    fetch(`/api/scraper/dlstreams/resolve/${monoChannelId}?forceRefresh=true`, { cache: 'no-store' })
+                        .then(r => r.ok ? r.json() : null)
+                        .then((resolved) => {
+                            if (!resolved || !resolved.streamUrl) return;
+                            this.currentUrl = resolved.streamUrl;
+                            const sid = this.content?.sourceId;
+                            const retryUrl = `/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}${sid ? `&sourceId=${sid}` : ''}`;
+                            this.playHls(retryUrl);
+                        })
+                        .catch((err) => {
+                            console.error('[WatchPage] mono.css force re-resolve failed:', err.message);
+                        });
+                    return;
+                }
+
                 // Try proxy on CORS error (only if not already proxied/transcoded)
                 // Note: Transcoded streams are local, so no CORS issues usually
                 if (!url.startsWith('/api/') && (data.type === Hls.ErrorTypes.NETWORK_ERROR)) {

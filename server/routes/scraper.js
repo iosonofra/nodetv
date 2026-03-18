@@ -211,6 +211,10 @@ router.put('/dlstreams/categories', async (req, res) => {
  */
 router.get('/dlstreams/resolve/:channelId', async (req, res) => {
     try {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+
         const { channelId } = req.params;
         const forceRefresh =
             req.query.force === '1' ||

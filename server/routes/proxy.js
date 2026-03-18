@@ -803,16 +803,19 @@ router.get('/stream', async (req, res) => {
                 return (browserOrigin || urlObj.origin) + '/';
             };
 
+            const isMonoMasquerade = /\.(mono\.css|mono\.csv)(\?|#|$)/i.test(finalUrl);
+            const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl) || isMonoMasquerade;
+            const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com|the-sunmoon\.site)/i.test(finalUrl);
+
             const headers = {
                 'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*',
+                'Accept': isMonoMasquerade 
+                    ? 'application/x-mpegURL, application/vnd.apple.mpegurl, application/vnd.apple.mpegurl;version=3, application/xspf+xml, text/plain, */*'
+                    : '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Origin': getOrigin(),
                 'Referer': getReferer()
             };
-
-            const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl);
-            const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com)/i.test(finalUrl);
 
             // Apply all other custom headers
             Object.entries(customHeaders).forEach(([k, v]) => {

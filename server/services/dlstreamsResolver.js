@@ -194,50 +194,70 @@ function shouldAbortNoisyRequest(url, resourceType) {
 }
 
 /**
- * Enhanced block page detection combining multiple signals
+ * Detect whether the page is a real block/challenge page.
+ * IMPORTANT: must NOT produce false positives on normal DLStreams watch pages.
+ *
+ * Normal DLStreams watch pages contain:
+ *  - "They're FREE & Will Bypass the Block!" (VPN advice - NOT a real block)
+ *  - "Schedule", "24/7 Channels" navigation
+ *  - An <iframe> for the player
+ *
+ * @param {string} bodyText  - document.body.innerText
+ * @param {string} htmlContent - document.documentElement.outerHTML
+ * @param {number} statusCode
  */
-function detectBlockPage(pageText, statusCode) {
-    if (!pageText) return false;
-    const text = pageText.toLowerCase();
-    
-    // Cloudflare + CDN block patterns
-    if (text.includes('checking your browser') || 
-        text.includes('challenge') ||
-        text.includes('enable javascript') ||
-        text.includes('protecting your connection') ||
-        text.includes('cf_clearance') ||
-        text.includes('error 1010') ||
-        text.includes('error 1016') ||
-        text.includes('ray id')) {
+function detectBlockPage(bodyText, htmlContent, statusCode) {
+    const text  = (bodyText    || '').toLowerCase();
+    const html  = (htmlContent || '').toLowerCase();
+    const combined = text + html;
+
+    // ── EARLY EXIT: normal DLStreams watch page ──────────────────────────────
+    // The real watch page always has the site navigation AND an iframe player.
+    // If both are present, the page is NOT a block - even if it mentions "bypass".
+    const hasDLSNavigation = text.includes('schedule') && text.includes('24/7');
+    const hasPlayerFrame   = html.includes('<iframe') &&
+        (html.includes('stream') || html.includes('player') || html.includes('watch'));
+    if (hasDLSNavigation && hasPlayerFrame) return false;
+
+    // ── Cloudflare "Just a Moment" challenge ─────────────────────────────────
+    // These are very specific to the Cloudflare interstitial page.
+    if (text.includes('just a moment') ||
+        html.includes('cf-challenge-form') ||
+        html.includes('cf_chl_prog') ||
+        html.includes('cf_chl_opt') ||
+        html.includes('chl_captcha_fr') ||
+        combined.includes('enable cookies')) {
         return true;
     }
-    
-    // DLStreams specific blocks
-    if (text.includes('bypass the block') || 
-        text.includes('will bypass the block') ||
-        text.includes('blocked check')) {
+
+    // ── Cloudflare specific error codes ──────────────────────────────────────
+    if (text.includes('error 1010') || text.includes('error 1016') ||
+        text.includes('error 1015') || text.includes('error 1006')) {
         return true;
     }
-    
-    // Rate/access limits
-    if (statusCode === 429 || 
-        statusCode === 403 || 
-        statusCode === 403 ||
-        text.includes('429') || 
-        text.includes('403') ||
-        text.includes('too many requests') ||
-        text.includes('access denied') ||
-        text.includes('forbidden')) {
+
+    // ── CF clearance on small page (real CF challenge, not just the cookie name) ─
+    if (html.includes('cf_clearance') && html.length < 20000) {
         return true;
     }
-    
-    // Common blocker patterns
-    if (text.includes('captcha') && text.length < 5000 ||
-        text.includes('recaptcha') ||
-        text.includes('you have been blocked')) {
+
+    // ── HTTP status codes ─────────────────────────────────────────────────────
+    if (statusCode === 429 || statusCode === 403) return true;
+
+    // ── Explicit generic block messages ──────────────────────────────────────
+    if (text.includes('you have been blocked') ||
+        text.includes('403 forbidden') ||
+        text.includes('429 too many requests') ||
+        text.includes('ip has been banned')) {
         return true;
     }
-    
+
+    // ── CAPTCHA only on small pages  ─────────────────────────────────────────
+    // A normal DLStreams page is ~25KB; a real captcha gate is <2KB text.
+    if ((text.includes('captcha') || html.includes('recaptcha')) && text.length < 1500) {
+        return true;
+    }
+
     return false;
 }
 
@@ -245,23 +265,28 @@ function detectBlockPage(pageText, statusCode) {
  * Log diagnostic information about a block detection
  */
 function logBlockDiagnostics(channelId, html, text) {
+    const h = (html || '').toLowerCase();
+    const t = (text || '').toLowerCase();
     const diagnostics = {
         channelId,
         timestamp: new Date().toISOString(),
         htmlSize: html.length,
         textSize: text.length,
-        hasCloudflare: html.includes('cloudflarereg') || html.includes('cf-challenge'),
-        hasCaptcha: html.includes('captcha') || html.includes('recaptcha'),
-        hasBlock: html.includes('bypass') || html.includes('Bypass'),
-        hasJsChallenge: html.includes('chk_jschl') || html.includes('js challenge'),
+        // Real block signals
+        hasCFChallenge: h.includes('cf-challenge-form') || h.includes('cf_chl_prog') || t.includes('just a moment'),
+        hasCFError: t.includes('error 1010') || t.includes('error 1016') || t.includes('error 1015'),
+        hasCaptcha: h.includes('recaptcha') || (t.includes('captcha') && t.length < 1500),
+        hasExplicitBlock: t.includes('you have been blocked') || t.includes('403 forbidden'),
+        // Normal content signals (should be present in valid pages)
+        hasDLSNavigation: t.includes('schedule') && t.includes('24/7'),
+        hasPlayerIframe: h.includes('<iframe') && (h.includes('stream') || h.includes('player')),
         statusSnippets: []
     };
     
-    // Extract first 500 chars of meaningful text
-    const lines = text.split('\n').filter(l => l.trim().length > 5).slice(0, 10);
-    diagnostics.statusSnippets = lines.map(l => l.trim().substring(0, 100));
+    const lines = text.split('\n').filter(l => l.trim().length > 5).slice(0, 8);
+    diagnostics.statusSnippets = lines.map(l => l.trim().substring(0, 120));
     
-    console.log(`  [DIAG] Block detection: ${JSON.stringify(diagnostics).substring(0, 300)}...`);
+    console.log(`  [DIAG] Block detection: ${JSON.stringify(diagnostics).substring(0, 400)}...`);
 }
 
 function findStreamUrlInText(text) {
@@ -661,14 +686,14 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 return { text, html, statusCode: 200 };
             }).catch(() => ({ text: '', html: '', statusCode: 0 }));
 
-            // Check with improved block detection
-            const isBlocked = detectBlockPage(pageState.text + pageState.html, pageState.statusCode);
+            // Check with correct signature: separate text, html, statusCode
+            const isBlocked = detectBlockPage(pageState.text, pageState.html, pageState.statusCode);
             
             if (isBlocked && blockPageHits < 1) {
                 blockPageDetected = true;
                 blockPageHits++;
                 logBlockDiagnostics(channelId, pageState.html, pageState.text);
-                console.log('  [!] Block-like page detected. Waiting 15s before retry (improved detection)...');
+                console.log('  [!] Block-like page detected. Waiting 15s before retry...');
                 rateLimitWait = true;
                 await new Promise(r => setTimeout(r, 15000));
                 await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -728,22 +753,15 @@ async function extractStreamUrl(page, channelId, options = {}) {
             const diagPath = path.join(DATA_DIR, `fail_${channelId}.html`);
             try {
                 const html = await page.content();
-                
-                // Also log some diagnostics
                 const textContent = await page.evaluate(() => document.body.innerText).catch(() => '');
-                const title = await page.title().catch(() => 'unknown');
                 
-                // Check if it looks like a block page
-                const isLikelyBlock = html.includes('checking your browser') || 
-                                     html.includes('challenge') || 
-                                     html.includes('error 1010') ||
-                                     html.includes('Bypass the Block');
+                // Use the real detectBlockPage to assess (not stale heuristics)
+                const isLikelyBlock = detectBlockPage(textContent, html, 0);
                 
-                // Save full HTML diagnostics
                 fs.writeFileSync(diagPath, html, 'utf8');
-                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}${isLikelyBlock ? ' (block page detected)' : ''}`);
+                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}${isLikelyBlock ? ' (real block page)' : ' (no stream found, but not a block page)'}`);
                 
-                if (isLikelyBlock && textContent.length < 1000) {
+                if (isLikelyBlock && textContent.length < 2000) {
                     console.log(`  [!] BLOCK PAGE CONTENT: ${textContent.substring(0, 200)}...`);
                 }
             } catch (diagErr) { 

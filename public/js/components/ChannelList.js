@@ -1197,7 +1197,7 @@ class ChannelList {
             }
 
             try {
-                const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}`);
+                const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}`, { cache: 'no-store' });
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.error || `Resolve failed (${res.status})`);
@@ -1263,7 +1263,7 @@ class ChannelList {
                         hlsPlayer.off(HLS_ERROR_EVENT, onManifestError);
                         console.warn('[ChannelList] mono.css manifest parse failed, forcing re-resolve...');
                         try {
-                            const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?forceRefresh=true`);
+                            const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?forceRefresh=true`, { cache: 'no-store' });
                             if (!res.ok) return;
                             const resolved = await res.json();
                             if (!resolved.streamUrl) return;

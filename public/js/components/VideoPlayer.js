@@ -1250,10 +1250,10 @@ class VideoPlayer {
                     if (data.fatal) {
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
-                        const isManifest404 = data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                        const manifestCode = Number(data?.response?.code || data?.response?.status || 0);
+                        const isManifestLoadFailure = data.type === Hls.ErrorTypes.NETWORK_ERROR &&
                             data.details === 'manifestLoadError' &&
-                            data.response &&
-                            Number(data.response.code) === 404;
+                            [401, 403, 404, 410, 429, 500, 502, 503, 504].includes(manifestCode);
                         const isDlstreamsChannel = !!(channel && channel.tvgId && String(channel.tvgId).startsWith('dl_'));
 
                         // Don't proxy if it's already a local API URL
@@ -1264,12 +1264,12 @@ class VideoPlayer {
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders));
                             this.hls.startLoad();
-                        } else if (isManifest404 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
+                        } else if (isManifestLoadFailure && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
                             this._dlstreamsRefreshAttempted = true;
                             const dlChannelId = String(channel.tvgId).replace('dl_', '');
-                            console.log(`[Player] DLStreams manifest 404 on proxied URL. Forcing re-resolve for channel ${dlChannelId}...`);
+                            console.log(`[Player] DLStreams manifest load failed (${manifestCode}) on proxied URL. Forcing re-resolve for channel ${dlChannelId}...`);
 
-                            fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?force=1`)
+                            fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?forceRefresh=true`, { cache: 'no-store' })
                                 .then(async (r) => {
                                     if (!r.ok) {
                                         const e = await r.json().catch(() => ({}));
@@ -1293,6 +1293,17 @@ class VideoPlayer {
                                 .catch((err) => {
                                     console.error('[Player] DLStreams force re-resolve failed:', err.message || err);
                                 });
+                        } else if (isManifestLoadFailure && isDlstreamsChannel && this._dlstreamsRefreshAttempted) {
+                            console.error(`[Player] DLStreams manifest still failing after refresh (${manifestCode}). Stopping retries.`);
+                            try { this.hls.stopLoad(); } catch (_) { }
+                            try { this.hls.destroy(); } catch (_) { }
+                            this.hls = null;
+                            this.showError(
+                                'DLStreams stream is currently unavailable.<br><br>' +
+                                'The upstream server is returning an invalid manifest or HTML block page.<br>' +
+                                'Try again in a minute or switch channel.'
+                            );
+                            return;
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             // Fatal media error - try recovery with cooldown
                             const now = Date.now();
@@ -1323,8 +1334,10 @@ class VideoPlayer {
                         }
                     }
                 });
-            } else if (this.video.canPlayType('application/vnd.apple.mpegurl') === 'probably' ||
-                this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe') {
+            } else if (!isDlstreamsChannel && (
+                this.video.canPlayType('application/vnd.apple.mpegurl') === 'probably' ||
+                this.video.canPlayType('application/vnd.apple.mpegurl') === 'maybe'
+            )) {
                 // Priority 2: Native HLS support (Safari on iOS/macOS where HLS.js may not work)
                 this.updateTranscodeStatus('direct', 'Direct Native');
                 this.video.src = finalUrl;
@@ -1340,6 +1353,11 @@ class VideoPlayer {
                     }
                 });
             } else {
+                if (isDlstreamsChannel && looksLikeHls) {
+                    this.updateTranscodeStatus('error', 'HLS Unsupported');
+                    this.showError('DLStreams HLS stream requires HLS.js support in this browser.');
+                    return;
+                }
                 // Priority 3: Try direct playback for non-HLS streams
                 this.updateTranscodeStatus('direct', 'Direct Play');
                 this.video.src = finalUrl;

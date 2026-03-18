@@ -212,7 +212,11 @@ router.put('/dlstreams/categories', async (req, res) => {
 router.get('/dlstreams/resolve/:channelId', async (req, res) => {
     try {
         const { channelId } = req.params;
-        const forceRefresh = req.query.force === '1' || req.query.force === 'true';
+        const forceRefresh =
+            req.query.force === '1' ||
+            req.query.force === 'true' ||
+            req.query.forceRefresh === '1' ||
+            req.query.forceRefresh === 'true';
 
         if (!channelId || !/^\d+$/.test(channelId)) {
             return res.status(400).json({ error: 'Valid numeric channelId required' });

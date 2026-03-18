@@ -356,7 +356,7 @@ class DlstreamsService {
     async resolveStreamUrl(channelId, options = {}) {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
         const resolveOptions = {
-            validateCache: true,
+            validateCache: false,
             ...options
         };
         const result = await resolveChannelUrl(channelId, resolveOptions);
@@ -381,7 +381,7 @@ class DlstreamsService {
             streamUrl: result.streamUrl,
             clearKeys,
             proxyHeaders: result.requestHeaders || null,
-            cached: result.cached
+            cached: result.cached === true
         };
     }
 }

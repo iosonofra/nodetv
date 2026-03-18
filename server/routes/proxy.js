@@ -722,6 +722,31 @@ router.get('/stream', async (req, res) => {
     const maxRetries = 2;
     let lastError = null;
 
+    const looksLikeHtmlResponse = async (resp) => {
+        if (!resp) return true;
+        const ct = (resp.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('text/html')) return true;
+        try {
+            const preview = (await resp.clone().text()).trimStart().slice(0, 256).toLowerCase();
+            return preview.startsWith('<!doctype html') ||
+                preview.startsWith('<html') ||
+                preview.startsWith('<head') ||
+                preview.includes('<title>');
+        } catch {
+            return false;
+        }
+    };
+
+    const looksLikeHlsManifest = async (resp) => {
+        if (!resp) return false;
+        try {
+            const preview = (await resp.clone().text()).trimStart().slice(0, 32);
+            return preview.startsWith('#EXTM3U');
+        } catch {
+            return false;
+        }
+    };
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             let { url, sourceId } = req.query;
@@ -866,8 +891,8 @@ router.get('/stream', async (req, res) => {
             // mono.css/mono.csv should return M3U playlist, not HTML.
             // If server returns text/html for mono.css, retry with alternative referer strategies.
             if (isMonoMasquerade && response.ok) {
-                const contentType = response.headers.get('content-type') || '';
-                if (contentType.includes('text/html')) {
+                const initialInvalid = await looksLikeHtmlResponse(response) || !(await looksLikeHlsManifest(response));
+                if (initialInvalid) {
                     console.log(`[Proxy] mono.css returned text/html instead of playlist. Retrying with alt referer...`);
                     
                     // Attempt 1: Retry with origin referer (ai.the-sunmoon.site itself)
@@ -881,7 +906,7 @@ router.get('/stream', async (req, res) => {
                         headers: altHeaders1
                     }).catch(() => null);
                     
-                    if (altResp1 && altResp1.ok && !altResp1.headers.get('content-type')?.includes('text/html')) {
+                    if (altResp1 && altResp1.ok && !(await looksLikeHtmlResponse(altResp1)) && (await looksLikeHlsManifest(altResp1))) {
                         console.log(`[Proxy] mono.css retry with origin referer succeeded`);
                         response = altResp1;
                     } else {
@@ -894,7 +919,7 @@ router.get('/stream', async (req, res) => {
                             headers: altHeaders2
                         }).catch(() => null);
                         
-                        if (altResp2 && altResp2.ok && !altResp2.headers.get('content-type')?.includes('text/html')) {
+                        if (altResp2 && altResp2.ok && !(await looksLikeHtmlResponse(altResp2)) && (await looksLikeHlsManifest(altResp2))) {
                             console.log(`[Proxy] mono.css retry without explicit headers succeeded`);
                             response = altResp2;
                         }
@@ -947,6 +972,18 @@ router.get('/stream', async (req, res) => {
                     console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
                 }
                 return res.status(response.status).send(`Failed to fetch stream: ${response.statusText}`);
+            }
+
+            // Never forward HTML as a valid manifest. HLS.js should receive a hard error so
+            // the client-side retry logic can re-resolve instead of attempting decoder init.
+            if (isManifestRequest && await looksLikeHtmlResponse(response)) {
+                const bodySnippet = await response.text().catch(() => 'N/A');
+                console.error(`[Proxy] Invalid manifest response (HTML) for ${finalUrl.substring(0, 120)}...`);
+                return res.status(502).json({
+                    error: 'Upstream returned HTML instead of media manifest',
+                    url: finalUrl,
+                    details: bodySnippet.substring(0, 180)
+                });
             }
 
             const contentType = response.headers.get('content-type') || '';

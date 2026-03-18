@@ -989,6 +989,13 @@ router.get('/stream', async (req, res) => {
             const contentType = response.headers.get('content-type') || '';
             res.set('Access-Control-Allow-Origin', '*');
 
+            if (isManifestRequest) {
+                // Avoid replaying poisoned manifests from browser/proxy caches.
+                res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+                res.set('Pragma', 'no-cache');
+                res.set('Expires', '0');
+            }
+
             // Forward range-related headers for video seeking support
             const contentLength = response.headers.get('content-length');
             const contentRange = response.headers.get('content-range');
@@ -1048,14 +1055,18 @@ router.get('/stream', async (req, res) => {
                 const manifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
                 const uriLines = manifestLines.filter(l => !l.startsWith('#'));
                 const hasExtinf = manifestLines.some(l => l.startsWith('#EXTINF'));
+                const childManifestCount = uriLines.filter(l => /\.(m3u8|m3u|mpd)(\?|$)/i.test(l)).length;
+                const knownPoisonSegments = uriLines.filter(l => /seg_[a-z0-9_\-]+\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(l)).length;
                 const imageUriCount = uriLines.filter(l => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(l)).length;
                 const mediaUriCount = uriLines.filter(l => /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$)/i.test(l)).length;
                 const suspiciousImagePlaylist = hasExtinf && (
                     (imageUriCount > 0 && mediaUriCount === 0) ||
                     (imageUriCount >= 2 && imageUriCount > mediaUriCount)
                 );
+                const suspiciousNoExtinfImagePlaylist = !hasExtinf && imageUriCount > 0 && mediaUriCount === 0 && childManifestCount === 0;
+                const aggressiveMonoImageBlock = isMonoMasquerade && (knownPoisonSegments > 0 || (imageUriCount > 0 && mediaUriCount === 0));
 
-                if (suspiciousImagePlaylist) {
+                if (suspiciousImagePlaylist || suspiciousNoExtinfImagePlaylist || aggressiveMonoImageBlock) {
                     console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);
                     return res.status(502).json({
                         error: 'Upstream returned invalid HLS playlist',

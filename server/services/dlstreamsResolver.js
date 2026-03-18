@@ -11,11 +11,9 @@ const http = require('http');
 const https = require('https');
 const fetch = require('node-fetch');
 
-// Stealth can be unstable on some Linux/CDP setups. Keep it optional.
-const isLinux = process.platform === 'linux';
-const useStealthPlugin = process.env.DISABLE_STEALTH_PLUGIN === '1'
-    ? false
-    : (process.env.ENABLE_STEALTH_PLUGIN === '1' ? true : !isLinux);
+// Stealth is disabled by default due to instability in this environment.
+// To enable stealth explicitly, set ENABLE_STEALTH_PLUGIN=1.
+const useStealthPlugin = process.env.ENABLE_STEALTH_PLUGIN === '1';
 
 if (useStealthPlugin) {
     try {

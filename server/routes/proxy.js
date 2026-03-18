@@ -806,6 +806,25 @@ router.get('/stream', async (req, res) => {
             const isMonoMasquerade = /\.(mono\.css|mono\.csv)(\?|#|$)/i.test(finalUrl);
             const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl) || isMonoMasquerade;
             const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com|the-sunmoon\.site)/i.test(finalUrl);
+            const isAiSunmoon = /ai\.the-sunmoon\.site/i.test(finalUrl);
+
+            const getRefererForMono = () => {
+                if (customHeaders['Referer'] || customHeaders['referer']) {
+                    return customHeaders['Referer'] || customHeaders['referer'];
+                }
+                if (isAiSunmoon && isMonoMasquerade) {
+                    // For ai.the-sunmoon.site/proxy/*/premium*/mono.css, use freestyleridesx origin
+                    // so the server recognizes it as a legitimate internal request
+                    const premiumMatch = finalUrl.match(/premium\d+/i);
+                    if (premiumMatch) {
+                        return `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${premiumMatch[0].replace(/\D/g, '')}`;
+                    }
+                    return 'https://freestyleridesx.lol/premiumtv/daddyhd.php';
+                }
+                if (isPluto) return 'https://pluto.tv/';
+                if (isFancode) return 'https://fancode.com/';
+                return (browserOrigin || urlObj.origin) + '/';
+            };
 
             const headers = {
                 'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -813,8 +832,14 @@ router.get('/stream', async (req, res) => {
                     ? 'application/x-mpegURL, application/vnd.apple.mpegurl, application/vnd.apple.mpegurl;version=3, application/xspf+xml, text/plain, */*'
                     : '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': isAiSunmoon ? 'cross-site' : 'none',
                 'Origin': getOrigin(),
-                'Referer': getReferer()
+                'Referer': getRefererForMono()
             };
 
             // Apply all other custom headers

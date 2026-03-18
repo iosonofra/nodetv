@@ -863,6 +863,46 @@ router.get('/stream', async (req, res) => {
 
             let response = await fetch(finalUrl, fetchOptions);
 
+            // mono.css/mono.csv should return M3U playlist, not HTML.
+            // If server returns text/html for mono.css, retry with alternative referer strategies.
+            if (isMonoMasquerade && response.ok) {
+                const contentType = response.headers.get('content-type') || '';
+                if (contentType.includes('text/html')) {
+                    console.log(`[Proxy] mono.css returned text/html instead of playlist. Retrying with alt referer...`);
+                    
+                    // Attempt 1: Retry with origin referer (ai.the-sunmoon.site itself)
+                    const altHeaders1 = {
+                        ...headers,
+                        'Referer': `https://ai.the-sunmoon.site/`,
+                        'Origin': 'https://ai.the-sunmoon.site'
+                    };
+                    const altResp1 = await fetch(finalUrl, {
+                        ...fetchOptions,
+                        headers: altHeaders1
+                    }).catch(() => null);
+                    
+                    if (altResp1 && altResp1.ok && !altResp1.headers.get('content-type')?.includes('text/html')) {
+                        console.log(`[Proxy] mono.css retry with origin referer succeeded`);
+                        response = altResp1;
+                    } else {
+                        // Attempt 2: Retry without explicit Referer/Origin
+                        const altHeaders2 = { ...headers };
+                        delete altHeaders2.Referer;
+                        delete altHeaders2.Origin;
+                        const altResp2 = await fetch(finalUrl, {
+                            ...fetchOptions,
+                            headers: altHeaders2
+                        }).catch(() => null);
+                        
+                        if (altResp2 && altResp2.ok && !altResp2.headers.get('content-type')?.includes('text/html')) {
+                            console.log(`[Proxy] mono.css retry without explicit headers succeeded`);
+                            response = altResp2;
+                        }
+                        // If both retries fail, continue with original response (will be text/html error)
+                    }
+                }
+            }
+
             // Some DLStreams CDNs return 403/404 unless Origin/Referer match dlstreams.top.
             // Retry once with forced DLStreams headers only for manifest requests.
             if (!response.ok && (response.status === 403 || response.status === 404) && isManifestRequest && isLikelyDlstreamsCdn) {

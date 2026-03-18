@@ -1099,6 +1099,8 @@ class ChannelList {
         const channel = this.channels.find(c => c.id === dataset.channelId);
         if (!channel) return;
 
+        let dlChannelId = null;
+
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
         this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from
@@ -1186,7 +1188,7 @@ class ChannelList {
             streamUrl = result.url;
         } else if (channel.tvgId && channel.tvgId.startsWith('dl_')) {
             // DLStreams channel: resolve fresh URL on-demand (tokens expire)
-            const dlChannelId = channel.tvgId.replace('dl_', '');
+            dlChannelId = channel.tvgId.replace('dl_', '');
             console.log(`[ChannelList] DLStreams channel detected (ID: ${dlChannelId}). Resolving fresh URL...`);
 
             // Show resolving indicator

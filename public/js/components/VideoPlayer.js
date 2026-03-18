@@ -1179,8 +1179,11 @@ class VideoPlayer {
             console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp, sourceId: channel.sourceId });
 
 
-            // Detect if this is likely an HLS stream (has .m3u8 in URL)
-            const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8');
+            // Detect if this is likely an HLS stream (including disguised mono.css/csv manifests)
+            const looksLikeHls =
+                finalUrl.includes('.m3u8') ||
+                finalUrl.includes('m3u8') ||
+                /\/mono\.(css|csv)(\?|$|%23|#)/i.test(finalUrl);
 
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams

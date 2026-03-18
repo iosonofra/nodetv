@@ -95,7 +95,7 @@ function sanitizeProxyHeaders(headers) {
     return Object.keys(out).length > 0 ? out : null;
 }
 
-async function validateStreamUrlFast(url) {
+async function validateStreamUrlFast(url, timeoutMs = CACHE_VALIDATE_TIMEOUT_MS) {
     if (!isValidStreamUrl(url)) return false;
     const cleanUrl = url.split('#')[0];
 
@@ -114,7 +114,7 @@ async function validateStreamUrlFast(url) {
                     ...profile
                 },
                 agent: cleanUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
-                timeout: CACHE_VALIDATE_TIMEOUT_MS
+                timeout: timeoutMs
             });
 
             if (!response.ok) {
@@ -763,13 +763,16 @@ async function extractStreamUrl(page, channelId, options = {}) {
     const cached = urlCache.get(channelId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
         if (isValidStreamUrl(cached.streamUrl)) {
-            if (validateCache) {
-                const isAlive = await validateStreamUrlFast(cached.streamUrl);
+            const isCachedMono = /\/mono\.(css|csv)(\?|$)/i.test((cached.streamUrl || '').split('#')[0]);
+            const shouldQuickValidateMono = isCachedMono && !validateCache;
+            if (validateCache || shouldQuickValidateMono) {
+                const checkTimeoutMs = validateCache ? CACHE_VALIDATE_TIMEOUT_MS : 2500;
+                const isAlive = await validateStreamUrlFast(cached.streamUrl, checkTimeoutMs);
                 if (!isAlive) {
                     console.log(`  [*] Cache URL validation failed for channel ${channelId}; forcing fresh resolve.`);
                     urlCache.delete(channelId);
                 } else {
-                    console.log(`  [*] Cache hit for channel ${channelId} (validated)`);
+                    console.log(`  [*] Cache hit for channel ${channelId} (${shouldQuickValidateMono ? 'quick-validated mono' : 'validated'})`);
                     return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
                 }
             } else {

@@ -1208,10 +1208,6 @@ class ChannelList {
                     channel.proxyHeaders = resolved.proxyHeaders;
                 }
                 
-                // Force HLS detection for DaddyHD disguised URLs (e.g. mono.css)
-                if (streamUrl && !streamUrl.includes('.m3u8') && !streamUrl.includes('m3u8') && !streamUrl.includes('.mpd')) {
-                    streamUrl += '#.m3u8';
-                }
                 console.log(`[ChannelList] DLStreams resolved: ${streamUrl?.substring(0, 80)}... (cached: ${resolved.cached})`);
 
                 // If DRM keys were resolved, inject them as properties for Shaka Player
@@ -1272,7 +1268,6 @@ class ChannelList {
                             const resolved = await res.json();
                             if (!resolved.streamUrl) return;
                             let freshUrl = resolved.streamUrl;
-                            if (!freshUrl.includes('.m3u8') && !freshUrl.includes('.mpd')) freshUrl += '#.m3u8';
                             console.log('[ChannelList] Re-resolving with fresh URL:', freshUrl.substring(0, 80));
                             window.app.player.play(channel, freshUrl);
                         } catch (e) {

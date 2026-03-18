@@ -15,6 +15,7 @@ const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
+const dlstreamsService = require('../services/dlstreamsService');
 
 // Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -977,6 +978,53 @@ router.get('/stream', async (req, res) => {
             // Never forward HTML as a valid manifest. HLS.js should receive a hard error so
             // the client-side retry logic can re-resolve instead of attempting decoder init.
             if (isManifestRequest && await looksLikeHtmlResponse(response)) {
+                // One-shot server-side recovery for DLStreams mono.css manifests.
+                // If cached mono URL is stale, force-refresh the channel URL and retry fetch.
+                if (isMonoMasquerade && req.query._dlAutoRefresh !== '1') {
+                    const premiumMatch = finalUrl.match(/premium(\d+)/i);
+                    const dlChannelId = premiumMatch && premiumMatch[1] ? premiumMatch[1] : null;
+
+                    if (dlChannelId) {
+                        try {
+                            console.warn(`[Proxy] mono.css HTML response; attempting server-side DLStreams re-resolve for channel ${dlChannelId}`);
+                            const fresh = await dlstreamsService.resolveStreamUrl(dlChannelId, {
+                                forceRefresh: true,
+                                validateCache: true
+                            });
+
+                            const freshUrlRaw = fresh && fresh.streamUrl ? String(fresh.streamUrl) : '';
+                            const freshUrl = freshUrlRaw ? freshUrlRaw.split('#')[0] : '';
+
+                            if (freshUrl) {
+                                const retryHeaders = { ...headers };
+                                if (fresh.proxyHeaders && typeof fresh.proxyHeaders === 'object') {
+                                    Object.entries(fresh.proxyHeaders).forEach(([k, v]) => {
+                                        if (!k || v == null) return;
+                                        const lk = String(k).toLowerCase();
+                                        if (lk === 'host') return;
+                                        retryHeaders[k] = String(v);
+                                    });
+                                }
+
+                                const refreshedResponse = await fetch(freshUrl, {
+                                    ...fetchOptions,
+                                    headers: retryHeaders,
+                                    agent: freshUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent
+                                }).catch(() => null);
+
+                                if (refreshedResponse && refreshedResponse.ok && !(await looksLikeHtmlResponse(refreshedResponse))) {
+                                    console.log(`[Proxy] Server-side DLStreams re-resolve succeeded for channel ${dlChannelId}`);
+                                    response = refreshedResponse;
+                                    finalUrl = freshUrl;
+                                }
+                            }
+                        } catch (refreshErr) {
+                            console.warn(`[Proxy] Server-side DLStreams re-resolve failed: ${refreshErr.message}`);
+                        }
+                    }
+                }
+
+                if (await looksLikeHtmlResponse(response)) {
                 const bodySnippet = await response.text().catch(() => 'N/A');
                 console.error(`[Proxy] Invalid manifest response (HTML) for ${finalUrl.substring(0, 120)}...`);
                 return res.status(502).json({
@@ -984,6 +1032,7 @@ router.get('/stream', async (req, res) => {
                     url: finalUrl,
                     details: bodySnippet.substring(0, 180)
                 });
+                }
             }
 
             const contentType = response.headers.get('content-type') || '';
@@ -1054,11 +1103,36 @@ router.get('/stream', async (req, res) => {
                 // which later crash the media pipeline.
                 const manifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
                 const uriLines = manifestLines.filter(l => !l.startsWith('#'));
+                const decodeLoose = (value) => {
+                    if (!value) return '';
+                    try {
+                        return decodeURIComponent(value);
+                    } catch {
+                        return String(value);
+                    }
+                };
+                const uriMeta = uriLines.map((line) => {
+                    const raw = String(line);
+                    const decoded = decodeLoose(raw);
+                    return { raw, decoded };
+                });
                 const hasExtinf = manifestLines.some(l => l.startsWith('#EXTINF'));
-                const childManifestCount = uriLines.filter(l => /\.(m3u8|m3u|mpd)(\?|$)/i.test(l)).length;
-                const knownPoisonSegments = uriLines.filter(l => /seg_[a-z0-9_\-]+\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(l)).length;
-                const imageUriCount = uriLines.filter(l => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(l)).length;
-                const mediaUriCount = uriLines.filter(l => /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$)/i.test(l)).length;
+                const childManifestCount = uriMeta.filter(({ raw, decoded }) => /\.(m3u8|m3u|mpd)(\?|$|&)/i.test(raw) || /\.(m3u8|m3u|mpd)(\?|$|&)/i.test(decoded)).length;
+                const knownPoisonSegments = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /seg_[a-z0-9_\-]+\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|\"|')/i.test(s);
+                }).length;
+                const imageUriCount = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|\"|')/i.test(s) ||
+                        /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                        /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                }).length;
+                const mediaUriCount = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                        /response-content-type=(video|audio)\//i.test(s);
+                }).length;
                 const suspiciousImagePlaylist = hasExtinf && (
                     (imageUriCount > 0 && mediaUriCount === 0) ||
                     (imageUriCount >= 2 && imageUriCount > mediaUriCount)

@@ -378,7 +378,10 @@ class WatchPage {
         }
 
         // Detect stream type
-        const looksLikeHls = url.includes('.m3u8') || url.includes('m3u8');
+        const looksLikeHls =
+            url.includes('.m3u8') ||
+            url.includes('m3u8') ||
+            /\/mono\.(css|csv)(\?|$|%23|#)/i.test(url);
         const isRawTs = url.includes('.ts') && !url.includes('.m3u8');
         const isDirectVideo = url.includes('.mp4') || url.includes('.mkv') || url.includes('.avi');
 

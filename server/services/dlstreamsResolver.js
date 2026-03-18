@@ -45,9 +45,23 @@ const CACHE_VALIDATE_TIMEOUT_MS = 10000;
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
 const globalHttpAgent = new http.Agent();
 
-// In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
+// User-Agent rotation pool for better evasion
+const UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+];
+
+function getRandomUA() {
+    return UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+}
+
+// In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp, validated })
 let urlCache = new Map();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL_MS = 60 * 60 * 1000; // 60 minutes - longer TTL for validated URLs
+const CACHE_UNVALIDATED_TTL_MS = 20 * 60 * 1000; // 20 min for unvalidated
 
 /**
  * Returns true only for genuine stream URLs.
@@ -144,7 +158,31 @@ const NOISY_URL_PATTERNS = [
     'fonts.googleapis',
     'fonts.gstatic',
     'gstatic.com/recaptcha',
-    'xadsmart.com'
+    'xadsmart.com',
+    // Cloudflare/CDN patterns (aggressive blocking)
+    'challenge-platform',
+    'challenges.cloudflare',
+    'cdn-cgi',
+    'cloudflare',
+    '/cdn/',
+    '/static/',
+    'ajax.googleapis.com',
+    'maxcdn',
+    'cloudflare-static',
+    // Ad networks & trackers
+    'rubiconproject',
+    'openx.net',
+    'criteo',
+    'pagead',
+    'oas.com',
+    'scorecardresearch',
+    'matomo',
+    'mixpanel',
+    // Video/streaming ads
+    'pubads',
+    'admeasures',
+    'ads.vimeo',
+    'bitmovin'
 ];
 
 function shouldAbortNoisyRequest(url, resourceType) {
@@ -153,6 +191,77 @@ function shouldAbortNoisyRequest(url, resourceType) {
         return true;
     }
     return NOISY_URL_PATTERNS.some(pattern => url.includes(pattern));
+}
+
+/**
+ * Enhanced block page detection combining multiple signals
+ */
+function detectBlockPage(pageText, statusCode) {
+    if (!pageText) return false;
+    const text = pageText.toLowerCase();
+    
+    // Cloudflare + CDN block patterns
+    if (text.includes('checking your browser') || 
+        text.includes('challenge') ||
+        text.includes('enable javascript') ||
+        text.includes('protecting your connection') ||
+        text.includes('cf_clearance') ||
+        text.includes('error 1010') ||
+        text.includes('error 1016') ||
+        text.includes('ray id')) {
+        return true;
+    }
+    
+    // DLStreams specific blocks
+    if (text.includes('bypass the block') || 
+        text.includes('will bypass the block') ||
+        text.includes('blocked check')) {
+        return true;
+    }
+    
+    // Rate/access limits
+    if (statusCode === 429 || 
+        statusCode === 403 || 
+        statusCode === 403 ||
+        text.includes('429') || 
+        text.includes('403') ||
+        text.includes('too many requests') ||
+        text.includes('access denied') ||
+        text.includes('forbidden')) {
+        return true;
+    }
+    
+    // Common blocker patterns
+    if (text.includes('captcha') && text.length < 5000 ||
+        text.includes('recaptcha') ||
+        text.includes('you have been blocked')) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Log diagnostic information about a block detection
+ */
+function logBlockDiagnostics(channelId, html, text) {
+    const diagnostics = {
+        channelId,
+        timestamp: new Date().toISOString(),
+        htmlSize: html.length,
+        textSize: text.length,
+        hasCloudflare: html.includes('cloudflarereg') || html.includes('cf-challenge'),
+        hasCaptcha: html.includes('captcha') || html.includes('recaptcha'),
+        hasBlock: html.includes('bypass') || html.includes('Bypass'),
+        hasJsChallenge: html.includes('chk_jschl') || html.includes('js challenge'),
+        statusSnippets: []
+    };
+    
+    // Extract first 500 chars of meaningful text
+    const lines = text.split('\n').filter(l => l.trim().length > 5).slice(0, 10);
+    diagnostics.statusSnippets = lines.map(l => l.trim().substring(0, 100));
+    
+    console.log(`  [DIAG] Block detection: ${JSON.stringify(diagnostics).substring(0, 300)}...`);
 }
 
 function findStreamUrlInText(text) {
@@ -237,6 +346,15 @@ let browserClosingTimer = null;
 const BROWSER_IDLE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
 
 /**
+ * Exponential backoff with jitter: attempt 0->2s, 1->4s, 2->8s, etc (capped at maxMs)
+ */
+function getExponentialBackoffDelay(attempt, baseMs = 2000, maxMs = 30000) {
+    const exponential = baseMs * Math.pow(2, Math.min(attempt, 4)); // Cap at 2^4 to avoid huge delays
+    const jitter = exponential * 0.8 + Math.random() * exponential * 0.4; // ±20% variation
+    return Math.min(jitter, maxMs);
+}
+
+/**
  * Get or launch shared browser
  */
 async function getSharedBrowser() {
@@ -267,7 +385,7 @@ async function getSharedBrowser() {
 }
 
 /**
- * Get Puppeteer launch options
+ * Get Puppeteer launch options with better anti-detection settings
  */
 function getLaunchOptions() {
     const opts = {
@@ -281,8 +399,17 @@ function getLaunchOptions() {
             '--disable-features=CalculateNativeWinOcclusion,PauseBackgroundTabs',
             '--disable-gpu',
             '--hide-scrollbars',
-            '--mute-audio'
-        ]
+            '--mute-audio',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-hang-monitor',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-sync',
+            '--no-first-run'
+        ],
+        protocolTimeout: 180000  // 3 minutes for long operations
     };
     if (fs.existsSync(CHROMIUM_PATH)) {
         opts.executablePath = CHROMIUM_PATH;
@@ -404,6 +531,19 @@ async function extractStreamUrl(page, channelId, options = {}) {
     page.setDefaultNavigationTimeout(20000);
 
     try {
+        // Set realistic headers and UA
+        await page.setUserAgent(getRandomUA()).catch(() => {});
+        await page.setViewport({ width: 1920, height: 1080 }).catch(() => {});
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document'
+        }).catch(() => {});
+
         // Intercept network requests
         await page.setRequestInterception(true);
         const requestHandler = req => {
@@ -517,36 +657,25 @@ async function extractStreamUrl(page, channelId, options = {}) {
         while (!streamUrl && poll < 12) {
             const pageState = await page.evaluate(() => {
                 const text = document.body.innerText || '';
-                if (text.includes('429 Too Many Requests')) return '429';
-                if (text.includes('404 Page Not Found')) return '404';
-                if (text.includes('Bypass the Block') || text.includes('Will Bypass the Block')) return 'blocked';
-                return 'ok';
-            }).catch(() => 'error');
+                const html = document.documentElement.outerHTML || '';
+                return { text, html, statusCode: 200 };
+            }).catch(() => ({ text: '', html: '', statusCode: 0 }));
 
-            if (pageState === '429' && !rateLimitWait) {
-                console.log('  [!] Rate limited (429). Waiting 8s...');
-                rateLimitWait = true;
-                await new Promise(r => setTimeout(r, 8000));
-                await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-                continue;
-            }
-
-            if (pageState === '404') {
-                console.log('  [!] Channel not found (404)');
-                break;
-            }
-
-            if (pageState === 'blocked' && !rateLimitWait) {
+            // Check with improved block detection
+            const isBlocked = detectBlockPage(pageState.text + pageState.html, pageState.statusCode);
+            
+            if (isBlocked && blockPageHits < 1) {
                 blockPageDetected = true;
                 blockPageHits++;
-                console.log('  [!] Block-like page detected. Waiting 10s before retry...');
+                logBlockDiagnostics(channelId, pageState.html, pageState.text);
+                console.log('  [!] Block-like page detected. Waiting 15s before retry (improved detection)...');
                 rateLimitWait = true;
-                await new Promise(r => setTimeout(r, 10000));
+                await new Promise(r => setTimeout(r, 15000));
                 await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
                 continue;
             }
 
-            if (pageState === 'blocked') {
+            if (isBlocked && blockPageHits >= 1) {
                 blockPageDetected = true;
                 blockPageHits++;
                 if (blockPageHits >= 2) {
@@ -599,9 +728,27 @@ async function extractStreamUrl(page, channelId, options = {}) {
             const diagPath = path.join(DATA_DIR, `fail_${channelId}.html`);
             try {
                 const html = await page.content();
+                
+                // Also log some diagnostics
+                const textContent = await page.evaluate(() => document.body.innerText).catch(() => '');
+                const title = await page.title().catch(() => 'unknown');
+                
+                // Check if it looks like a block page
+                const isLikelyBlock = html.includes('checking your browser') || 
+                                     html.includes('challenge') || 
+                                     html.includes('error 1010') ||
+                                     html.includes('Bypass the Block');
+                
+                // Save full HTML diagnostics
                 fs.writeFileSync(diagPath, html, 'utf8');
-                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}`);
-            } catch (diagErr) { }
+                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}${isLikelyBlock ? ' (block page detected)' : ''}`);
+                
+                if (isLikelyBlock && textContent.length < 1000) {
+                    console.log(`  [!] BLOCK PAGE CONTENT: ${textContent.substring(0, 200)}...`);
+                }
+            } catch (diagErr) { 
+                console.log(`  [!] Could not save diagnostics: ${diagErr.message}`);
+            }
         }
 
         // 4. Cache result or failure
@@ -675,7 +822,19 @@ async function resolveChannelUrl(channelId, options = {}) {
     try {
         browser = await getSharedBrowser();
         const page = await browser.newPage();
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await page.setUserAgent(getRandomUA());
+        
+        // Set realistic viewport and headers
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document'
+        });
         
         const result = await extractStreamUrl(page, channelId, options);
 
@@ -725,7 +884,12 @@ async function fetchCategories() {
     try {
         browser = await getSharedBrowser();
         const page = await browser.newPage();
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await page.setUserAgent(getRandomUA());
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        });
         await page.goto(BASE_URL, { waitUntil: 'networkidle2', timeout: 30000 });
 
         const categories = await page.evaluate(() => {

@@ -38,6 +38,18 @@ const {
     CHROMIUM_PATH
 } = require('../services/dlstreamsResolver');
 
+// User-Agent rotation
+const UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+];
+
+function getRandomUA() {
+    return UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+}
+
 const SCHEDULE_URL = `${BASE_URL}/index.php`;
 
 // Output paths
@@ -197,7 +209,15 @@ async function scrape() {
 
         browser = await puppeteer.launch(launchOptions);
         const mainPage = await browser.newPage();
-        await mainPage.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await mainPage.setUserAgent(getRandomUA());
+        await mainPage.setViewport({ width: 1920, height: 1080 });
+        await mainPage.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1'
+        });
         await mainPage.setDefaultNavigationTimeout(20000);
 
         // Step 0.5: rapid guardrails
@@ -314,6 +334,34 @@ async function scrape() {
             if (max <= min) return min;
             return Math.floor(Math.random() * (max - min + 1)) + min;
         };
+        
+        /**
+         * Exponential backoff helper (copied from resolver for consistency)
+         */
+        const getExponentialBackoffDelay = (attempt, baseMs = 2000, maxMs = 30000) => {
+            const exponential = baseMs * Math.pow(2, Math.min(attempt, 4));
+            const jitter = exponential * 0.8 + Math.random() * exponential * 0.4;
+            return Math.min(jitter, maxMs);
+        };
+        
+        /**
+         * Add timing noise to make requests less predictable
+         * 20% chance to add extra delay to mimic human behavior
+         */
+        const sleepWithNoise = async (baseMs, label = '', workerId = '') => {
+            const hasNoise = Math.random() < 0.2;
+            let delay = baseMs;
+            
+            if (hasNoise) {
+                const noiseMs = randomBetween(500, 3000);
+                delay = baseMs + noiseMs;
+                if (workerId && label) {
+                    console.log(`[Worker ${workerId}] [*] Extra timing noise: ${baseMs}ms + ${noiseMs}ms`);
+                }
+            }
+            
+            await sleep(delay);
+        };
 
         let consecutiveFailures = 0;
         let globalCooldownUntil = 0;
@@ -329,6 +377,12 @@ async function scrape() {
         let stopReason = null;
         let currentConcurrencyTarget = Math.max(1, concurrencyLimit);
         let successSinceLastAdjustment = 0;
+        
+        // Smart concurrency ramping: track success streaks with time windows
+        let lastSuccessTime = Date.now();
+        const concurrencyRampupWindow = 20000; // 20s window for ramp-up decisions
+        let successesInWindow = 0;
+        let lastConcurrencyAdjustmentTime = Date.now();
 
         // Track transient failures (wrapper detected but no final URL found) for second pass queue
         const transientFailures = new Set(); // Set<channelId>
@@ -337,6 +391,10 @@ async function scrape() {
         const MAX_SECOND_PASS_DURATION_MS = 1800000; // 30 minutes
         const SECOND_PASS_RETRY_DELAY_MIN_MS = 5000;
         const SECOND_PASS_RETRY_DELAY_MAX_MS = 30000;
+        
+        // Page recycling: recreate pages every N requests to avoid stale cookies/sessions
+        const PAGE_RECYCLE_EVERY_N_REQUESTS = parseInt(process.env.SCRAPER_PAGE_RECYCLE_EVERY || '15', 10);
+        const pageRequestCounts = new Map(); // workerId -> requestCount
 
         console.log(`[*] Proceeding with concurrency limit: ${concurrencyLimit}`);
         console.log(`[*] Adaptive concurrency: ${adaptiveConcurrencyEnabled ? 'enabled' : 'disabled'} (min ${Math.min(minConcurrencyLimit, concurrencyLimit)}, max ${concurrencyLimit}, ramp-up threshold ${successThresholdForRampUp}).`);
@@ -379,7 +437,7 @@ async function scrape() {
                 try {
                     const page = await Promise.race([
                         browser.newPage(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timeout')), 12000))
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Page creation timeout')), 15000))
                     ]);
                     
                     // Wait a bit for stealth plugin evasions to complete
@@ -393,7 +451,15 @@ async function scrape() {
                         console.log(`[Worker ${workerId}] [!] Page error: ${err.message}`);
                     });
                     
-                    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+                    // Use randomized UA and set realistic headers
+                    await page.setUserAgent(getRandomUA()).catch(() => {});
+                    await page.setViewport({ width: 1920, height: 1080 }).catch(() => {});
+                    await page.setExtraHTTPHeaders({
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                    }).catch(() => {});
+                    
                     page.setDefaultNavigationTimeout(20000);
                     
                     return page;
@@ -409,9 +475,19 @@ async function scrape() {
 
         // Helper to check if page is usable and recreate if needed
         const ensurePageReady = async (page, workerId) => {
+            // Page recycling: recreate page every N requests to clear stale cookies/sessions
+            const requestCount = pageRequestCounts.get(workerId) || 0;
+            if (page && !page.isClosed() && requestCount >= PAGE_RECYCLE_EVERY_N_REQUESTS) {
+                console.log(`[Worker ${workerId}] [*] Page recycling: recreating page after ${requestCount} requests (clearing cookies)`);
+                try { await page.close(); } catch (e) {}
+                pageRequestCounts.set(workerId, 0);
+                return await createPageWithRetry(workerId, 2);
+            }
+            
             if (!page || page.isClosed()) {
                 return await createPageWithRetry(workerId, 2);
             }
+            
             return page;
         };
         
@@ -463,6 +539,9 @@ async function scrape() {
                     continue;
                 }
                 
+                // Track request count for page recycling
+                pageRequestCounts.set(workerId, (pageRequestCounts.get(workerId) || 0) + 1);
+                
                 try {
                     let streamUrl, ckParam;
                     let channelBlockedDuringAttempts = false;
@@ -477,16 +556,25 @@ async function scrape() {
                         console.log(`[Worker ${workerId}] [${completedChannels + 1}/${tasks.length}] Processing: ${event.title} - ${channel.name} (ID: ${channel.id})...`);
                         let resolvedAfterRetry = false;
                         let lastWrapperDetectedButNoUrl = false;
+                        let lastBlockPageHits = 0;
                         for (let attempt = 0; attempt <= maxRetries; attempt++) {
                             try {
                                 const result = await extractStreamUrl(page, channel.id, { forceRefresh: attempt > 0 });
                                 streamUrl = result.streamUrl;
                                 ckParam = result.ckParam;
                                 lastWrapperDetectedButNoUrl = result.wrapperDetectedButNoUrl || false;
+                                lastBlockPageHits = result.blockPageHits || 0;
                                 channelBlockedDuringAttempts = channelBlockedDuringAttempts || (result.blockPageDetected === true);
 
                                 if (!streamUrl && result.blockPageDetected) {
                                     console.log(`  [Worker ${workerId}] [!] Block page detected for channel ${channel.id}, deferring retries to cooldown/second-pass.`);
+                                    
+                                    // If block was HARD (2+ attempts), extend cooldown significantly
+                                    if (lastBlockPageHits >= 2) {
+                                        const hardBlockExtension = randomBetween(blockStormCooldownMinMs * 1.2, blockStormCooldownMaxMs * 1.2);
+                                        globalCooldownUntil = Math.max(globalCooldownUntil, Date.now() + hardBlockExtension);
+                                        console.log(`  [Worker ${workerId}] [!] HARD BLOCK (${lastBlockPageHits} hits) - extended cooldown by ${Math.round(hardBlockExtension/1000)}s`);
+                                    }
                                     break;
                                 }
 
@@ -495,22 +583,32 @@ async function scrape() {
                                     break;
                                 }
                             } catch (extractErr) {
-                                console.log(`[Worker ${workerId}] [!] Extract error on attempt ${attempt + 1}: ${extractErr.message}`);
+                                const isProtocolError = extractErr.message && (extractErr.message.includes('Protocol error') || extractErr.message.includes('Session closed') || extractErr.message.includes('timed out') || extractErr.message.includes('TimeoutError'));
+                                console.log(`[Worker ${workerId}] [!] Extract error on attempt ${attempt + 1}: ${extractErr.message}${isProtocolError ? ' (protocol/session issue)' : ''}`);
+                                
                                 // If page was closed during extract, recreate and retry
-                                if (extractErr.message && (extractErr.message.includes('Session closed') || extractErr.message.includes('Protocol error'))) {
+                                if (isProtocolError) {
                                     if (page) {
                                         try { await page.close(); } catch (e) {}
                                     }
                                     page = await createPageWithRetry(workerId, 2);
+                                    
                                     if (!page && attempt < maxRetries) {
-                                        console.log(`[Worker ${workerId}] [!] Could not recreate page, skipping retry`);
-                                        break;
+                                        console.log(`[Worker ${workerId}] [!] Could not recreate page, will try again with different strategy`);
                                     }
-                                }
-                                if (attempt < maxRetries && page) {
-                                    const retryDelay = randomBetween(retryMinDelayMs, retryMaxDelayMs);
+                                    
+                                    // Exponential backoff for protocol errors
+                                    if (attempt < maxRetries && page) {
+                                        const protocolRetryDelay = getExponentialBackoffDelay(attempt, 3000, 12000);
+                                        retryAttemptsUsed++;
+                                        console.log(`  [Worker ${workerId}] [!] Protocol error recovery: Retry ${attempt + 1}/${maxRetries} in ${Math.round(protocolRetryDelay)}ms...`);
+                                        await sleep(protocolRetryDelay);
+                                    }
+                                } else if (attempt < maxRetries && page) {
+                                    // Normal error: exponential backoff too
+                                    const retryDelay = getExponentialBackoffDelay(attempt, retryMinDelayMs, retryMaxDelayMs);
                                     retryAttemptsUsed++;
-                                    console.log(`  [Worker ${workerId}] [!] Retry ${attempt + 1}/${maxRetries} for channel ${channel.id} in ${retryDelay}ms...`);
+                                    console.log(`  [Worker ${workerId}] [!] Retry ${attempt + 1}/${maxRetries} for channel ${channel.id} in ${Math.round(retryDelay)}ms...`);
                                     await sleep(retryDelay);
                                 }
                             }
@@ -550,6 +648,20 @@ async function scrape() {
                     if (streamUrl) {
                         consecutiveFailures = 0;
                         successSinceLastAdjustment++;
+                        successesInWindow++;
+                        lastSuccessTime = Date.now();
+                        
+                        // Smart concurrency ramp-up: if success rate is good, increase concurrency
+                        const timeSinceLastAdjustment = Date.now() - lastConcurrencyAdjustmentTime;
+                        if (adaptiveConcurrencyEnabled && 
+                            currentConcurrencyTarget < concurrencyLimit && 
+                            timeSinceLastAdjustment > concurrencyRampupWindow &&
+                            successesInWindow >= Math.ceil(successThresholdForRampUp / 2)) {
+                            setConcurrencyTarget(currentConcurrencyTarget + 1, `success window ramp (${successesInWindow} successes in ${Math.round(timeSinceLastAdjustment/1000)}s)`);
+                            successesInWindow = 0;
+                            lastConcurrencyAdjustmentTime = Date.now();
+                        }
+                        
                         let finalUrl = streamUrl;
 
                         // Handle chrome-extension wrapper
@@ -657,7 +769,7 @@ async function scrape() {
                 completedChannels++;
 
                 const taskGapDelay = randomBetween(taskJitterMinMs, taskJitterMaxMs);
-                await sleep(taskGapDelay);
+                await sleepWithNoise(taskGapDelay, 'task-gap', workerId);
             }
             
             if (page && !page.isClosed()) {
@@ -829,7 +941,7 @@ async function scrape() {
             console.log(`[*] Saved empty playlist to: ${PLAYLIST_FILE}`);
         }
 
-        console.log(`[*] Runtime metrics: retries_used=${retryAttemptsUsed}, retry_recovered=${retryRecoveredChannels}, blocked_events=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, final_failures=${channelsFailedFinal}, second_pass_recovered=${secondPhaseRecoveredChannels}, concurrency_down=${concurrencyReductions}, concurrency_up=${concurrencyIncreases}, final_concurrency=${currentConcurrencyTarget}`);
+        console.log(`[*] Runtime metrics: retries_used=${retryAttemptsUsed}, retry_recovered=${retryRecoveredChannels}, blocked_events=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, final_failures=${channelsFailedFinal}, second_pass_recovered=${secondPhaseRecoveredChannels}, concurrency_down=${concurrencyReductions}, concurrency_up=${concurrencyIncreases}, final_concurrency=${currentConcurrencyTarget}, page_recycles=${Math.max(...Array.from(pageRequestCounts.values()).map(c => Math.floor(c / PAGE_RECYCLE_EVERY_N_REQUESTS)))}`);
 
         // Save History
         const duration = Math.floor((Date.now() - startTime) / 1000);
@@ -857,9 +969,12 @@ async function scrape() {
                 stoppedEarly,
                 stopReason,
                 processedTasks: completedChannels,
-                totalTasks: tasks.length
+                totalTasks: tasks.length,
+                exponentialBackoffUsed: true,
+                pageRecyclingEnabled: PAGE_RECYCLE_EVERY_N_REQUESTS,
+                smartRampingEnabled: adaptiveConcurrencyEnabled
             },
-            message: `${stoppedEarly ? 'Partially generated' : 'Generated'} ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, blockedEvents=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}, secondPhaseRecovered=${secondPhaseRecoveredChannels}, concurrency=${currentConcurrencyTarget}/${concurrencyLimit}${stoppedEarly ? `, stopReason=${stopReason}` : ''}.`
+            message: `${stoppedEarly ? 'Partially generated' : 'Generated'} ${count} channels from ${events.length} events. retries=${retryAttemptsUsed}, blockedEvents=${blockedPageEventsTotal}, cooldowns=${cooldownActivations}, finalFailures=${channelsFailedFinal}, secondPhaseRecovered=${secondPhaseRecoveredChannels}, concurrency=${currentConcurrencyTarget}/${concurrencyLimit}, exponentialBackoff=enabled, pageRecycling=${PAGE_RECYCLE_EVERY_N_REQUESTS}${stoppedEarly ? `, stopReason=${stopReason}` : ''}.`
         };
 
         updateHistory(runData);

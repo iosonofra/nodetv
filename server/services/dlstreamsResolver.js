@@ -95,9 +95,68 @@ function sanitizeProxyHeaders(headers) {
     return Object.keys(out).length > 0 ? out : null;
 }
 
+function extractHeadersFromUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+        const u = new URL(url);
+        const encoded = u.searchParams.get('headers');
+        if (!encoded) return null;
+        const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+        const parsed = JSON.parse(decoded);
+        return sanitizeProxyHeaders(parsed);
+    } catch (_) {
+        return null;
+    }
+}
+
+function looksLikePoisonedHlsManifest(manifestText, strictMono = false) {
+    if (!manifestText || typeof manifestText !== 'string') return false;
+
+    const lines = manifestText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return false;
+
+    const hasExtinf = lines.some(l => l.startsWith('#EXTINF'));
+    const uriLines = lines.filter(l => !l.startsWith('#'));
+    if (uriLines.length === 0) return false;
+
+    const decodeLoose = (value) => {
+        if (!value) return '';
+        try {
+            return decodeURIComponent(value);
+        } catch {
+            return String(value);
+        }
+    };
+
+    const uriMeta = uriLines.map((line) => {
+        const raw = String(line);
+        const decoded = decodeLoose(raw);
+        return { raw, decoded };
+    });
+
+    const imageUriCount = uriMeta.filter(({ raw, decoded }) => {
+        const s = `${raw} ${decoded}`;
+        return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s) ||
+            /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+            /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+    }).length;
+
+    const mediaUriCount = uriMeta.filter(({ raw, decoded }) => {
+        const s = `${raw} ${decoded}`;
+        return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+            /response-content-type=(video|audio)\//i.test(s);
+    }).length;
+
+    if (strictMono && imageUriCount > 0) return true;
+
+    return hasExtinf && imageUriCount > 0 && mediaUriCount === 0;
+}
+
 async function validateStreamUrlFast(url, timeoutMs = CACHE_VALIDATE_TIMEOUT_MS) {
     if (!isValidStreamUrl(url)) return false;
     const cleanUrl = url.split('#')[0];
+    const isMonoMasquerade = /\/mono\.(css|csv)(\?|$)/i.test(cleanUrl);
+    const embeddedHeaders = extractHeadersFromUrl(cleanUrl) || {};
 
     const profiles = [
         {},
@@ -111,7 +170,8 @@ async function validateStreamUrlFast(url, timeoutMs = CACHE_VALIDATE_TIMEOUT_MS)
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
                     'Accept': '*/*',
-                    ...profile
+                    ...profile,
+                    ...embeddedHeaders
                 },
                 agent: cleanUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
                 timeout: timeoutMs
@@ -123,7 +183,12 @@ async function validateStreamUrlFast(url, timeoutMs = CACHE_VALIDATE_TIMEOUT_MS)
 
             const body = await response.text();
             const trimmed = body.trimStart();
-            if (trimmed.startsWith('#EXTM3U')) return true;
+            if (trimmed.startsWith('#EXTM3U')) {
+                if (looksLikePoisonedHlsManifest(body, isMonoMasquerade)) {
+                    continue;
+                }
+                return true;
+            }
             if (trimmed.startsWith('<?xml') || trimmed.startsWith('<MPD')) return true;
         } catch (_) {
             // try next profile
@@ -456,6 +521,10 @@ async function resolveViaHttpProbe(candidateUrl, visited = new Set(), refererUrl
         'Referer': refererUrl || `${BASE_URL}/`,
         'Origin': origin
     };
+    const embeddedHeaders = extractHeadersFromUrl(candidateUrl);
+    if (embeddedHeaders) {
+        Object.assign(headers, embeddedHeaders);
+    }
 
     let body = '';
     let finalUrl = candidateUrl;
@@ -1145,6 +1214,17 @@ async function extractStreamUrl(page, channelId, options = {}) {
                     }
                 }
             } catch (e) { }
+        }
+
+        if (streamUrl) {
+            const isMonoMasquerade = /\/mono\.(css|csv)(\?|$)/i.test((streamUrl || '').split('#')[0]);
+            if (isMonoMasquerade) {
+                const monoLooksValid = await validateStreamUrlFast(streamUrl, 6000);
+                if (!monoLooksValid) {
+                    console.log(`  [!] Rejected poisoned mono manifest for channel ${channelId}; forcing client re-resolve path.`);
+                    streamUrl = null;
+                }
+            }
         }
 
         if (streamUrl) {

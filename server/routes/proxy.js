@@ -1150,7 +1150,7 @@ router.get('/stream', async (req, res) => {
                     (imageUriCount >= 2 && imageUriCount > mediaUriCount)
                 );
                 const suspiciousNoExtinfImagePlaylist = !hasExtinf && imageUriCount > 0 && mediaUriCount === 0 && childManifestCount === 0;
-                const aggressiveMonoImageBlock = isMonoMasquerade && (knownPoisonSegments > 0 || (imageUriCount > 0 && mediaUriCount === 0));
+                const aggressiveMonoImageBlock = isMonoMasquerade && imageUriCount > 0;
 
                 if (suspiciousImagePlaylist || suspiciousNoExtinfImagePlaylist || aggressiveMonoImageBlock) {
                     console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);
@@ -1166,6 +1166,13 @@ router.get('/stream', async (req, res) => {
                 const finalUrlObj = new URL(finalUrl);
                 const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);
                 const queryStr = finalUrlObj.search;
+                const passthroughParams = new URLSearchParams();
+                for (const [k, v] of Object.entries(req.query || {})) {
+                    if (k === 'url' || v == null || v === '') continue;
+                    passthroughParams.set(k, String(v));
+                }
+                const passthroughSuffix = passthroughParams.toString();
+                const proxySuffix = passthroughSuffix ? `&${passthroughSuffix}` : '';
 
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
@@ -1180,7 +1187,7 @@ router.get('/stream', async (req, res) => {
                                     if (!p1.includes('?') && queryStr) {
                                         absoluteUrl += queryStr;
                                     }
-                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}"`;
+                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${proxySuffix}"`;
                                 } catch (e) {
                                     return match;
                                 }
@@ -1201,7 +1208,7 @@ router.get('/stream', async (req, res) => {
                                 absoluteUrl += queryStr;
                             }
                         }
-                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}`;
+                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${proxySuffix}`;
                     } catch (e) { return line; }
                 }).join('\n');
 

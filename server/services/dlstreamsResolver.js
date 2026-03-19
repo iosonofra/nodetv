@@ -610,40 +610,45 @@ async function resolveDirectChannelLookup(channelId, refererUrl = null) {
     const configuredHosts = String(process.env.DLSTREAMS_LOOKUP_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
     for (const h of configuredHosts) hosts.add(h);
 
-    const ref = refererUrl || `${BASE_URL}/watch.php?id=${cid}`;
+    // The watch page sets CHANNEL_KEY = "premium<id>" — so server_lookup expects
+    // "premium461", not just "461". Try both forms.
+    const channelIdVariants = [`premium${cid}`, cid];
+    const referer = `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${cid}`;
 
     for (const host of hosts) {
-        try {
-            const lookupUrl = `https://${host}/server_lookup?channel_id=${encodeURIComponent(cid)}`;
-            const resp = await fetch(lookupUrl, {
-                method: 'GET',
-                headers: {
-                    'User-Agent': getRandomUA(),
-                    'Accept': 'application/json,text/plain,*/*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Referer': ref,
-                    'Origin': BASE_URL,
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                agent: lookupUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
-                timeout: 8000
-            });
-            if (!resp.ok) continue;
+        for (const channelKey of channelIdVariants) {
+            try {
+                const lookupUrl = `https://${host}/server_lookup?channel_id=${encodeURIComponent(channelKey)}`;
+                const resp = await fetch(lookupUrl, {
+                    method: 'GET',
+                    headers: {
+                        'User-Agent': getRandomUA(),
+                        'Accept': 'application/json,text/plain,*/*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': refererUrl || referer,
+                        'Origin': `https://${host}`,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    agent: lookupUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+                    timeout: 8000
+                });
+                if (!resp.ok) continue;
 
-            const data = await resp.json().catch(() => null);
-            const serverKey = data && data.server_key ? String(data.server_key).trim() : '';
-            if (!serverKey) continue;
+                const data = await resp.json().catch(() => null);
+                const serverKey = data && data.server_key ? String(data.server_key).trim() : '';
+                if (!serverKey) continue;
 
-            const monoUrl = buildMonoUrlFromLookup(host, serverKey, cid);
-            if (!monoUrl || !isValidStreamUrl(monoUrl)) continue;
+                const monoUrl = buildMonoUrlFromLookup(host, serverKey, cid);
+                if (!monoUrl || !isValidStreamUrl(monoUrl)) continue;
 
-            const valid = await validateStreamUrlFast(monoUrl, 5000);
-            if (!valid) continue;
+                const valid = await validateStreamUrlFast(monoUrl, 5000);
+                if (!valid) continue;
 
-            console.log(`  [*] Resolved stream via direct server_lookup fallback (${host}): ${monoUrl}`);
-            return monoUrl;
-        } catch (_) {
-            // Try next host
+                console.log(`  [*] Resolved stream via direct server_lookup (${host}, key=${channelKey}): ${monoUrl}`);
+                return monoUrl;
+            } catch (_) {
+                // Try next variant/host
+            }
         }
     }
 
@@ -1408,15 +1413,23 @@ async function resolveChannelUrl(channelId, options = {}) {
 
     const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
 
-    // --- Fast-path A: HTTP probe of watch page (parse CHANNEL_KEY/M3U8_SERVER) ---
+    // --- Fast-path A: HTTP probe of watch pages (parse CHANNEL_KEY/M3U8_SERVER) ---
+    // Try multiple watch page hosts — dlstreams.top may be geo-blocked/unreachable from
+    // the server, but freestyleridesx.lol serves the same page with the same JS variables.
+    const watchPageHosts = [
+        playerUrl,  // https://dlstreams.top/watch.php?id=<id>
+        `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${channelId}`,
+    ];
     console.log(`  [~] Trying fast HTTP probe for channel ${channelId}...`);
-    const httpProbed = await resolveViaHttpProbe(playerUrl, new Set(), `${BASE_URL}/`).catch(() => null);
-    if (httpProbed && isValidStreamUrl(httpProbed)) {
-        console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId}: ${httpProbed.substring(0, 80)}`);
-        urlCache.set(channelId, { streamUrl: httpProbed, ckParam: null, requestHeaders: null, timestamp: Date.now() });
-        saveUrlCache();
-        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [HTTP-PROBE]`);
-        return { streamUrl: httpProbed, ckParam: null, requestHeaders: null, cached: false };
+    for (const watchUrl of watchPageHosts) {
+        const httpProbed = await resolveViaHttpProbe(watchUrl, new Set(), `${BASE_URL}/`).catch(() => null);
+        if (httpProbed && isValidStreamUrl(httpProbed)) {
+            console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId} via ${watchUrl.substring(0, 60)}: ${httpProbed.substring(0, 80)}`);
+            urlCache.set(channelId, { streamUrl: httpProbed, ckParam: null, requestHeaders: null, timestamp: Date.now() });
+            saveUrlCache();
+            console.log(`[DLStreams Resolver] Channel ${channelId}: OK [HTTP-PROBE]`);
+            return { streamUrl: httpProbed, ckParam: null, requestHeaders: null, cached: false };
+        }
     }
 
     // --- Fast-path B: direct server_lookup on all known CDN hosts ---

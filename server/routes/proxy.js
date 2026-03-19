@@ -833,6 +833,17 @@ router.get('/stream', async (req, res) => {
             const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl) || isMonoMasquerade;
             const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com|the-sunmoon\.site)/i.test(finalUrl);
             const isAiSunmoon = /ai\.the-sunmoon\.site/i.test(finalUrl);
+            const isImageLikeSegmentRequest = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(finalUrl) ||
+                /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(finalUrl) ||
+                /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(finalUrl);
+
+            if (req.query.dlChannelId && isImageLikeSegmentRequest) {
+                console.warn(`[Proxy] Blocking image-like segment request for DLStreams channel ${req.query.dlChannelId}: ${finalUrl.substring(0, 140)}...`);
+                return res.status(410).json({
+                    error: 'Blocked non-media segment in DLStreams manifest',
+                    url: finalUrl
+                });
+            }
 
             const getRefererForMono = () => {
                 if (customHeaders['Referer'] || customHeaders['referer']) {
@@ -1164,30 +1175,52 @@ router.get('/stream', async (req, res) => {
                             /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
                             /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
                     };
+                    const isMediaLikeUri = (value) => {
+                        const s = `${value} ${decodeLoose(value)}`;
+                        return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                            /response-content-type=(video|audio)\//i.test(s);
+                    };
 
                     const sanitizedLines = [];
+                    let pendingSegmentMeta = [];
                     let removedSegments = 0;
 
                     for (const line of rawLines) {
                         const trimmed = line.trim();
-                        if (trimmed && !trimmed.startsWith('#') && isImageLikeUri(trimmed)) {
-                            removedSegments++;
-                            while (sanitizedLines.length > 0) {
-                                const last = sanitizedLines[sanitizedLines.length - 1].trim();
-                                if (last.startsWith('#EXTINF') || last.startsWith('#EXT-X-PROGRAM-DATE-TIME') || last.startsWith('#EXT-X-BYTERANGE')) {
-                                    sanitizedLines.pop();
-                                    continue;
-                                }
-                                break;
+
+                        if (!trimmed) {
+                            continue;
+                        }
+
+                        if (trimmed.startsWith('#EXTINF') || trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') || trimmed.startsWith('#EXT-X-BYTERANGE')) {
+                            pendingSegmentMeta.push(line);
+                            continue;
+                        }
+
+                        if (!trimmed.startsWith('#')) {
+                            if (isImageLikeUri(trimmed)) {
+                                removedSegments++;
+                                pendingSegmentMeta = [];
+                                continue;
+                            }
+
+                            if (pendingSegmentMeta.length > 0) {
+                                sanitizedLines.push(...pendingSegmentMeta);
+                                pendingSegmentMeta = [];
+                            }
+
+                            if (isMediaLikeUri(trimmed) || /^https?:\/\//i.test(trimmed) || trimmed.startsWith('/')) {
+                                sanitizedLines.push(line);
                             }
                             continue;
                         }
+
                         sanitizedLines.push(line);
                     }
 
                     if (removedSegments > 0) {
                         manifest = sanitizedLines.join('\n');
-                        console.log(`[Proxy] Sanitized mixed mono manifest by removing ${removedSegments} image segment(s) for ${finalUrl.substring(0, 120)}...`);
+                        console.log(`[Proxy] Sanitized mixed mono manifest by removing ${removedSegments} image segment block(s) for ${finalUrl.substring(0, 120)}...`);
                     }
                 }
 

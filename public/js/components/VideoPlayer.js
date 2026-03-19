@@ -1179,20 +1179,25 @@ class VideoPlayer {
             console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp, sourceId: channel.sourceId });
 
 
-            // Detect if this is likely an HLS stream (including disguised mono.css/csv manifests)
+            // Detect stream type from the original URL first.
+            // Proxied URLs (`/api/proxy/stream?...`) can hide `/mono.css` as `%2Fmono.css`.
+            const originalUrlForType = String(streamUrl || '');
+            const lowerOriginalUrlForType = originalUrlForType.toLowerCase();
+
             const looksLikeHls =
-                finalUrl.includes('.m3u8') ||
-                finalUrl.includes('m3u8') ||
-                /\/mono\.(css|csv)(\?|$|%23|#)/i.test(finalUrl);
+                lowerOriginalUrlForType.includes('.m3u8') ||
+                lowerOriginalUrlForType.includes('m3u8') ||
+                /\/mono\.(css|csv)(\?|$|%23|#)/i.test(originalUrlForType) ||
+                /(?:%2f|\/)mono\.(css|csv)(?:%3f|\?|$|%23|#)/i.test(finalUrl);
 
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams
-            const isRawTs = finalUrl.includes('.ts') && !finalUrl.includes('.m3u8');
-            const isExtensionless = !finalUrl.includes('.m3u8') &&
-                !finalUrl.includes('.mp4') &&
-                !finalUrl.includes('.mkv') &&
-                !finalUrl.includes('.avi') &&
-                !finalUrl.includes('.ts');
+            const isRawTs = lowerOriginalUrlForType.includes('.ts') && !lowerOriginalUrlForType.includes('.m3u8');
+            const isExtensionless = !lowerOriginalUrlForType.includes('.m3u8') &&
+                !lowerOriginalUrlForType.includes('.mp4') &&
+                !lowerOriginalUrlForType.includes('.mkv') &&
+                !lowerOriginalUrlForType.includes('.avi') &&
+                !lowerOriginalUrlForType.includes('.ts');
 
             // Force Remux: Route through FFmpeg for container conversion
             // Applies to: 1) .ts streams when detected, or 2) ALL non-HLS streams when enabled

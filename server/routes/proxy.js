@@ -987,10 +987,16 @@ router.get('/stream', async (req, res) => {
                     if (dlChannelId) {
                         try {
                             console.warn(`[Proxy] mono.css HTML response; attempting server-side DLStreams re-resolve for channel ${dlChannelId}`);
-                            const fresh = await dlstreamsService.resolveStreamUrl(dlChannelId, {
-                                forceRefresh: true,
-                                validateCache: true
-                            });
+                            const resolveTimeoutMs = 12000;
+                            const fresh = await Promise.race([
+                                dlstreamsService.resolveStreamUrl(dlChannelId, {
+                                    forceRefresh: true,
+                                    validateCache: true
+                                }),
+                                new Promise((_, reject) => {
+                                    setTimeout(() => reject(new Error(`DLStreams resolve timeout after ${resolveTimeoutMs}ms`)), resolveTimeoutMs);
+                                })
+                            ]);
 
                             const freshUrlRaw = fresh && fresh.streamUrl ? String(fresh.streamUrl) : '';
                             const freshUrl = freshUrlRaw ? freshUrlRaw.split('#')[0] : '';

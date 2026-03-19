@@ -10,3 +10,6 @@ dist/
 release/
 .vscode
 transcode-cache/
+data/content.db-shm
+data/content.db
+data/content.db-wal

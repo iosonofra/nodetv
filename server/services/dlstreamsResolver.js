@@ -757,6 +757,7 @@ async function resolveRedirectedStreamUrl(page, candidateUrl, visited = new Set(
  * Visit a player page and intercept stream URL (m3u8/mpd)
  */
 async function extractStreamUrl(page, channelId, options = {}) {
+    channelId = String(channelId);
     const forceRefresh = options.forceRefresh === true;
     const validateCache = options.validateCache === true;
     // 1. Check cache first
@@ -927,7 +928,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
 
         // 2. Navigate with domcontentloaded: doesn't wait for network idle, much faster
         try {
-            await page.goto(playerUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 25000 });
         } catch (err) {
             if (!streamUrl) console.log(`  [!] Navigation warning: ${err.message}`);
         }
@@ -966,7 +967,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 console.log('  [!] Block-like page detected. Waiting 15s before retry...');
                 rateLimitWait = true;
                 await new Promise(r => setTimeout(r, 15000));
-                await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+                await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
                 continue;
             }
 
@@ -1172,6 +1173,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
  * Resolve a single channel URL on-demand (delegates to extractStreamUrl)
  */
 async function resolveChannelUrl(channelId, options = {}) {
+    channelId = String(channelId);
     console.log(`[DLStreams Resolver] Resolving channel ${channelId}...`);
     let browser;
     try {

@@ -829,7 +829,9 @@ router.get('/stream', async (req, res) => {
                 return (browserOrigin || urlObj.origin) + '/';
             };
 
-            const isMonoMasquerade = /\.(mono\.css|mono\.csv)(\?|#|$)/i.test(finalUrl);
+            // Match /mono.css or /mono.csv (slash-prefixed, not dot-prefixed like ".mono.css")
+            // The actual URL path is /proxy/<key>/premium<id>/mono.css
+            const isMonoMasquerade = /\/mono\.(css|csv)(\?|#|$)/i.test(finalUrl) || /\.(mono\.css|mono\.csv)(\?|#|$)/i.test(finalUrl);
             const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl) || isMonoMasquerade;
             const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com|the-sunmoon\.site)/i.test(finalUrl);
             const isAiSunmoon = /ai\.the-sunmoon\.site/i.test(finalUrl);

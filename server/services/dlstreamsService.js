@@ -357,6 +357,7 @@ class DlstreamsService {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
         const resolveOptions = {
             validateCache: false,
+            bypassFailureCache: true,
             ...options
         };
         const result = await resolveChannelUrl(channelId, resolveOptions);

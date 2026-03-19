@@ -567,6 +567,77 @@ async function resolveViaHttpProbe(candidateUrl, visited = new Set(), refererUrl
     return null;
 }
 
+function buildMonoUrlFromLookup(host, serverKey, channelId) {
+    const h = String(host || '').trim();
+    const key = String(serverKey || '').trim();
+    const cid = String(channelId || '').trim();
+    if (!h || !key || !cid) return null;
+    return key === 'top1/cdn'
+        ? `https://${h}/proxy/top1/cdn/${cid}/mono.css`
+        : `https://${h}/proxy/${key}/${cid}/mono.css`;
+}
+
+async function resolveDirectChannelLookup(channelId, refererUrl = null) {
+    const cid = String(channelId || '').trim();
+    if (!/^\d+$/.test(cid)) return null;
+
+    const hosts = new Set();
+    hosts.add('ai.the-sunmoon.site');
+    hosts.add('the-sunmoon.site');
+
+    // Learn likely hosts from current cache entries.
+    for (const value of urlCache.values()) {
+        const candidate = value && value.streamUrl ? String(value.streamUrl) : '';
+        if (!candidate) continue;
+        try {
+            const h = new URL(candidate.split('#')[0]).hostname;
+            if (h) hosts.add(h);
+        } catch (_) {}
+    }
+
+    const configuredHosts = String(process.env.DLSTREAMS_LOOKUP_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean);
+    for (const h of configuredHosts) hosts.add(h);
+
+    const ref = refererUrl || `${BASE_URL}/watch.php?id=${cid}`;
+
+    for (const host of hosts) {
+        try {
+            const lookupUrl = `https://${host}/server_lookup?channel_id=${encodeURIComponent(cid)}`;
+            const resp = await fetch(lookupUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': getRandomUA(),
+                    'Accept': 'application/json,text/plain,*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': ref,
+                    'Origin': BASE_URL,
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                agent: lookupUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+                timeout: 8000
+            });
+            if (!resp.ok) continue;
+
+            const data = await resp.json().catch(() => null);
+            const serverKey = data && data.server_key ? String(data.server_key).trim() : '';
+            if (!serverKey) continue;
+
+            const monoUrl = buildMonoUrlFromLookup(host, serverKey, cid);
+            if (!monoUrl || !isValidStreamUrl(monoUrl)) continue;
+
+            const valid = await validateStreamUrlFast(monoUrl, 5000);
+            if (!valid) continue;
+
+            console.log(`  [*] Resolved stream via direct server_lookup fallback (${host}): ${monoUrl}`);
+            return monoUrl;
+        } catch (_) {
+            // Try next host
+        }
+    }
+
+    return null;
+}
+
 function buildWrapperCandidates(wrapperUrl) {
     if (!wrapperUrl || !STREAM_WRAPPER_REGEX.test(wrapperUrl)) return [];
     const variants = ['stream', 'cast', 'watch', 'plus', 'casting', 'player'];
@@ -829,6 +900,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
     channelId = String(channelId);
     const forceRefresh = options.forceRefresh === true;
     const validateCache = options.validateCache === true;
+    const bypassFailureCache = options.bypassFailureCache === true;
     // 1. Check cache first
     const cached = urlCache.get(channelId);
     if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
@@ -858,7 +930,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
 
     // 2. Check failure cache
     const failure = failureCache.get(channelId);
-    if (!forceRefresh && failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
+    if (!forceRefresh && !bypassFailureCache && failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
         console.log(`  [*] Skipping channel ${channelId} due to recent failure.`);
         return { streamUrl: null, ckParam: null, cached: false };
     }
@@ -1214,6 +1286,13 @@ async function extractStreamUrl(page, channelId, options = {}) {
                     }
                 }
             } catch (e) { }
+        }
+
+        if (!streamUrl) {
+            const directLookupStream = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+            if (directLookupStream) {
+                streamUrl = directLookupStream;
+            }
         }
 
         if (streamUrl) {

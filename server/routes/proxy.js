@@ -1150,7 +1150,11 @@ router.get('/stream', async (req, res) => {
                     (imageUriCount >= 2 && imageUriCount > mediaUriCount)
                 );
                 const suspiciousNoExtinfImagePlaylist = !hasExtinf && imageUriCount > 0 && mediaUriCount === 0 && childManifestCount === 0;
-                const aggressiveMonoImageBlock = isMonoMasquerade && imageUriCount > 0;
+                const aggressiveMonoImageBlock = isMonoMasquerade && (
+                    (imageUriCount > 0 && mediaUriCount === 0) ||
+                    (knownPoisonSegments >= 2 && mediaUriCount <= 1) ||
+                    (imageUriCount >= 3 && imageUriCount > mediaUriCount)
+                );
 
                 if (suspiciousImagePlaylist || suspiciousNoExtinfImagePlaylist || aggressiveMonoImageBlock) {
                     console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);

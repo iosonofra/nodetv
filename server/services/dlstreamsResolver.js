@@ -147,7 +147,18 @@ function looksLikePoisonedHlsManifest(manifestText, strictMono = false) {
             /response-content-type=(video|audio)\//i.test(s);
     }).length;
 
-    if (strictMono && imageUriCount > 0) return true;
+    const knownPoisonSegments = uriMeta.filter(({ raw, decoded }) => {
+        const s = `${raw} ${decoded}`;
+        return /seg_[a-z0-9_\-]+\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s);
+    }).length;
+
+    if (strictMono) {
+        // DLStreams mono manifests can include occasional image placeholders.
+        // Treat as poisoned only when media is absent or image segments dominate.
+        if (imageUriCount > 0 && mediaUriCount === 0) return true;
+        if (knownPoisonSegments >= 2 && mediaUriCount <= 1) return true;
+        if (imageUriCount >= 3 && imageUriCount > mediaUriCount) return true;
+    }
 
     return hasExtinf && imageUriCount > 0 && mediaUriCount === 0;
 }
@@ -940,6 +951,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
     let wrapperUrl = null;
     let ckParam = null;
     let requestHeaders = null;
+    let shouldCacheResolvedUrl = true;
     let blockPageDetected = false;
     let blockPageHits = 0;
 
@@ -1300,16 +1312,19 @@ async function extractStreamUrl(page, channelId, options = {}) {
             if (isMonoMasquerade) {
                 const monoLooksValid = await validateStreamUrlFast(streamUrl, 6000);
                 if (!monoLooksValid) {
-                    console.log(`  [!] Rejected poisoned mono manifest for channel ${channelId}; forcing client re-resolve path.`);
-                    streamUrl = null;
+                    // Do not hard-fail on suspicious mono here: some channels expose mixed
+                    // manifests that still play. We avoid polluting cache, but return the URL
+                    // and let proxy/runtime checks decide.
+                    console.log(`  [!] Suspicious mono manifest for channel ${channelId}; returning URL without caching.`);
+                    shouldCacheResolvedUrl = false;
                 }
             }
         }
 
-        if (streamUrl) {
+        if (streamUrl && shouldCacheResolvedUrl) {
             urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });
             saveUrlCache();
-        } else {
+        } else if (!streamUrl) {
             failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout or no m3u/css URL found" });
         }
 

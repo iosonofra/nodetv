@@ -1209,7 +1209,10 @@ router.get('/stream', async (req, res) => {
                             continue;
                         }
 
-                        if (trimmed.startsWith('#EXTINF') || trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') || trimmed.startsWith('#EXT-X-BYTERANGE')) {
+                        if (trimmed.startsWith('#EXTINF') || trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') || trimmed.startsWith('#EXT-X-BYTERANGE') || trimmed.startsWith('#EXT-X-DISCONTINUITY')) {
+                            // Buffer these together with the segment URI that follows.
+                            // If that URI turns out to be an image, the whole block
+                            // (including #EXT-X-DISCONTINUITY) gets discarded.
                             pendingSegmentMeta.push(line);
                             continue;
                         }
@@ -1236,6 +1239,11 @@ router.get('/stream', async (req, res) => {
                     }
 
                     if (removedSegments > 0) {
+                        // Discard any trailing buffered segment metadata with no following URI
+                        // (e.g. a #EXT-X-DISCONTINUITY at the very end of the manifest)
+                        if (pendingSegmentMeta.length > 0) {
+                            pendingSegmentMeta = [];
+                        }
                         manifest = sanitizedLines.join('\n');
                         console.log(`[Proxy] Sanitized mixed mono manifest by removing ${removedSegments} image segment block(s) for ${finalUrl.substring(0, 120)}...`);
                     }

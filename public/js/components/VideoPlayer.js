@@ -103,7 +103,12 @@ class VideoPlayer {
     /**
      * Get HLS.js configuration with buffer settings optimized for stable playback
      */
-    getHlsConfig() {
+    getHlsConfig(opts = {}) {
+        // DLStreams mono.css manifests often have only 2-3 real segments per window
+        // (the rest are image placeholders stripped by the proxy). Using liveSyncDurationCount:3
+        // means HLS.js never finds enough segments to start playing. Use 1 for DLStreams.
+        const liveSyncCount = opts.isDlstreams ? 1 : 3;
+        const liveMaxLatency = opts.isDlstreams ? 4 : 10;
         return {
             enableWorker: true,
             // Buffer settings to prevent underruns during background tab throttling
@@ -112,8 +117,8 @@ class VideoPlayer {
             maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
             maxBufferHole: 1.0,            // Allow 1s holes in buffer (helps with discontinuities)
             // Live stream settings - stay further from live edge for stability
-            liveSyncDurationCount: 3,      // Stay 3 segments behind live
-            liveMaxLatencyDurationCount: 10, // Allow up to 10 segments behind before catching up
+            liveSyncDurationCount: liveSyncCount,
+            liveMaxLatencyDurationCount: liveMaxLatency,
             liveBackBufferLength: 30,      // Keep 30s of back buffer for seeking
             // Audio discontinuity handling (fixes garbled audio during ad transitions)
             stretchShortVideoTrack: true,  // Stretch short segments to avoid gaps
@@ -1240,7 +1245,7 @@ class VideoPlayer {
                 // The HLS init logic is quite complex with error handling
                 // I'll inline the Hls init here as per original but mindful of proxy vs local
 
-                this.hls = new Hls(this.getHlsConfig());
+                this.hls = new Hls(this.getHlsConfig({ isDlstreams: isDlstreamsChannel }));
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
 
@@ -1392,12 +1397,12 @@ class VideoPlayer {
     /**
      * Helper to play HLS stream (reduces duplication)
      */
-    playHls(url) {
+    playHls(url, opts = {}) {
         if (this.hls) {
             this.hls.destroy();
         }
 
-        this.hls = new Hls(this.getHlsConfig());
+        this.hls = new Hls(this.getHlsConfig(opts));
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
 

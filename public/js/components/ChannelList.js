@@ -1197,7 +1197,14 @@ class ChannelList {
             }
 
             try {
-                const res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}`, { cache: 'no-store' });
+                const resolveAbort = new AbortController();
+                const resolveAbortTimer = setTimeout(() => resolveAbort.abort(), 80000);
+                let res;
+                try {
+                    res = await fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}`, { cache: 'no-store', signal: resolveAbort.signal });
+                } finally {
+                    clearTimeout(resolveAbortTimer);
+                }
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.error || `Resolve failed (${res.status})`);

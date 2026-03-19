@@ -1104,7 +1104,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
         let poll = 0;
         let rateLimitWait = false;
 
-        while (!streamUrl && poll < 24) {
+        while (!streamUrl && poll < 14) {
             const pageState = await page.evaluate(() => {
                 const text = document.body.innerText || '';
                 const html = document.documentElement.outerHTML || '';
@@ -1118,9 +1118,9 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 blockPageDetected = true;
                 blockPageHits++;
                 logBlockDiagnostics(channelId, pageState.html, pageState.text);
-                console.log('  [!] Block-like page detected. Waiting 15s before retry...');
+                console.log('  [!] Block-like page detected. Waiting 8s before retry...');
                 rateLimitWait = true;
-                await new Promise(r => setTimeout(r, 15000));
+                await new Promise(r => setTimeout(r, 8000));
                 await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
                 continue;
             }
@@ -1152,7 +1152,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
             await checkFrames();
             if (streamUrl) break;
 
-            await new Promise(r => setTimeout(r, 700));
+            await new Promise(r => setTimeout(r, 600));
             poll++;
 
             if (poll === 5) {

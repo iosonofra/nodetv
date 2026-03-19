@@ -226,7 +226,16 @@ router.get('/dlstreams/resolve/:channelId', async (req, res) => {
             return res.status(400).json({ error: 'Valid numeric channelId required' });
         }
 
-        const result = await dlstreamsService.resolveStreamUrl(channelId, { forceRefresh });
+        // Hard timeout to prevent Cloudflare 524: resolve must complete within 75s.
+        // Puppeteer worst-case (25s nav + 24×700ms polls + 15s block wait + fallbacks) can
+        // exceed the Cloudflare 100s limit. We return 503 before that happens.
+        const RESOLVE_TIMEOUT_MS = 75000;
+        const result = await Promise.race([
+            dlstreamsService.resolveStreamUrl(channelId, { forceRefresh }),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Resolve timed out after 75s')), RESOLVE_TIMEOUT_MS)
+            )
+        ]);
 
         if (!result.streamUrl) {
             return res.status(404).json({ error: 'Could not resolve stream URL', channelId });
@@ -234,8 +243,9 @@ router.get('/dlstreams/resolve/:channelId', async (req, res) => {
 
         res.json(result);
     } catch (err) {
-        console.error(`[DLStreams Resolve] Error resolving channel ${req.params.channelId}:`, err);
-        res.status(500).json({ error: err.message });
+        const isTimeout = err.message && err.message.includes('timed out');
+        console.error(`[DLStreams Resolve] ${isTimeout ? 'Timeout' : 'Error'} resolving channel ${req.params.channelId}:`, err.message);
+        res.status(isTimeout ? 503 : 500).json({ error: err.message });
     }
 });
 

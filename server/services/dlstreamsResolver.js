@@ -583,9 +583,10 @@ function buildMonoUrlFromLookup(host, serverKey, channelId) {
     const key = String(serverKey || '').trim();
     const cid = String(channelId || '').trim();
     if (!h || !key || !cid) return null;
+    // All known mono URLs use /proxy/<key>/premium<id>/mono.css
     return key === 'top1/cdn'
-        ? `https://${h}/proxy/top1/cdn/${cid}/mono.css`
-        : `https://${h}/proxy/${key}/${cid}/mono.css`;
+        ? `https://${h}/proxy/top1/cdn/premium${cid}/mono.css`
+        : `https://${h}/proxy/${key}/premium${cid}/mono.css`;
 }
 
 async function resolveDirectChannelLookup(channelId, refererUrl = null) {
@@ -1301,6 +1302,18 @@ async function extractStreamUrl(page, channelId, options = {}) {
         }
 
         if (!streamUrl) {
+            // Fallback A: plain HTTP fetch of the watch page — parses CHANNEL_KEY + M3U8_SERVER
+            // without needing a full browser render. Works when the bot-blocker only targets
+            // Puppeteer/headless UA but serves the HTML to regular HTTP requests.
+            const httpWatchResolved = await resolveViaHttpProbe(playerUrl, new Set(), `${BASE_URL}/`).catch(() => null);
+            if (httpWatchResolved && isValidStreamUrl(httpWatchResolved)) {
+                console.log(`  [*] Resolved via HTTP watch-page probe fallback: ${httpWatchResolved}`);
+                streamUrl = httpWatchResolved;
+            }
+        }
+
+        if (!streamUrl) {
+            // Fallback B: direct server_lookup API call on all known CDN hosts
             const directLookupStream = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
             if (directLookupStream) {
                 streamUrl = directLookupStream;

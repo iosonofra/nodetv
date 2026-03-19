@@ -1156,7 +1156,59 @@ router.get('/stream', async (req, res) => {
                     (imageUriCount >= 3 && imageUriCount > mediaUriCount)
                 );
 
-                if (suspiciousImagePlaylist || suspiciousNoExtinfImagePlaylist || aggressiveMonoImageBlock) {
+                if (isMonoMasquerade && imageUriCount > 0 && mediaUriCount > 0) {
+                    const rawLines = manifest.split('\n');
+                    const isImageLikeUri = (value) => {
+                        const s = `${value} ${decodeLoose(value)}`;
+                        return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s) ||
+                            /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                            /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                    };
+
+                    const sanitizedLines = [];
+                    let removedSegments = 0;
+
+                    for (const line of rawLines) {
+                        const trimmed = line.trim();
+                        if (trimmed && !trimmed.startsWith('#') && isImageLikeUri(trimmed)) {
+                            removedSegments++;
+                            while (sanitizedLines.length > 0) {
+                                const last = sanitizedLines[sanitizedLines.length - 1].trim();
+                                if (last.startsWith('#EXTINF') || last.startsWith('#EXT-X-PROGRAM-DATE-TIME') || last.startsWith('#EXT-X-BYTERANGE')) {
+                                    sanitizedLines.pop();
+                                    continue;
+                                }
+                                break;
+                            }
+                            continue;
+                        }
+                        sanitizedLines.push(line);
+                    }
+
+                    if (removedSegments > 0) {
+                        manifest = sanitizedLines.join('\n');
+                        console.log(`[Proxy] Sanitized mixed mono manifest by removing ${removedSegments} image segment(s) for ${finalUrl.substring(0, 120)}...`);
+                    }
+                }
+
+                const sanitizedManifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
+                const sanitizedUriLines = sanitizedManifestLines.filter(l => !l.startsWith('#'));
+                const sanitizedImageUriCount = sanitizedUriLines.filter(line => {
+                    const s = `${line} ${decodeLoose(line)}`;
+                    return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s) ||
+                        /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                        /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                }).length;
+                const sanitizedMediaUriCount = sanitizedUriLines.filter(line => {
+                    const s = `${line} ${decodeLoose(line)}`;
+                    return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                        /response-content-type=(video|audio)\//i.test(s);
+                }).length;
+                const finalSuspiciousImagePlaylist = suspiciousImagePlaylist && sanitizedMediaUriCount === 0;
+                const finalSuspiciousNoExtinfImagePlaylist = suspiciousNoExtinfImagePlaylist && sanitizedMediaUriCount === 0;
+                const finalAggressiveMonoImageBlock = aggressiveMonoImageBlock && sanitizedMediaUriCount === 0;
+
+                if (finalSuspiciousImagePlaylist || finalSuspiciousNoExtinfImagePlaylist || finalAggressiveMonoImageBlock || (isMonoMasquerade && sanitizedImageUriCount > 0 && sanitizedMediaUriCount === 0)) {
                     console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);
                     return res.status(502).json({
                         error: 'Upstream returned invalid HLS playlist',

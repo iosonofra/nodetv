@@ -903,41 +903,56 @@ router.get('/stream', async (req, res) => {
             let response = await fetch(finalUrl, fetchOptions);
 
             // mono.css/mono.csv should return M3U playlist, not HTML.
-            // If server returns text/html for mono.css, retry with alternative referer strategies.
+            // The CDN appears to use lazy playlist generation: the first cold request triggers
+            // server-side generation and returns HTML/empty while it builds the playlist.
+            // Subsequent requests hit the cache and return the HLS manifest immediately.
+            // Strategy: detect non-HLS response, wait for CDN to finish generating, then retry
+            // with the same headers (same referer that was used to resolve the URL).
             if (isMonoMasquerade && response.ok) {
                 const initialInvalid = await looksLikeHtmlResponse(response) || !(await looksLikeHlsManifest(response));
                 if (initialInvalid) {
-                    console.log(`[Proxy] mono.css returned text/html instead of playlist. Retrying with alt referer...`);
-                    
-                    // Attempt 1: Retry with origin referer (ai.the-sunmoon.site itself)
-                    const altHeaders1 = {
-                        ...headers,
-                        'Referer': `https://ai.the-sunmoon.site/`,
-                        'Origin': 'https://ai.the-sunmoon.site'
-                    };
-                    const altResp1 = await fetch(finalUrl, {
-                        ...fetchOptions,
-                        headers: altHeaders1
-                    }).catch(() => null);
-                    
-                    if (altResp1 && altResp1.ok && !(await looksLikeHtmlResponse(altResp1)) && (await looksLikeHlsManifest(altResp1))) {
-                        console.log(`[Proxy] mono.css retry with origin referer succeeded`);
-                        response = altResp1;
+                    console.log(`[Proxy] mono.css returned non-HLS content (CDN cold-start). Waiting 1.5s for CDN to generate playlist...`);
+
+                    // Wait for CDN lazy generation to complete before retrying.
+                    await new Promise(r => setTimeout(r, 1500));
+
+                    // Attempt 1: Retry with the same headers (same referer used to resolve the URL).
+                    // The CDN should now have the playlist cached.
+                    const retryResp1 = await fetch(finalUrl, fetchOptions).catch(() => null);
+                    if (retryResp1 && retryResp1.ok && !(await looksLikeHtmlResponse(retryResp1)) && (await looksLikeHlsManifest(retryResp1))) {
+                        console.log(`[Proxy] mono.css retry after delay succeeded`);
+                        response = retryResp1;
                     } else {
-                        // Attempt 2: Retry without explicit Referer/Origin
-                        const altHeaders2 = { ...headers };
-                        delete altHeaders2.Referer;
-                        delete altHeaders2.Origin;
-                        const altResp2 = await fetch(finalUrl, {
+                        // Attempt 2: Retry with origin referer (ai.the-sunmoon.site itself)
+                        const altHeaders1 = {
+                            ...headers,
+                            'Referer': `https://ai.the-sunmoon.site/`,
+                            'Origin': 'https://ai.the-sunmoon.site'
+                        };
+                        const altResp1 = await fetch(finalUrl, {
                             ...fetchOptions,
-                            headers: altHeaders2
+                            headers: altHeaders1
                         }).catch(() => null);
-                        
-                        if (altResp2 && altResp2.ok && !(await looksLikeHtmlResponse(altResp2)) && (await looksLikeHlsManifest(altResp2))) {
-                            console.log(`[Proxy] mono.css retry without explicit headers succeeded`);
-                            response = altResp2;
+
+                        if (altResp1 && altResp1.ok && !(await looksLikeHtmlResponse(altResp1)) && (await looksLikeHlsManifest(altResp1))) {
+                            console.log(`[Proxy] mono.css retry with origin referer succeeded`);
+                            response = altResp1;
+                        } else {
+                            // Attempt 3: Retry without explicit Referer/Origin
+                            const altHeaders2 = { ...headers };
+                            delete altHeaders2.Referer;
+                            delete altHeaders2.Origin;
+                            const altResp2 = await fetch(finalUrl, {
+                                ...fetchOptions,
+                                headers: altHeaders2
+                            }).catch(() => null);
+
+                            if (altResp2 && altResp2.ok && !(await looksLikeHtmlResponse(altResp2)) && (await looksLikeHlsManifest(altResp2))) {
+                                console.log(`[Proxy] mono.css retry without explicit headers succeeded`);
+                                response = altResp2;
+                            }
+                            // If all retries fail, fall through to server-side re-resolve below
                         }
-                        // If both retries fail, continue with original response (will be text/html error)
                     }
                 }
             }

@@ -641,7 +641,7 @@ class VideoPlayer {
                                 console.log('[HLS] Max retries reached, switching to proxy...');
                                 this.networkRetryCount = 0;
                                 this.isUsingProxy = true;
-                                const proxiedUrl = this.getProxiedUrl(this.currentUrl);
+                                const proxiedUrl = this.getProxiedUrl(this.currentUrl, this.currentChannel?.sourceId, this.currentChannel?.proxyHeaders, this.currentChannel);
                                 this.hls.loadSource(proxiedUrl);
                                 this.hls.startLoad();
                             } else {
@@ -1175,7 +1175,7 @@ class VideoPlayer {
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;
-            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders) : streamUrl;
+            const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders, channel) : streamUrl;
             console.log('[Player] Playing:', { streamUrl, needsProxy, isPageHttps, isUrlHttp, sourceId: channel.sourceId });
 
 
@@ -1267,7 +1267,7 @@ class VideoPlayer {
                         if (isCorsLikely && !this.isUsingProxy && !isLocalApi) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
-                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders));
+                            this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel));
                             this.hls.startLoad();
                         } else if (isManifestLoadFailure && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
                             this._dlstreamsRefreshAttempted = true;
@@ -1290,7 +1290,7 @@ class VideoPlayer {
                                         channel.proxyHeaders = resolved.proxyHeaders;
                                     }
                                     this.currentUrl = resolved.streamUrl;
-                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders);
+                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel);
                                     console.log('[Player] DLStreams token refreshed. Retrying manifest via proxy...');
                                     this.hls.loadSource(refreshedProxyUrl);
                                     this.hls.startLoad();
@@ -1351,7 +1351,7 @@ class VideoPlayer {
                     console.log('Autoplay prevented, trying proxy if CORS error:', e);
                     if (!this.isUsingProxy) {
                         this.isUsingProxy = true;
-                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders);
+                        this.video.src = this.getProxiedUrl(streamUrl, channel.sourceId, channel?.proxyHeaders, channel);
                         this.video.play().catch(err => {
                             if (err.name !== 'AbortError') console.error('Proxy play failed:', err);
                         });
@@ -1556,9 +1556,13 @@ class VideoPlayer {
     /**
      * Get proxied URL for a stream
      */
-    getProxiedUrl(url, sourceId, extraHeaders) {
+    getProxiedUrl(url, sourceId, extraHeaders, channel) {
         let proxiedUrl = `/api/proxy/stream?url=${encodeURIComponent(url)}`;
         if (sourceId) proxiedUrl += `&sourceId=${sourceId}`;
+        const dlChannelId = channel?.tvgId && String(channel.tvgId).startsWith('dl_')
+            ? String(channel.tvgId).replace('dl_', '')
+            : null;
+        if (dlChannelId) proxiedUrl += `&dlChannelId=${encodeURIComponent(dlChannelId)}`;
         if (extraHeaders && typeof extraHeaders === 'object') {
             try {
                 proxiedUrl += `&headers=${encodeURIComponent(btoa(JSON.stringify(extraHeaders)))}`;

@@ -981,13 +981,15 @@ router.get('/stream', async (req, res) => {
                 // One-shot server-side recovery for DLStreams mono.css manifests.
                 // If cached mono URL is stale, force-refresh the channel URL and retry fetch.
                 if (isMonoMasquerade && req.query._dlAutoRefresh !== '1') {
-                    const premiumMatch = finalUrl.match(/premium(\d+)/i);
-                    const dlChannelId = premiumMatch && premiumMatch[1] ? premiumMatch[1] : null;
+                    const dlChannelIdRaw = req.query.dlChannelId;
+                    const dlChannelId = dlChannelIdRaw && /^\d+$/.test(String(dlChannelIdRaw))
+                        ? String(dlChannelIdRaw)
+                        : null;
 
                     if (dlChannelId) {
                         try {
                             console.warn(`[Proxy] mono.css HTML response; attempting server-side DLStreams re-resolve for channel ${dlChannelId}`);
-                            const resolveTimeoutMs = 12000;
+                            const resolveTimeoutMs = 7000;
                             const fresh = await Promise.race([
                                 dlstreamsService.resolveStreamUrl(dlChannelId, {
                                     forceRefresh: true,
@@ -1027,6 +1029,8 @@ router.get('/stream', async (req, res) => {
                         } catch (refreshErr) {
                             console.warn(`[Proxy] Server-side DLStreams re-resolve failed: ${refreshErr.message}`);
                         }
+                    } else {
+                        console.warn('[Proxy] mono.css HTML response but missing/invalid dlChannelId, skipping server-side DLStreams re-resolve');
                     }
                 }
 

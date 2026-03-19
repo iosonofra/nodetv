@@ -157,6 +157,9 @@ class ShakaPlayerEngine {
                         console.log(`[ShakaPlayer] Licensing request proxied: ${proxyUrl}`);
                     } else {
                         const headersParam = this.currentStreamHeaders ? `&headers=${encodeURIComponent(this.currentStreamHeaders)}` : '';
+                        const dlChannelIdParam = this.currentChannel?.tvgId && String(this.currentChannel.tvgId).startsWith('dl_')
+                            ? `&dlChannelId=${encodeURIComponent(String(this.currentChannel.tvgId).replace('dl_', ''))}`
+                            : '';
                         
                         // Propagate additional query parameters from manifest URL (like ?ck= for PlusCDN)
                         let extraParams = '';
@@ -169,7 +172,7 @@ class ShakaPlayerEngine {
                             }
                         }
 
-                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}${extraParams}`;
+                        const proxyUrl = `/api/proxy/stream?url=${encodeURIComponent(originalUrl)}&sourceId=${sourceId || ''}${headersParam}${dlChannelIdParam}${extraParams}`;
                         request.uris = [proxyUrl];
                     }
                 }

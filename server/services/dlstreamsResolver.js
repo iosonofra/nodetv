@@ -1357,18 +1357,85 @@ async function extractStreamUrl(page, channelId, options = {}) {
 }
 
 /**
- * Resolve a single channel URL on-demand (delegates to extractStreamUrl)
+ * Resolve a single channel URL on-demand.
+ *
+ * Fast-path strategy (no browser required, ~2-4s):
+ *   1. Cache hit → return immediately
+ *   2. HTTP probe of watch page → parse CHANNEL_KEY/M3U8_SERVER → server_lookup API
+ *   3. Direct server_lookup on all known CDN hosts
+ *
+ * Slow-path fallback (Puppeteer, ~20-60s):
+ *   4. Full headless browser render + stream interception
+ *
+ * This mirrors how the CDN itself works: the watch page embeds CHANNEL_KEY and M3U8_SERVER
+ * as JS variables, calls /server_lookup to get a server_key, then builds the mono.css URL.
+ * We replicate this in ~2 HTTP requests without a browser.
  */
 async function resolveChannelUrl(channelId, options = {}) {
     channelId = String(channelId);
+    const forceRefresh = options.forceRefresh === true;
+    const bypassFailureCache = options.bypassFailureCache === true;
     console.log(`[DLStreams Resolver] Resolving channel ${channelId}...`);
-    let browser;
+
+    // --- Cache check (shared with extractStreamUrl) ---
+    const cached = urlCache.get(channelId);
+    if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+        if (isValidStreamUrl(cached.streamUrl)) {
+            const isCachedMono = /\/mono\.(css|csv)(\?|$)/i.test((cached.streamUrl || '').split('#')[0]);
+            if (isCachedMono) {
+                const isAlive = await validateStreamUrlFast(cached.streamUrl, 2500);
+                if (isAlive) {
+                    console.log(`[DLStreams Resolver] Channel ${channelId}: OK [CACHED+VALIDATED]`);
+                    return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+                }
+                console.log(`  [*] Cached mono URL is stale for channel ${channelId}; refreshing.`);
+                urlCache.delete(channelId);
+            } else {
+                console.log(`[DLStreams Resolver] Channel ${channelId}: OK [CACHED]`);
+                return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+            }
+        } else {
+            urlCache.delete(channelId);
+        }
+    }
+
+    // --- Failure cache check ---
+    const failure = failureCache.get(channelId);
+    if (!forceRefresh && !bypassFailureCache && failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
+        console.log(`  [*] Skipping channel ${channelId} due to recent failure.`);
+        return { streamUrl: null, ckParam: null, cached: false };
+    }
+
+    const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
+
+    // --- Fast-path A: HTTP probe of watch page (parse CHANNEL_KEY/M3U8_SERVER) ---
+    console.log(`  [~] Trying fast HTTP probe for channel ${channelId}...`);
+    const httpProbed = await resolveViaHttpProbe(playerUrl, new Set(), `${BASE_URL}/`).catch(() => null);
+    if (httpProbed && isValidStreamUrl(httpProbed)) {
+        console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId}: ${httpProbed.substring(0, 80)}`);
+        urlCache.set(channelId, { streamUrl: httpProbed, ckParam: null, requestHeaders: null, timestamp: Date.now() });
+        saveUrlCache();
+        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [HTTP-PROBE]`);
+        return { streamUrl: httpProbed, ckParam: null, requestHeaders: null, cached: false };
+    }
+
+    // --- Fast-path B: direct server_lookup on all known CDN hosts ---
+    console.log(`  [~] Trying direct server_lookup for channel ${channelId}...`);
+    const directUrl = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+    if (directUrl && isValidStreamUrl(directUrl)) {
+        console.log(`  [+] Direct server_lookup succeeded for channel ${channelId}: ${directUrl.substring(0, 80)}`);
+        urlCache.set(channelId, { streamUrl: directUrl, ckParam: null, requestHeaders: null, timestamp: Date.now() });
+        saveUrlCache();
+        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
+        return { streamUrl: directUrl, ckParam: null, requestHeaders: null, cached: false };
+    }
+
+    // --- Slow-path: full Puppeteer browser render ---
+    console.log(`  [~] Fast paths failed for channel ${channelId}; falling back to Puppeteer...`);
     try {
-        browser = await getSharedBrowser();
+        const browser = await getSharedBrowser();
         const page = await browser.newPage();
         await page.setUserAgent(getRandomUA());
-        
-        // Set realistic viewport and headers
         await page.setViewport({ width: 1920, height: 1080 });
         await page.setExtraHTTPHeaders({
             'Accept-Language': 'en-US,en;q=0.9',
@@ -1379,18 +1446,19 @@ async function resolveChannelUrl(channelId, options = {}) {
             'Sec-Fetch-User': '?1',
             'Sec-Fetch-Dest': 'document'
         });
-        
+
         const result = await extractStreamUrl(page, channelId, options);
 
-        if (result.streamUrl && result.streamUrl.startsWith("chrome-extension://")) {
-            if (result.streamUrl.includes("#")) result.streamUrl = result.streamUrl.split("#")[1];
+        if (result.streamUrl && result.streamUrl.startsWith('chrome-extension://')) {
+            if (result.streamUrl.includes('#')) result.streamUrl = result.streamUrl.split('#')[1];
         }
 
-        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : ''}`);
+        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : '[PUPPETEER]'}`);
         await page.close().catch(() => {});
         return result;
     } catch (err) {
         console.error(`[DLStreams Resolver] Error: ${err.message}`);
+        failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
         return { streamUrl: null, ckParam: null, cached: false, error: err.message };
     }
 }

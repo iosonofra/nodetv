@@ -107,8 +107,8 @@ class VideoPlayer {
         // DLStreams mono.css manifests often have only 2-3 real segments per window
         // (the rest are image placeholders stripped by the proxy). Using liveSyncDurationCount:3
         // means HLS.js never finds enough segments to start playing. Use 1 for DLStreams.
-        const liveSyncCount = opts.isDlstreams ? 1 : 3;
-        const liveMaxLatency = opts.isDlstreams ? 4 : 10;
+        const liveSyncCount = opts.isDlstreams ? 1 : 2;
+        const liveMaxLatency = opts.isDlstreams ? 4 : 8;
         return {
             enableWorker: true,
             // Buffer settings to prevent underruns during background tab throttling
@@ -116,7 +116,11 @@ class VideoPlayer {
             maxMaxBufferLength: 60,        // Absolute max buffer 60 seconds
             maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
             maxBufferHole: 1.0,            // Allow 1s holes in buffer (helps with discontinuities)
-            // Live stream settings - stay further from live edge for stability
+            // Live stream settings - stay close to live edge for low latency.
+            // DLStreams mono manifests only have 2-3 real segments per 12s window;
+            // liveSyncDurationCount:3 would lock HLS.js at the start of the manifest
+            // forever, never finding 3 segments behind live edge. Use 1 for DLStreams,
+            // 2 for everything else (still safe; allows 8s latency which is fine for live TV).
             liveSyncDurationCount: liveSyncCount,
             liveMaxLatencyDurationCount: liveMaxLatency,
             liveBackBufferLength: 30,      // Keep 30s of back buffer for seeking

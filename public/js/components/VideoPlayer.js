@@ -678,6 +678,13 @@ class VideoPlayer {
                     } else {
                         this.mediaErrorCount = 1;
                     }
+                    this._totalMediaErrorCount = (this._totalMediaErrorCount || 0) + 1;
+
+                    // Hard cap: if too many non-fatal media errors, stop trying to recover
+                    if (this._totalMediaErrorCount > 10) {
+                        console.error(`[HLS] Too many non-fatal media errors (${this._totalMediaErrorCount}). Stopping recovery.`);
+                        return;
+                    }
 
                     // Only attempt recovery if more than 2 seconds since last attempt
                     if (timeSinceLastRecovery > 2000) {
@@ -986,6 +993,9 @@ class VideoPlayer {
         this.currentChannel = channel;
         this._dlstreamsRefreshAttempted = false;
         this._dlstreamsColdStartRetried = false;
+        this._fatalMediaRecoveryCount = 0;
+        this._dlstreamsMediaErrorRefreshAttempted = false;
+        this._totalMediaErrorCount = 0;
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1332,10 +1342,58 @@ class VideoPlayer {
                             );
                             return;
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                            // Fatal media error - try recovery with cooldown
+                            // Fatal media error - try recovery with cooldown and max attempts
+                            this._fatalMediaRecoveryCount = (this._fatalMediaRecoveryCount || 0) + 1;
                             const now = Date.now();
+
+                            if (this._fatalMediaRecoveryCount > 4) {
+                                // Too many fatal media errors — the stream is undecodable
+                                console.error(`[Player] Fatal media error persists after ${this._fatalMediaRecoveryCount} recovery attempts. Giving up.`);
+                                try { this.hls.stopLoad(); } catch (_) { }
+                                try { this.hls.destroy(); } catch (_) { }
+                                this.hls = null;
+
+                                if (isDlstreamsChannel && !this._dlstreamsMediaErrorRefreshAttempted) {
+                                    // One-shot: try force-refreshing the DLStreams URL
+                                    this._dlstreamsMediaErrorRefreshAttempted = true;
+                                    const dlChId = String(channel.tvgId).replace('dl_', '');
+                                    console.log(`[Player] DLStreams media decode failure — forcing re-resolve for channel ${dlChId}...`);
+                                    fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
+                                        .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
+                                        .then(resolved => {
+                                            if (resolved?.streamUrl) {
+                                                channel.streamUrl = resolved.streamUrl;
+                                                if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
+                                                console.log('[Player] DLStreams re-resolved after media error. Retrying play...');
+                                                this._fatalMediaRecoveryCount = 0;
+                                                this.play(channel);
+                                            } else {
+                                                throw new Error('Empty streamUrl');
+                                            }
+                                        })
+                                        .catch(err => {
+                                            console.error('[Player] DLStreams media-error re-resolve failed:', err.message);
+                                            this.showError(
+                                                'DLStreams stream is currently unavailable.<br><br>' +
+                                                'The stream segments could not be decoded (invalid or blocked content).<br>' +
+                                                'Try again in a minute or switch channel.'
+                                            );
+                                        });
+                                } else {
+                                    this.showError(
+                                        isDlstreamsChannel
+                                            ? 'DLStreams stream is currently unavailable.<br><br>' +
+                                              'The stream segments could not be decoded after multiple attempts.<br>' +
+                                              'Try again in a minute or switch channel.'
+                                            : 'Stream playback failed — the media could not be decoded.<br><br>' +
+                                              'The stream may be corrupted or in an unsupported format.'
+                                    );
+                                }
+                                return;
+                            }
+
                             if (now - (this.lastRecoveryAttempt || 0) > 2000) {
-                                console.log('Fatal media error, attempting recovery...');
+                                console.log(`Fatal media error (attempt ${this._fatalMediaRecoveryCount}/4), attempting recovery...`);
                                 this.lastRecoveryAttempt = now;
                                 this.hls.recoverMediaError();
                             }

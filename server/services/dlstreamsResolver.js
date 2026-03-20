@@ -434,12 +434,25 @@ function getCachedHeaders(channelId) {
     return cached?.requestHeaders || null;
 }
 
+/**
+ * Fallback: get ANY cached requestHeaders from any channel (same CDN expects same Referer)
+ */
+function getAnyDlstreamsHeaders() {
+    for (const [, entry] of urlCache) {
+        if (entry.requestHeaders && (entry.requestHeaders.referer || entry.requestHeaders.origin)) {
+            return entry.requestHeaders;
+        }
+    }
+    return null;
+}
+
 module.exports = {
     extractStreamUrl,
     resolveChannelUrl,
     decodeClearKey,
     fetchCategories,
     getCachedHeaders,
+    getAnyDlstreamsHeaders,
     getLaunchOptions,
     BASE_URL,
     CHROMIUM_PATH

@@ -15,7 +15,7 @@ const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
-const { getCachedHeaders } = require('../services/dlstreamsResolver');
+const { getCachedHeaders, getAnyDlstreamsHeaders } = require('../services/dlstreamsResolver');
 
 // Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -737,9 +737,15 @@ router.get('/stream', async (req, res) => {
                 const dlChannelId = req.query.dlChannelId;
                 if (dlChannelId) {
                     dlCachedHeaders = getCachedHeaders(dlChannelId);
-                    if (dlCachedHeaders) {
-                        console.log(`[Proxy] Using cached DLStreams headers for channel ${dlChannelId}:`, Object.keys(dlCachedHeaders));
-                    }
+                }
+                // Fallback: try to find any cached entry with headers for the same CDN host
+                if (!dlCachedHeaders) {
+                    dlCachedHeaders = getAnyDlstreamsHeaders();
+                }
+                if (dlCachedHeaders) {
+                    console.log(`[Proxy] Using DLStreams headers for mono URL:`, dlCachedHeaders.referer || dlCachedHeaders.origin || '(none)');
+                } else {
+                    console.warn(`[Proxy] No cached DLStreams headers available for mono URL - CDN may reject`);
                 }
             }
 
@@ -903,6 +909,16 @@ router.get('/stream', async (req, res) => {
             // Peek at first bytes to check for HLS manifest ({ #EXTM3U })
             const textPrefix = firstChunk.subarray(0, 7).toString('utf8');
             const contentLooksLikeHls = textPrefix === '#EXTM3U';
+
+            // Detect CDN faux-200 error responses for mono.css/mono.csv streams
+            // These CDN proxies return HTTP 200 with plain-text error messages instead of real HLS content
+            if (isDlStreamsMono && !contentLooksLikeHls) {
+                const bodySnippet = firstChunk.subarray(0, 200).toString('utf8');
+                if (bodySnippet.includes('Upstream error') || bodySnippet.includes('404') || bodySnippet.includes('Not Found') || bodySnippet.includes('error')) {
+                    console.error(`[Proxy] CDN returned faux-200 error for mono URL: ${bodySnippet.substring(0, 100)}`);
+                    return res.status(502).send(`Upstream error: ${bodySnippet.substring(0, 100)}`);
+                }
+            }
 
             if (contentLooksLikeHls) {
                 // HLS Manifest: We must read the WHOLE manifest to rewrite it

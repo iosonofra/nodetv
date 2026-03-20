@@ -378,7 +378,8 @@ class DlstreamsService {
         return {
             streamUrl: result.streamUrl,
             clearKeys,
-            cached: result.cached === true
+            cached: result.cached === true,
+            proxyHeaders: result.requestHeaders || null
         };
     }
 }

@@ -499,8 +499,11 @@ class WatchPage {
             (isPageHttps && isUrlHttp) ||
             proxyRequiredDomains.some(domain => url.includes(domain));
         const sourceId = this.content?.sourceId;
+        // Extract dlChannelId from mono.css URLs for DLStreams header lookup
+        const monoIdMatch = url.match(/premium(\d+)/i);
+        const dlChannelIdParam = monoIdMatch ? `&dlChannelId=${monoIdMatch[1]}` : '';
         const finalUrl = needsProxy
-            ? `/api/proxy/stream?url=${encodeURIComponent(url)}${sourceId ? `&sourceId=${sourceId}` : ''}`
+            ? `/api/proxy/stream?url=${encodeURIComponent(url)}${sourceId ? `&sourceId=${sourceId}` : ''}${dlChannelIdParam}`
             : url;
 
         console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls, isPageHttps, isUrlHttp });
@@ -588,7 +591,9 @@ class WatchPage {
                             if (!resolved || !resolved.streamUrl) return;
                             this.currentUrl = resolved.streamUrl;
                             const sid = this.content?.sourceId;
-                            const retryUrl = `/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}${sid ? `&sourceId=${sid}` : ''}`;
+                            const retryMonoMatch = this.currentUrl.match(/premium(\d+)/i);
+                            const retryDlParam = retryMonoMatch ? `&dlChannelId=${retryMonoMatch[1]}` : '';
+                            const retryUrl = `/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}${sid ? `&sourceId=${sid}` : ''}${retryDlParam}`;
                             this.playHls(retryUrl);
                         })
                         .catch((err) => {

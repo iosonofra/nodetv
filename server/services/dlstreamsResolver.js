@@ -8,6 +8,9 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
+const fetch = require('node-fetch');
 
 // Use stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
@@ -21,6 +24,21 @@ const CHROMIUM_PATH = process.env.CHROMIUM_PATH || "/usr/bin/chromium-browser";
 const ROOT_DIR = path.resolve(__dirname, "../../");
 const DATA_DIR = path.join(ROOT_DIR, "data", "scraper");
 const URL_CACHE_FILE = path.join(DATA_DIR, "url_cache.json");
+
+const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+const globalHttpAgent = new http.Agent();
+
+// User-Agent rotation pool
+const UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+];
+
+function getRandomUA() {
+    return UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+}
 
 // In-memory cache for resolved URLs (channelId -> { streamUrl, ckParam, timestamp })
 let urlCache = new Map();
@@ -66,6 +84,216 @@ function saveUrlCache() {
 
 // Initial load
 loadUrlCache();
+
+// ---- Stream URL validation helpers ----
+
+/**
+ * Returns true only for genuine stream URLs (.m3u8, .mpd, mono.css, mono.csv)
+ */
+function isValidStreamUrl(url) {
+    if (!url) return false;
+    const clean = url.split('#')[0];
+    return /\.(m3u8|mpd)(\?|$)/i.test(clean) ||
+           /\/mono\.(css|csv)(\?|$)/i.test(clean);
+}
+
+/**
+ * Find stream URL in HTML/JS text
+ */
+function findStreamUrlInText(text) {
+    if (!text) return null;
+    const mediaMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\.(?:m3u8|mpd)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (mediaMaybe) return mediaMaybe[0];
+    const monoMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/mono\.(?:css|csv)(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (monoMaybe) return monoMaybe[0];
+    return null;
+}
+
+/**
+ * Find wrapper/player URL in text
+ */
+function findWrapperUrlInText(text) {
+    if (!text) return null;
+    const wrapperMaybe = text.match(/https?:\/\/[\w\-.:@%?&=\/\+~]+?\/(?:stream|cast|watch|plus|casting|player)\/stream-\d+\.php(?:\?[\w\-.:@%?&=\/\+~]*)?/i);
+    if (wrapperMaybe) return wrapperMaybe[0];
+    return null;
+}
+
+/**
+ * Find premiumtv/daddyhd URL in text
+ */
+function findPremiumTvUrlInText(text, baseUrl = null) {
+    if (!text) return null;
+    const absMatch = text.match(/https?:\/\/[^"'\s<>]+\/premiumtv\/daddyhd\.php\?id=\d+(?:[^"'\s<>]*)?/i);
+    if (absMatch) return absMatch[0];
+    const relMatch = text.match(/["']([^"']*\/premiumtv\/daddyhd\.php\?id=\d+[^"']*)["']/i);
+    if (!relMatch || !relMatch[1]) return null;
+    try {
+        return baseUrl ? new URL(relMatch[1], baseUrl).href : relMatch[1];
+    } catch (_) {
+        return relMatch[1];
+    }
+}
+
+/**
+ * Parse CHANNEL_KEY + M3U8_SERVER from page HTML and do server_lookup to build mono URL
+ */
+async function resolvePremiumLookupFlow(pageHtml, pageUrl, refererUrl = null) {
+    if (!pageHtml || !pageUrl) return null;
+
+    const keyMatch = pageHtml.match(/CHANNEL_KEY\s*=\s*['\"]([^'\"]+)['\"]/i);
+    const serverMatch = pageHtml.match(/M3U8_SERVER\s*=\s*['\"]([^'\"]+)['\"]/i);
+    if (!keyMatch || !serverMatch) return null;
+
+    const channelKey = String(keyMatch[1] || '').trim();
+    const m3u8Server = String(serverMatch[1] || '').trim();
+    if (!channelKey || !m3u8Server) return null;
+
+    const lookupUrl = `https://${m3u8Server}/server_lookup?channel_id=${encodeURIComponent(channelKey)}`;
+
+    let pageOrigin = BASE_URL;
+    try { pageOrigin = new URL(pageUrl).origin; } catch (_) {}
+
+    try {
+        const lookupResp = await fetch(lookupUrl, {
+            method: 'GET',
+            headers: {
+                'User-Agent': getRandomUA(),
+                'Accept': 'application/json,text/plain,*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': refererUrl || pageUrl,
+                'Origin': pageOrigin,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            agent: lookupUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+            timeout: 18000
+        });
+
+        const lookupJson = await lookupResp.json().catch(() => null);
+        const serverKey = lookupJson?.server_key ? String(lookupJson.server_key).trim() : null;
+        if (!serverKey) return null;
+
+        const monoUrl = serverKey === 'top1/cdn'
+            ? `https://${m3u8Server}/proxy/top1/cdn/${channelKey}/mono.css`
+            : `https://${m3u8Server}/proxy/${serverKey}/${channelKey}/mono.css`;
+
+        return isValidStreamUrl(monoUrl) ? monoUrl : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+/**
+ * Resolve a URL by following HTTP redirects and parsing page content for stream URLs
+ */
+async function resolveViaHttpProbe(candidateUrl, visited = new Set(), refererUrl = null) {
+    if (!candidateUrl || visited.has(candidateUrl) || visited.size > 8) return null;
+    visited.add(candidateUrl);
+
+    if (isValidStreamUrl(candidateUrl)) return candidateUrl;
+
+    let origin = BASE_URL;
+    try { origin = new URL(refererUrl || candidateUrl).origin; } catch (_) {}
+
+    let body = '';
+    let finalUrl = candidateUrl;
+    try {
+        const response = await fetch(candidateUrl, {
+            method: 'GET',
+            headers: {
+                'User-Agent': getRandomUA(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': refererUrl || `${BASE_URL}/`,
+                'Origin': origin
+            },
+            redirect: 'follow',
+            timeout: 18000,
+            agent: candidateUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent
+        });
+
+        finalUrl = response?.url || candidateUrl;
+        if (isValidStreamUrl(finalUrl)) return finalUrl;
+
+        body = await response.text();
+    } catch (_) {
+        return null;
+    }
+
+    const mediaInBody = findStreamUrlInText(body);
+    if (mediaInBody && isValidStreamUrl(mediaInBody)) return mediaInBody;
+
+    const premiumResolved = await resolvePremiumLookupFlow(body, finalUrl, refererUrl || candidateUrl).catch(() => null);
+    if (premiumResolved && isValidStreamUrl(premiumResolved)) return premiumResolved;
+
+    const nextCandidate = findWrapperUrlInText(body) || findPremiumTvUrlInText(body, finalUrl);
+    if (nextCandidate && !visited.has(nextCandidate)) {
+        return resolveViaHttpProbe(nextCandidate, visited, finalUrl);
+    }
+
+    return null;
+}
+
+/**
+ * Try direct server_lookup on known CDN hosts
+ */
+async function resolveDirectChannelLookup(channelId, refererUrl = null) {
+    const cid = String(channelId || '').trim();
+    if (!/^\d+$/.test(cid)) return null;
+
+    const hosts = new Set(['ai.the-sunmoon.site', 'the-sunmoon.site']);
+
+    // Learn likely hosts from current cache entries
+    for (const value of urlCache.values()) {
+        const candidate = value?.streamUrl ? String(value.streamUrl) : '';
+        if (!candidate) continue;
+        try {
+            const h = new URL(candidate.split('#')[0]).hostname;
+            if (h) hosts.add(h);
+        } catch (_) {}
+    }
+
+    const channelIdVariants = [`premium${cid}`, cid];
+    const referer = `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${cid}`;
+
+    for (const host of hosts) {
+        for (const channelKey of channelIdVariants) {
+            try {
+                const lookupUrl = `https://${host}/server_lookup?channel_id=${encodeURIComponent(channelKey)}`;
+                const resp = await fetch(lookupUrl, {
+                    method: 'GET',
+                    headers: {
+                        'User-Agent': getRandomUA(),
+                        'Accept': 'application/json,text/plain,*/*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': refererUrl || referer,
+                        'Origin': `https://${host}`,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    agent: globalHttpsAgent,
+                    timeout: 8000
+                });
+                if (!resp.ok) continue;
+
+                const data = await resp.json().catch(() => null);
+                const serverKey = data?.server_key ? String(data.server_key).trim() : '';
+                if (!serverKey) continue;
+
+                const monoUrl = serverKey === 'top1/cdn'
+                    ? `https://${host}/proxy/top1/cdn/premium${cid}/mono.css`
+                    : `https://${host}/proxy/${serverKey}/premium${cid}/mono.css`;
+
+                if (!isValidStreamUrl(monoUrl)) continue;
+
+                console.log(`  [*] Resolved stream via direct server_lookup (${host}, key=${channelKey}): ${monoUrl}`);
+                return monoUrl;
+            } catch (_) {
+                // Try next variant/host
+            }
+        }
+    }
+    return null;
+}
 
 // Shared browser instance for reuse
 let sharedBrowser = null;
@@ -306,14 +534,45 @@ async function extractStreamUrl(page, channelId, options = {}) {
                 } catch(e) {}
             }
         }
-        // 3. Diagnostic dump on failure
+        // 3. Diagnostic dump on failure + HTTP probe fallback
         if (!streamUrl) {
             const diagPath = path.join(DATA_DIR, `fail_${channelId}.html`);
+            let pageHtml = '';
             try {
-                const html = await page.content();
-                fs.writeFileSync(diagPath, html, 'utf8');
-                console.log(`  [!] Diagnostic HTML dumped to ${diagPath}`);
+                pageHtml = await page.content();
+                fs.writeFileSync(diagPath, pageHtml, 'utf8');
             } catch (diagErr) { }
+
+            // Try HTTP probe fallback: parse page HTML for CHANNEL_KEY/M3U8_SERVER
+            const httpFallback = await resolvePremiumLookupFlow(pageHtml, playerUrl).catch(() => null);
+            if (httpFallback && isValidStreamUrl(httpFallback)) {
+                console.log(`  [*] Resolved stream URL via HTTP probe fallback: ${httpFallback}`);
+                streamUrl = httpFallback;
+                // Set referer headers for the CDN
+                requestHeaders = {
+                    'user-agent': getRandomUA(),
+                    'referer': 'https://freestyleridesx.lol/',
+                    'origin': 'https://freestyleridesx.lol',
+                    'accept': '*/*',
+                    'accept-language': 'en-US,en;q=0.9'
+                };
+            } else {
+                // Try direct server_lookup as last resort
+                const directFallback = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+                if (directFallback && isValidStreamUrl(directFallback)) {
+                    console.log(`  [*] Resolved stream URL via direct server_lookup fallback: ${directFallback}`);
+                    streamUrl = directFallback;
+                    requestHeaders = {
+                        'user-agent': getRandomUA(),
+                        'referer': 'https://freestyleridesx.lol/',
+                        'origin': 'https://freestyleridesx.lol',
+                        'accept': '*/*',
+                        'accept-language': 'en-US,en;q=0.9'
+                    };
+                } else {
+                    console.log(`  [!] Diagnostic HTML dumped to ${diagPath} (no stream found)`);
+                }
+            }
         }
 
         // 4. Cache result or failure
@@ -337,16 +596,91 @@ async function extractStreamUrl(page, channelId, options = {}) {
 }
 
 /**
- * Resolve a single channel URL on-demand (delegates to extractStreamUrl)
+ * Resolve a single channel URL on-demand.
+ * Fast-path: HTTP probe of watch pages + direct server_lookup (~2-5s)
+ * Slow-path: Full Puppeteer browser render (~20-60s)
  */
 async function resolveChannelUrl(channelId, options = {}) {
     channelId = String(channelId);
+    const { bypassFailureCache, forceRefresh } = options;
     console.log(`[DLStreams Resolver] Resolving channel ${channelId}...`);
-    let browser;
+
+    // --- Cache check ---
+    const cached = urlCache.get(channelId);
+    if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+        const isMono = cached.streamUrl && (cached.streamUrl.includes('mono.css') || cached.streamUrl.includes('mono.csv'));
+        if (isMono && !cached.requestHeaders) {
+            console.log(`  [*] Cache invalidated for channel ${channelId}: mono URL without requestHeaders`);
+        } else {
+            console.log(`[DLStreams Resolver] Channel ${channelId}: OK [CACHED]`);
+            return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+        }
+    }
+
+    // --- Failure cache check ---
+    if (!forceRefresh && !bypassFailureCache) {
+        const failure = failureCache.get(channelId);
+        if (failure && (Date.now() - failure.timestamp) < FAILURE_TTL_MS) {
+            console.log(`  [*] Skipping channel ${channelId} due to recent failure.`);
+            return { streamUrl: null, ckParam: null, cached: false };
+        }
+    }
+
+    const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
+
+    // --- Fast-path A: HTTP probe of watch pages ---
+    const watchPageHosts = [
+        playerUrl,
+        `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${channelId}`,
+    ];
+    console.log(`  [~] Trying fast HTTP probe for channel ${channelId}...`);
+    for (const watchUrl of watchPageHosts) {
+        const httpProbed = await resolveViaHttpProbe(watchUrl, new Set(), `${BASE_URL}/`).catch(() => null);
+        if (httpProbed && isValidStreamUrl(httpProbed)) {
+            console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId}: ${httpProbed.substring(0, 80)}`);
+            // Try to get referer headers from the watch page host
+            let probeHeaders = null;
+            try {
+                const watchOrigin = new URL(watchUrl).origin;
+                probeHeaders = {
+                    'user-agent': getRandomUA(),
+                    'referer': watchOrigin + '/',
+                    'origin': watchOrigin,
+                    'accept': '*/*',
+                    'accept-language': 'en-US,en;q=0.9'
+                };
+            } catch (_) {}
+            urlCache.set(channelId, { streamUrl: httpProbed, ckParam: null, requestHeaders: probeHeaders, timestamp: Date.now() });
+            saveUrlCache();
+            console.log(`[DLStreams Resolver] Channel ${channelId}: OK [HTTP-PROBE]`);
+            return { streamUrl: httpProbed, ckParam: null, requestHeaders: probeHeaders, cached: false };
+        }
+    }
+
+    // --- Fast-path B: direct server_lookup on known CDN hosts ---
+    console.log(`  [~] Trying direct server_lookup for channel ${channelId}...`);
+    const directUrl = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+    if (directUrl && isValidStreamUrl(directUrl)) {
+        console.log(`  [+] Direct server_lookup succeeded for channel ${channelId}: ${directUrl.substring(0, 80)}`);
+        const lookupHeaders = {
+            'user-agent': getRandomUA(),
+            'referer': 'https://freestyleridesx.lol/',
+            'origin': 'https://freestyleridesx.lol',
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9'
+        };
+        urlCache.set(channelId, { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, timestamp: Date.now() });
+        saveUrlCache();
+        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
+        return { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, cached: false };
+    }
+
+    // --- Slow-path: full Puppeteer browser render ---
+    console.log(`  [~] Fast paths failed for channel ${channelId}; falling back to Puppeteer...`);
     try {
-        browser = await getSharedBrowser();
+        const browser = await getSharedBrowser();
         const page = await browser.newPage();
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36");
+        await page.setUserAgent(getRandomUA());
         
         const result = await extractStreamUrl(page, channelId, options);
 
@@ -354,11 +688,12 @@ async function resolveChannelUrl(channelId, options = {}) {
             if (result.streamUrl.includes("#")) result.streamUrl = result.streamUrl.split("#")[1];
         }
 
-        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : ''}`);
+        console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : '[PUPPETEER]'}`);
         await page.close().catch(() => {});
         return result;
     } catch (err) {
         console.error(`[DLStreams Resolver] Error: ${err.message}`);
+        failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
         return { streamUrl: null, ckParam: null, cached: false, error: err.message };
     }
 }

@@ -46,24 +46,11 @@ class DlstreamsService {
             nextRun = new Date(this.lastRun.getTime() + (intervalHours * 3600000));
         }
 
-        const history = this.getHistory();
-        const latestRun = history[0] || null;
-        const latestMetrics = latestRun?.metrics || {
-            retriesUsed: 0,
-            retryRecoveredChannels: 0,
-            cooldownActivations: 0,
-            finalFailures: 0
-        };
-
         return {
             isRunning: this.isRunning,
             lastRun: this.lastRun,
-            history,
-            latestMetrics,
+            history: this.getHistory(),
             fileInfo,
-            dlstreamsConcurrencyLimit: currentSettings.dlstreamsConcurrencyLimit || 4,
-            dlstreamsHoursBefore: currentSettings.dlstreamsHoursBefore ?? 3,
-            dlstreamsHoursAfter:  currentSettings.dlstreamsHoursAfter  ?? 3,
             autoRunInfo: {
                 enabled: autoRunEnabled,
                 intervalHours,
@@ -110,12 +97,8 @@ class DlstreamsService {
             this.addLog('[*] No categories selected — scraping all events.');
         }
 
-        const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 4;
+        const concurrencyLimit = currentSettings.dlstreamsConcurrencyLimit || 5;
         this.addLog(`[*] Concurrency Limit: ${concurrencyLimit}`);
-
-        const hoursBefore = parseInt(currentSettings.dlstreamsHoursBefore) || 3;
-        const hoursAfter  = parseInt(currentSettings.dlstreamsHoursAfter)  || 3;
-        this.addLog(`[*] Time window: -${hoursBefore}h / +${hoursAfter}h`);
 
         const scriptPath = path.join(__dirname, '../scraper/dlstreams.js');
 
@@ -125,9 +108,7 @@ class DlstreamsService {
                 PORT: process.env.PORT || 3000,
                 SCRAPER_RUN_TYPE: runType,
                 DLSTREAMS_CATEGORIES: JSON.stringify(selectedCategories),
-                SCRAPER_CONCURRENCY: concurrencyLimit.toString(),
-                DLSTREAMS_HOURS_BEFORE: hoursBefore.toString(),
-                DLSTREAMS_HOURS_AFTER: hoursAfter.toString()
+                SCRAPER_CONCURRENCY: concurrencyLimit.toString()
             }
         });
 
@@ -353,11 +334,9 @@ class DlstreamsService {
      * @param {string} channelId - DLStreams channel ID (numeric string)
      * @returns {{ streamUrl: string|null, clearKeys: string|null, cached: boolean }}
      */
-    async resolveStreamUrl(channelId, options = {}) {
+    async resolveStreamUrl(channelId) {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
-        const result = await resolveChannelUrl(channelId, {
-            bypassFailureCache: options.forceRefresh || options.bypassFailureCache || false
-        });
+        const result = await resolveChannelUrl(channelId);
 
         // Decode ClearKey if present
         let clearKeys = null;
@@ -378,7 +357,7 @@ class DlstreamsService {
         return {
             streamUrl: result.streamUrl,
             clearKeys,
-            cached: result.cached === true
+            cached: result.cached
         };
     }
 }

@@ -15,6 +15,7 @@ const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
+const dlstreamsService = require('../services/dlstreamsService');
 
 // Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -722,6 +723,31 @@ router.get('/stream', async (req, res) => {
     const maxRetries = 2;
     let lastError = null;
 
+    const looksLikeHtmlResponse = async (resp) => {
+        if (!resp) return true;
+        const ct = (resp.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('text/html')) return true;
+        try {
+            const preview = (await resp.clone().text()).trimStart().slice(0, 256).toLowerCase();
+            return preview.startsWith('<!doctype html') ||
+                preview.startsWith('<html') ||
+                preview.startsWith('<head') ||
+                preview.includes('<title>');
+        } catch {
+            return false;
+        }
+    };
+
+    const looksLikeHlsManifest = async (resp) => {
+        if (!resp) return false;
+        try {
+            const preview = (await resp.clone().text()).trimStart().slice(0, 32);
+            return preview.startsWith('#EXTM3U');
+        } catch {
+            return false;
+        }
+    };
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             let { url, sourceId } = req.query;
@@ -803,12 +829,56 @@ router.get('/stream', async (req, res) => {
                 return (browserOrigin || urlObj.origin) + '/';
             };
 
+            // Match /mono.css or /mono.csv (slash-prefixed, not dot-prefixed like ".mono.css")
+            // The actual URL path is /proxy/<key>/premium<id>/mono.css
+            const isMonoMasquerade = /\/mono\.(css|csv)(\?|#|$)/i.test(finalUrl) || /\.(mono\.css|mono\.csv)(\?|#|$)/i.test(finalUrl);
+            const isManifestRequest = /\.(m3u8|mpd)(\?|$)/i.test(finalUrl) || isMonoMasquerade;
+            const isLikelyDlstreamsCdn = /(dlstreams\.top|zhdcdn\.zip|hhkys\.com|the-sunmoon\.site)/i.test(finalUrl);
+            const isAiSunmoon = /ai\.the-sunmoon\.site/i.test(finalUrl);
+            const isImageLikeSegmentRequest = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(finalUrl) ||
+                /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(finalUrl) ||
+                /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(finalUrl);
+
+            if (req.query.dlChannelId && isImageLikeSegmentRequest) {
+                console.warn(`[Proxy] Blocking image-like segment request for DLStreams channel ${req.query.dlChannelId}: ${finalUrl.substring(0, 140)}...`);
+                return res.status(410).json({
+                    error: 'Blocked non-media segment in DLStreams manifest',
+                    url: finalUrl
+                });
+            }
+
+            const getRefererForMono = () => {
+                if (customHeaders['Referer'] || customHeaders['referer']) {
+                    return customHeaders['Referer'] || customHeaders['referer'];
+                }
+                if (isAiSunmoon && isMonoMasquerade) {
+                    // For ai.the-sunmoon.site/proxy/*/premium*/mono.css, use freestyleridesx origin
+                    // so the server recognizes it as a legitimate internal request
+                    const premiumMatch = finalUrl.match(/premium\d+/i);
+                    if (premiumMatch) {
+                        return `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${premiumMatch[0].replace(/\D/g, '')}`;
+                    }
+                    return 'https://freestyleridesx.lol/premiumtv/daddyhd.php';
+                }
+                if (isPluto) return 'https://pluto.tv/';
+                if (isFancode) return 'https://fancode.com/';
+                return (browserOrigin || urlObj.origin) + '/';
+            };
+
             const headers = {
                 'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*',
+                'Accept': isMonoMasquerade 
+                    ? 'application/x-mpegURL, application/vnd.apple.mpegurl, application/vnd.apple.mpegurl;version=3, application/xspf+xml, text/plain, */*'
+                    : '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': isAiSunmoon ? 'cross-site' : 'none',
                 'Origin': getOrigin(),
-                'Referer': getReferer()
+                'Referer': getRefererForMono()
             };
 
             // Apply all other custom headers
@@ -830,7 +900,68 @@ router.get('/stream', async (req, res) => {
                 agent: proxyAgent || (finalUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
             };
 
-            const response = await fetch(finalUrl, fetchOptions);
+            let response = await fetch(finalUrl, fetchOptions);
+
+            // mono.css/mono.csv should return M3U playlist, not HTML.
+            // The CDN appears to use lazy playlist generation: the first cold request triggers
+            // server-side generation and returns HTML/empty while it builds the playlist.
+            // Subsequent requests hit the cache and return the HLS manifest immediately.
+            // Strategy: detect non-HLS response, wait for CDN to finish generating, then retry
+            // with the same headers (same referer that was used to resolve the URL).
+            if (isMonoMasquerade && response.ok) {
+                const initialInvalid = await looksLikeHtmlResponse(response) || !(await looksLikeHlsManifest(response));
+                if (initialInvalid) {
+                    console.log(`[Proxy] mono.css returned non-HLS content (CDN cold-start). Retrying with backoff...`);
+
+                    // CDN uses lazy playlist generation: the first cold request triggers
+                    // server-side build and returns HTML while it prepares the cache.
+                    // Retry up to 4 times with increasing delays (1s, 2s, 2s, 2s = 7s budget).
+                    const coldStartDelays = [1000, 2000, 2000, 2000];
+                    let coldStartResolved = false;
+                    for (let i = 0; i < coldStartDelays.length; i++) {
+                        await new Promise(r => setTimeout(r, coldStartDelays[i]));
+                        const retryResp = await fetch(finalUrl, fetchOptions).catch(() => null);
+                        if (retryResp && retryResp.ok && !(await looksLikeHtmlResponse(retryResp)) && (await looksLikeHlsManifest(retryResp))) {
+                            console.log(`[Proxy] mono.css cold-start retry ${i + 1} succeeded after ${coldStartDelays.slice(0, i + 1).reduce((a, b) => a + b, 0)}ms`);
+                            response = retryResp;
+                            coldStartResolved = true;
+                            break;
+                        }
+                        console.log(`[Proxy] mono.css cold-start retry ${i + 1}/${coldStartDelays.length} still HTML, waiting...`);
+                    }
+                    // If all retries fail, fall through to server-side re-resolve below
+                }
+            }
+
+            // Some DLStreams CDNs return 403/404 unless Origin/Referer match dlstreams.top.
+            // Retry once with forced DLStreams headers only for manifest requests.
+            if (!response.ok && (response.status === 403 || response.status === 404) && isManifestRequest && isLikelyDlstreamsCdn) {
+                const fallbackHeaders = {
+                    ...headers,
+                    'Origin': 'https://dlstreams.top',
+                    'Referer': 'https://dlstreams.top/'
+                };
+                const fallbackOptions = {
+                    ...fetchOptions,
+                    headers: fallbackHeaders
+                };
+                console.log(`[Proxy] Retry manifest with DLStreams headers for ${finalUrl.substring(0, 120)}...`);
+                response = await fetch(finalUrl, fallbackOptions);
+            }
+
+            // Some origins reject explicit Origin/Referer headers from proxies.
+            // Final fallback: retry without Origin and Referer for manifest fetches.
+            if (!response.ok && (response.status === 403 || response.status === 404) && isManifestRequest) {
+                const noCorsHeaders = { ...headers };
+                delete noCorsHeaders.Origin;
+                delete noCorsHeaders.Referer;
+                const fallbackNoCorsOptions = {
+                    ...fetchOptions,
+                    headers: noCorsHeaders
+                };
+                console.log(`[Proxy] Retry manifest without Origin/Referer for ${finalUrl.substring(0, 120)}...`);
+                response = await fetch(finalUrl, fallbackNoCorsOptions);
+            }
 
             // Retry on 5xx errors (transient upstream issues)
             if (response.status >= 500 && attempt < maxRetries) {
@@ -848,8 +979,85 @@ router.get('/stream', async (req, res) => {
                 return res.status(response.status).send(`Failed to fetch stream: ${response.statusText}`);
             }
 
+            // Never forward HTML as a valid manifest. HLS.js should receive a hard error so
+            // the client-side retry logic can re-resolve instead of attempting decoder init.
+            if (isManifestRequest && await looksLikeHtmlResponse(response)) {
+                // One-shot server-side recovery for DLStreams mono.css manifests.
+                // If cached mono URL is stale, force-refresh the channel URL and retry fetch.
+                if (isMonoMasquerade && req.query._dlAutoRefresh !== '1') {
+                    const dlChannelIdRaw = req.query.dlChannelId;
+                    const dlChannelId = dlChannelIdRaw && /^\d+$/.test(String(dlChannelIdRaw))
+                        ? String(dlChannelIdRaw)
+                        : null;
+
+                    if (dlChannelId) {
+                        try {
+                            console.warn(`[Proxy] mono.css HTML response; attempting server-side DLStreams re-resolve for channel ${dlChannelId}`);
+                            const resolveTimeoutMs = 7000;
+                            const fresh = await Promise.race([
+                                dlstreamsService.resolveStreamUrl(dlChannelId, {
+                                    forceRefresh: true,
+                                    validateCache: true
+                                }),
+                                new Promise((_, reject) => {
+                                    setTimeout(() => reject(new Error(`DLStreams resolve timeout after ${resolveTimeoutMs}ms`)), resolveTimeoutMs);
+                                })
+                            ]);
+
+                            const freshUrlRaw = fresh && fresh.streamUrl ? String(fresh.streamUrl) : '';
+                            const freshUrl = freshUrlRaw ? freshUrlRaw.split('#')[0] : '';
+
+                            if (freshUrl) {
+                                const retryHeaders = { ...headers };
+                                if (fresh.proxyHeaders && typeof fresh.proxyHeaders === 'object') {
+                                    Object.entries(fresh.proxyHeaders).forEach(([k, v]) => {
+                                        if (!k || v == null) return;
+                                        const lk = String(k).toLowerCase();
+                                        if (lk === 'host') return;
+                                        retryHeaders[k] = String(v);
+                                    });
+                                }
+
+                                const refreshedResponse = await fetch(freshUrl, {
+                                    ...fetchOptions,
+                                    headers: retryHeaders,
+                                    agent: freshUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent
+                                }).catch(() => null);
+
+                                if (refreshedResponse && refreshedResponse.ok && !(await looksLikeHtmlResponse(refreshedResponse))) {
+                                    console.log(`[Proxy] Server-side DLStreams re-resolve succeeded for channel ${dlChannelId}`);
+                                    response = refreshedResponse;
+                                    finalUrl = freshUrl;
+                                }
+                            }
+                        } catch (refreshErr) {
+                            console.warn(`[Proxy] Server-side DLStreams re-resolve failed: ${refreshErr.message}`);
+                        }
+                    } else {
+                        console.warn('[Proxy] mono.css HTML response but missing/invalid dlChannelId, skipping server-side DLStreams re-resolve');
+                    }
+                }
+
+                if (await looksLikeHtmlResponse(response)) {
+                const bodySnippet = await response.text().catch(() => 'N/A');
+                console.error(`[Proxy] Invalid manifest response (HTML) for ${finalUrl.substring(0, 120)}...`);
+                return res.status(502).json({
+                    error: 'Upstream returned HTML instead of media manifest',
+                    url: finalUrl,
+                    details: bodySnippet.substring(0, 180)
+                });
+                }
+            }
+
             const contentType = response.headers.get('content-type') || '';
             res.set('Access-Control-Allow-Origin', '*');
+
+            if (isManifestRequest) {
+                // Avoid replaying poisoned manifests from browser/proxy caches.
+                res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+                res.set('Pragma', 'no-cache');
+                res.set('Expires', '0');
+            }
 
             // Forward range-related headers for video seeking support
             const contentLength = response.headers.get('content-length');
@@ -885,8 +1093,10 @@ router.get('/stream', async (req, res) => {
             const firstChunk = Buffer.from(first.value);
 
             // Peek at first bytes to check for HLS manifest ({ #EXTM3U })
-            const textPrefix = firstChunk.subarray(0, 7).toString('utf8');
-            const contentLooksLikeHls = textPrefix === '#EXTM3U';
+            const firstChunkText = firstChunk.toString('utf8');
+            const contentLooksLikeHls =
+                firstChunkText.trimStart().startsWith('#EXTM3U') ||
+                (isManifestRequest && /mpegurl|vnd\.apple\.mpegurl|x-mpegurl/i.test(contentType));
 
             if (contentLooksLikeHls) {
                 // HLS Manifest: We must read the WHOLE manifest to rewrite it
@@ -902,13 +1112,157 @@ router.get('/stream', async (req, res) => {
                 const buffer = Buffer.concat(chunks);
                 const finalUrl = response.url || url;
                 console.log(`[Proxy] Processing HLS manifest from: ${finalUrl.substring(0, 80)}...`);
-                res.set('Content-Type', 'application/vnd.apple.mpegurl');
-
                 let manifest = buffer.toString('utf-8');
+
+                // Sanity-check HLS manifests. Some anti-bot endpoints return syntactically
+                // valid playlists that point mostly/all segments to image assets (.png/.jpg),
+                // which later crash the media pipeline.
+                const manifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
+                const uriLines = manifestLines.filter(l => !l.startsWith('#'));
+                const decodeLoose = (value) => {
+                    if (!value) return '';
+                    try {
+                        return decodeURIComponent(value);
+                    } catch {
+                        return String(value);
+                    }
+                };
+                const uriMeta = uriLines.map((line) => {
+                    const raw = String(line);
+                    const decoded = decodeLoose(raw);
+                    return { raw, decoded };
+                });
+                const hasExtinf = manifestLines.some(l => l.startsWith('#EXTINF'));
+                const childManifestCount = uriMeta.filter(({ raw, decoded }) => /\.(m3u8|m3u|mpd)(\?|$|&)/i.test(raw) || /\.(m3u8|m3u|mpd)(\?|$|&)/i.test(decoded)).length;
+                const knownPoisonSegments = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /seg_[a-z0-9_\-]+\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|\"|')/i.test(s);
+                }).length;
+                const imageUriCount = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|\"|')/i.test(s) ||
+                        /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                        /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                }).length;
+                const mediaUriCount = uriMeta.filter(({ raw, decoded }) => {
+                    const s = `${raw} ${decoded}`;
+                    return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                        /response-content-type=(video|audio)\//i.test(s);
+                }).length;
+                const suspiciousImagePlaylist = hasExtinf && (
+                    (imageUriCount > 0 && mediaUriCount === 0) ||
+                    (imageUriCount >= 2 && imageUriCount > mediaUriCount)
+                );
+                const suspiciousNoExtinfImagePlaylist = !hasExtinf && imageUriCount > 0 && mediaUriCount === 0 && childManifestCount === 0;
+                const aggressiveMonoImageBlock = isMonoMasquerade && (
+                    (imageUriCount > 0 && mediaUriCount === 0) ||
+                    (knownPoisonSegments >= 2 && mediaUriCount <= 1) ||
+                    (imageUriCount >= 3 && imageUriCount > mediaUriCount)
+                );
+
+                if (isMonoMasquerade && imageUriCount > 0 && mediaUriCount > 0) {
+                    const rawLines = manifest.split('\n');
+                    const isImageLikeUri = (value) => {
+                        const s = `${value} ${decodeLoose(value)}`;
+                        return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s) ||
+                            /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                            /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                    };
+                    const isMediaLikeUri = (value) => {
+                        const s = `${value} ${decodeLoose(value)}`;
+                        return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                            /response-content-type=(video|audio)\//i.test(s);
+                    };
+
+                    const sanitizedLines = [];
+                    let pendingSegmentMeta = [];
+                    let removedSegments = 0;
+
+                    for (const line of rawLines) {
+                        const trimmed = line.trim();
+
+                        if (!trimmed) {
+                            continue;
+                        }
+
+                        if (trimmed.startsWith('#EXTINF') || trimmed.startsWith('#EXT-X-PROGRAM-DATE-TIME') || trimmed.startsWith('#EXT-X-BYTERANGE') || trimmed.startsWith('#EXT-X-DISCONTINUITY')) {
+                            // Buffer these together with the segment URI that follows.
+                            // If that URI turns out to be an image, the whole block
+                            // (including #EXT-X-DISCONTINUITY) gets discarded.
+                            pendingSegmentMeta.push(line);
+                            continue;
+                        }
+
+                        if (!trimmed.startsWith('#')) {
+                            if (isImageLikeUri(trimmed)) {
+                                removedSegments++;
+                                pendingSegmentMeta = [];
+                                continue;
+                            }
+
+                            if (pendingSegmentMeta.length > 0) {
+                                sanitizedLines.push(...pendingSegmentMeta);
+                                pendingSegmentMeta = [];
+                            }
+
+                            if (isMediaLikeUri(trimmed) || /^https?:\/\//i.test(trimmed) || trimmed.startsWith('/')) {
+                                sanitizedLines.push(line);
+                            }
+                            continue;
+                        }
+
+                        sanitizedLines.push(line);
+                    }
+
+                    if (removedSegments > 0) {
+                        // Discard any trailing buffered segment metadata with no following URI
+                        // (e.g. a #EXT-X-DISCONTINUITY at the very end of the manifest)
+                        if (pendingSegmentMeta.length > 0) {
+                            pendingSegmentMeta = [];
+                        }
+                        manifest = sanitizedLines.join('\n');
+                        console.log(`[Proxy] Sanitized mixed mono manifest by removing ${removedSegments} image segment block(s) for ${finalUrl.substring(0, 120)}...`);
+                    }
+                }
+
+                const sanitizedManifestLines = manifest.split('\n').map(l => l.trim()).filter(Boolean);
+                const sanitizedUriLines = sanitizedManifestLines.filter(l => !l.startsWith('#'));
+                const sanitizedImageUriCount = sanitizedUriLines.filter(line => {
+                    const s = `${line} ${decodeLoose(line)}`;
+                    return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$|&|"|')/i.test(s) ||
+                        /response-content-type=image\/(png|jpe?g|gif|webp|bmp|svg\+xml)/i.test(s) ||
+                        /(?:filename|filename\*)[^&\n]*\.(png|jpe?g|gif|webp|bmp|svg)/i.test(s);
+                }).length;
+                const sanitizedMediaUriCount = sanitizedUriLines.filter(line => {
+                    const s = `${line} ${decodeLoose(line)}`;
+                    return /\.(ts|m2ts|m4s|m4v|m4a|cmfa|cmfv|mp4|aac|ac3|ec3|mp3|webm)(\?|$|&)/i.test(s) ||
+                        /response-content-type=(video|audio)\//i.test(s);
+                }).length;
+                const finalSuspiciousImagePlaylist = suspiciousImagePlaylist && sanitizedMediaUriCount === 0;
+                const finalSuspiciousNoExtinfImagePlaylist = suspiciousNoExtinfImagePlaylist && sanitizedMediaUriCount === 0;
+                const finalAggressiveMonoImageBlock = aggressiveMonoImageBlock && sanitizedMediaUriCount === 0;
+
+                if (finalSuspiciousImagePlaylist || finalSuspiciousNoExtinfImagePlaylist || finalAggressiveMonoImageBlock || (isMonoMasquerade && sanitizedImageUriCount > 0 && sanitizedMediaUriCount === 0)) {
+                    console.error(`[Proxy] Rejected suspicious HLS manifest (image segments) for ${finalUrl.substring(0, 120)}...`);
+                    return res.status(502).json({
+                        error: 'Upstream returned invalid HLS playlist',
+                        reason: 'playlist contains image segments instead of media segments',
+                        url: finalUrl
+                    });
+                }
+
+                res.set('Content-Type', 'application/vnd.apple.mpegurl');
 
                 const finalUrlObj = new URL(finalUrl);
                 const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);
                 const queryStr = finalUrlObj.search;
+                const passthroughParams = new URLSearchParams();
+                for (const [k, v] of Object.entries(req.query || {})) {
+                    if (k === 'url' || v == null || v === '') continue;
+                    passthroughParams.set(k, String(v));
+                }
+                const passthroughSuffix = passthroughParams.toString();
+                const proxySuffix = passthroughSuffix ? `&${passthroughSuffix}` : '';
 
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
@@ -923,7 +1277,7 @@ router.get('/stream', async (req, res) => {
                                     if (!p1.includes('?') && queryStr) {
                                         absoluteUrl += queryStr;
                                     }
-                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}"`;
+                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${proxySuffix}"`;
                                 } catch (e) {
                                     return match;
                                 }
@@ -944,7 +1298,7 @@ router.get('/stream', async (req, res) => {
                                 absoluteUrl += queryStr;
                             }
                         }
-                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}`;
+                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${proxySuffix}`;
                     } catch (e) { return line; }
                 }).join('\n');
 

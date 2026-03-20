@@ -135,8 +135,14 @@ async function extractStreamUrl(page, channelId, options = {}) {
     // 1. Check cache first
     const cached = urlCache.get(channelId);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
-        console.log(`  [*] Cache hit for channel ${channelId}`);
-        return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, cached: true };
+        // Invalidate cache for mono.css/mono.csv URLs without requestHeaders (can't proxy without them)
+        const isMono = cached.streamUrl && (cached.streamUrl.includes('mono.css') || cached.streamUrl.includes('mono.csv'));
+        if (isMono && !cached.requestHeaders) {
+            console.log(`  [*] Cache invalidated for channel ${channelId}: mono URL without requestHeaders`);
+        } else {
+            console.log(`  [*] Cache hit for channel ${channelId}`);
+            return { streamUrl: cached.streamUrl, ckParam: cached.ckParam, requestHeaders: cached.requestHeaders || null, cached: true };
+        }
     }
 
     // 2. Check failure cache (skip if bypassFailureCache)
@@ -151,6 +157,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
     const playerUrl = channelId.startsWith('http') ? channelId : `${BASE_URL}/watch.php?id=${channelId}`;
     let streamUrl = null;
     let ckParam = null;
+    let requestHeaders = null;
 
     try {
         // Intercept network requests
@@ -162,6 +169,18 @@ async function extractStreamUrl(page, channelId, options = {}) {
             if (!streamUrl && !url.includes('s3.dualstack') && (url.includes('.mpd') || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv'))) {
                 console.log(`  [+] Intercepted: ${url}`);
                 streamUrl = url;
+                // Capture request headers (Referer, Origin) needed by CDN
+                try {
+                    const hdrs = req.headers();
+                    const kept = {};
+                    for (const [k, v] of Object.entries(hdrs)) {
+                        const lk = k.toLowerCase();
+                        if (['user-agent','origin','referer','accept','accept-language'].includes(lk) && v) {
+                            kept[lk] = v;
+                        }
+                    }
+                    if (Object.keys(kept).length > 0) requestHeaders = kept;
+                } catch (e) {}
                 if (url.includes('ck=')) {
                     try {
                         const parts = url.split('ck=');
@@ -303,7 +322,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
 
         // 3. Cache result or failure
         if (streamUrl) {
-            urlCache.set(channelId, { streamUrl, ckParam, timestamp: Date.now() });
+            urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });
             saveUrlCache();
         } else {
             failureCache.set(channelId, { timestamp: Date.now(), error: "Timeout" });
@@ -407,11 +426,20 @@ async function fetchCategories() {
     }
 }
 
+/**
+ * Get cached request headers for a channel (used by proxy to set correct Referer/Origin)
+ */
+function getCachedHeaders(channelId) {
+    const cached = urlCache.get(String(channelId));
+    return cached?.requestHeaders || null;
+}
+
 module.exports = {
     extractStreamUrl,
     resolveChannelUrl,
     decodeClearKey,
     fetchCategories,
+    getCachedHeaders,
     getLaunchOptions,
     BASE_URL,
     CHROMIUM_PATH

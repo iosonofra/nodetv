@@ -15,6 +15,7 @@ const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
+const { getCachedHeaders } = require('../services/dlstreamsResolver');
 
 // Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -729,6 +730,19 @@ router.get('/stream', async (req, res) => {
                 return res.status(400).json({ error: 'URL required' });
             }
 
+            // For DLStreams mono.css/mono.csv URLs, inject cached Referer/Origin headers
+            const isDlStreamsMono = url.includes('mono.css') || url.includes('mono.csv');
+            let dlCachedHeaders = null;
+            if (isDlStreamsMono) {
+                const dlChannelId = req.query.dlChannelId;
+                if (dlChannelId) {
+                    dlCachedHeaders = getCachedHeaders(dlChannelId);
+                    if (dlCachedHeaders) {
+                        console.log(`[Proxy] Using cached DLStreams headers for channel ${dlChannelId}:`, Object.keys(dlCachedHeaders));
+                    }
+                }
+            }
+
             // Check if this source requires Warp proxy
             let proxyAgent = null;
             if (sourceId) {
@@ -788,6 +802,7 @@ router.get('/stream', async (req, res) => {
             const browserOrigin = req.get('origin') || req.get('referer')?.replace(/\/$/, '') || null;
 
             const getOrigin = () => {
+                if (dlCachedHeaders?.origin) return dlCachedHeaders.origin;
                 if (customHeaders['Origin']) return customHeaders['Origin'];
                 if (customHeaders['origin']) return customHeaders['origin'];
                 if (isPluto) return 'https://pluto.tv';
@@ -796,6 +811,7 @@ router.get('/stream', async (req, res) => {
             };
 
             const getReferer = () => {
+                if (dlCachedHeaders?.referer) return dlCachedHeaders.referer;
                 if (customHeaders['Referer']) return customHeaders['Referer'];
                 if (customHeaders['referer']) return customHeaders['referer'];
                 if (isPluto) return 'https://pluto.tv/';

@@ -1621,12 +1621,20 @@ class VideoPlayer {
         this.stopTranscodeSession();
 
         if (this.hls) {
-            this.hls.destroy();
+            this.video.pause();
+            this.hls.destroy(); // internally calls detachMedia() which resets video.src
             this.hls = null;
+            // Do NOT set video.src = '' here: hls.destroy() already cleaned up the media
+            // element. A second src='' assignment resolves to the app root URL and fires
+            // MEDIA_ERR_SRC_NOT_SUPPORTED, causing a spurious "Video error: 4" before the
+            // next channel even starts loading.
+        } else {
+            this.video.pause();
+            // Use removeAttribute rather than src='' to avoid the browser resolving '' as
+            // the page URL and firing a media error.
+            this.video.removeAttribute('src');
+            this.video.load();
         }
-        this.video.pause();
-        this.video.src = '';
-        this.video.load();
 
         // Reset UI to idle state
         this.overlay.classList.remove('hidden'); // Show "Select a channel"

@@ -996,6 +996,13 @@ class VideoPlayer {
         this._fatalMediaRecoveryCount = 0;
         this._dlstreamsMediaErrorRefreshAttempted = false;
         this._totalMediaErrorCount = 0;
+        this._nativeDecodeErrorCount = 0;
+
+        // Remove previous native error listener if any
+        if (this._nativeErrorHandler) {
+            this.video.removeEventListener('error', this._nativeErrorHandler);
+            this._nativeErrorHandler = null;
+        }
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1264,10 +1271,74 @@ class VideoPlayer {
                 this.hls.loadSource(finalUrl);
                 this.hls.attachMedia(this.video);
 
+                // Native video error listener: catches decode failures that HLS.js misses.
+                // When segments pass HLS.js parsing but the browser decoder rejects them
+                // (e.g. HTML content disguised as .ts), the <video> fires error code 4
+                // (MEDIA_ERR_SRC_NOT_SUPPORTED) while HLS.js keeps refreshing the live
+                // playlist forever. Cap consecutive native decode errors and stop.
+                this._nativeErrorHandler = () => {
+                    const err = this.video?.error;
+                    if (!err || !err.code) return;
+                    // Code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (includes decoder init failures)
+                    // Code 3 = MEDIA_ERR_DECODE
+                    if (err.code === 4 || err.code === 3) {
+                        this._nativeDecodeErrorCount = (this._nativeDecodeErrorCount || 0) + 1;
+                        console.warn(`[Player] Native decode error #${this._nativeDecodeErrorCount}: code=${err.code} ${err.message || ''}`);
+                        if (this._nativeDecodeErrorCount >= 2 && this.hls) {
+                            console.error(`[Player] Repeated native decode errors (${this._nativeDecodeErrorCount}). Stopping HLS.js.`);
+                            clearTimeout(this._playbackStartTimeout);
+                            try { this.hls.stopLoad(); } catch (_) { }
+                            try { this.hls.destroy(); } catch (_) { }
+                            this.hls = null;
+                            this.showError(
+                                isDlstreamsChannel
+                                    ? 'DLStreams stream is currently unavailable.<br><br>' +
+                                      'The video decoder failed — the stream segments contain invalid data.<br>' +
+                                      'Try again in a minute or switch channel.'
+                                    : 'Stream playback failed — the video decoder could not process the stream data.<br><br>' +
+                                      'The stream may be corrupted or in an unsupported format.'
+                            );
+                        }
+                    }
+                };
+                this.video.addEventListener('error', this._nativeErrorHandler);
+
+                // Cancel playback timeout once video actually starts rendering
+                this._onPlaybackStarted = () => {
+                    clearTimeout(this._playbackStartTimeout);
+                    this.video.removeEventListener('playing', this._onPlaybackStarted);
+                };
+                this.video.addEventListener('playing', this._onPlaybackStarted);
+
                 this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
                     this.video.play().catch(e => {
                         if (e.name !== 'AbortError') console.log('Autoplay prevented:', e);
                     });
+
+                    // Playback-start timeout: if no video frame is rendered within 15s
+                    // after the manifest is parsed, the segments are likely undecodable
+                    // (e.g. HTML/image data disguised as .ts). HLS.js won't fire errors
+                    // in this case — it just keeps refreshing the live playlist forever.
+                    clearTimeout(this._playbackStartTimeout);
+                    this._playbackStartTimeout = setTimeout(() => {
+                        if (!this.hls) return;
+                        // readyState < 3 = HAVE_FUTURE_DATA means no frame rendered yet
+                        if (this.video.readyState < 3 && this.video.currentTime === 0) {
+                            console.error('[Player] Playback timeout: no video rendered 15s after manifest parsed. Stopping.');
+                            try { this.hls.stopLoad(); } catch (_) { }
+                            try { this.hls.destroy(); } catch (_) { }
+                            this.hls = null;
+                            this.showError(
+                                isDlstreamsChannel
+                                    ? 'DLStreams stream is currently unavailable.<br><br>' +
+                                      'No video data was received after loading the manifest.<br>' +
+                                      'The stream segments may contain invalid data.<br>' +
+                                      'Try again in a minute or switch channel.'
+                                    : 'Stream playback failed — no video was rendered.<br><br>' +
+                                      'The stream segments may be corrupted or in an unsupported format.'
+                            );
+                        }
+                    }, 15000);
                 });
 
                 // Re-attach error handler for the new Hls instance
@@ -1690,6 +1761,19 @@ class VideoPlayer {
     stop() {
         // Stop any running transcode session first
         this.stopTranscodeSession();
+
+        // Clear playback-start timeout
+        clearTimeout(this._playbackStartTimeout);
+
+        // Remove native error listener
+        if (this._nativeErrorHandler) {
+            this.video.removeEventListener('error', this._nativeErrorHandler);
+            this._nativeErrorHandler = null;
+        }
+        if (this._onPlaybackStarted) {
+            this.video.removeEventListener('playing', this._onPlaybackStarted);
+            this._onPlaybackStarted = null;
+        }
 
         if (this.hls) {
             this.video.pause();

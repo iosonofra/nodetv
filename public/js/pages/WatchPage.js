@@ -636,7 +636,9 @@ class WatchPage {
         }
         if (this.video) {
             this.video.pause();
-            this.video.src = '';
+            // Use removeAttribute instead of src='' to avoid the browser resolving ''
+            // as the page URL and firing MEDIA_ERR_SRC_NOT_SUPPORTED (error code 4).
+            this.video.removeAttribute('src');
             this.video.load();
         }
 

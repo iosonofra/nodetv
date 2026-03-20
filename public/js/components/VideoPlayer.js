@@ -985,6 +985,7 @@ class VideoPlayer {
     async play(channel, streamUrl) {
         this.currentChannel = channel;
         this._dlstreamsRefreshAttempted = false;
+        this._dlstreamsColdStartRetried = false;
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1278,6 +1279,18 @@ class VideoPlayer {
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel));
                             this.hls.startLoad();
+                        } else if (manifestCode === 502 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsColdStartRetried) {
+                            // 502 = our proxy returned "CDN returned HTML (cold-start)".
+                            // The URL is still valid — no need to force-re-resolve, just wait
+                            // a moment for the CDN to finish warming up and retry the manifest.
+                            this._dlstreamsColdStartRetried = true;
+                            console.log(`[Player] DLStreams 502 cold-start detected for channel. Retrying manifest in 3s...`);
+                            setTimeout(() => {
+                                if (!this.hls) return;
+                                const coldRetryUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel);
+                                this.hls.loadSource(coldRetryUrl);
+                                this.hls.startLoad();
+                            }, 3000);
                         } else if (isManifestLoadFailure && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
                             this._dlstreamsRefreshAttempted = true;
                             const dlChannelId = String(channel.tvgId).replace('dl_', '');

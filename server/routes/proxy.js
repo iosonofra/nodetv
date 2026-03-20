@@ -911,49 +911,25 @@ router.get('/stream', async (req, res) => {
             if (isMonoMasquerade && response.ok) {
                 const initialInvalid = await looksLikeHtmlResponse(response) || !(await looksLikeHlsManifest(response));
                 if (initialInvalid) {
-                    console.log(`[Proxy] mono.css returned non-HLS content (CDN cold-start). Waiting 1.5s for CDN to generate playlist...`);
+                    console.log(`[Proxy] mono.css returned non-HLS content (CDN cold-start). Retrying with backoff...`);
 
-                    // Wait for CDN lazy generation to complete before retrying.
-                    await new Promise(r => setTimeout(r, 1500));
-
-                    // Attempt 1: Retry with the same headers (same referer used to resolve the URL).
-                    // The CDN should now have the playlist cached.
-                    const retryResp1 = await fetch(finalUrl, fetchOptions).catch(() => null);
-                    if (retryResp1 && retryResp1.ok && !(await looksLikeHtmlResponse(retryResp1)) && (await looksLikeHlsManifest(retryResp1))) {
-                        console.log(`[Proxy] mono.css retry after delay succeeded`);
-                        response = retryResp1;
-                    } else {
-                        // Attempt 2: Retry with origin referer (ai.the-sunmoon.site itself)
-                        const altHeaders1 = {
-                            ...headers,
-                            'Referer': `https://ai.the-sunmoon.site/`,
-                            'Origin': 'https://ai.the-sunmoon.site'
-                        };
-                        const altResp1 = await fetch(finalUrl, {
-                            ...fetchOptions,
-                            headers: altHeaders1
-                        }).catch(() => null);
-
-                        if (altResp1 && altResp1.ok && !(await looksLikeHtmlResponse(altResp1)) && (await looksLikeHlsManifest(altResp1))) {
-                            console.log(`[Proxy] mono.css retry with origin referer succeeded`);
-                            response = altResp1;
-                        } else {
-                            // Attempt 3: Retry without explicit Referer/Origin
-                            const altHeaders2 = { ...headers };
-                            delete altHeaders2.Referer;
-                            delete altHeaders2.Origin;
-                            const altResp2 = await fetch(finalUrl, {
-                                ...fetchOptions,
-                                headers: altHeaders2
-                            }).catch(() => null);
-
-                            if (altResp2 && altResp2.ok && !(await looksLikeHtmlResponse(altResp2)) && (await looksLikeHlsManifest(altResp2))) {
-                                console.log(`[Proxy] mono.css retry without explicit headers succeeded`);
-                                response = altResp2;
-                            }
-                            // If all retries fail, fall through to server-side re-resolve below
+                    // CDN uses lazy playlist generation: the first cold request triggers
+                    // server-side build and returns HTML while it prepares the cache.
+                    // Retry up to 4 times with increasing delays (1s, 2s, 2s, 2s = 7s budget).
+                    const coldStartDelays = [1000, 2000, 2000, 2000];
+                    let coldStartResolved = false;
+                    for (let i = 0; i < coldStartDelays.length; i++) {
+                        await new Promise(r => setTimeout(r, coldStartDelays[i]));
+                        const retryResp = await fetch(finalUrl, fetchOptions).catch(() => null);
+                        if (retryResp && retryResp.ok && !(await looksLikeHtmlResponse(retryResp)) && (await looksLikeHlsManifest(retryResp))) {
+                            console.log(`[Proxy] mono.css cold-start retry ${i + 1} succeeded after ${coldStartDelays.slice(0, i + 1).reduce((a, b) => a + b, 0)}ms`);
+                            response = retryResp;
+                            coldStartResolved = true;
+                            break;
                         }
+                        console.log(`[Proxy] mono.css cold-start retry ${i + 1}/${coldStartDelays.length} still HTML, waiting...`);
                     }
+                    // If all retries fail, fall through to server-side re-resolve below
                 }
             }
 

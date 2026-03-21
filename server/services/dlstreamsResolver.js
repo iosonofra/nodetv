@@ -97,6 +97,55 @@ function isValidStreamUrl(url) {
            /\/mono\.(css|csv)(\?|$)/i.test(clean);
 }
 
+const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
+
+/**
+ * Validate a mono.css/mono.csv manifest by fetching it and checking for poisoned
+ * (image-like) segment URLs. Returns { valid: true } or { valid: false, reason }.
+ */
+async function validateMonoManifest(monoUrl, headers = null) {
+    if (!monoUrl) return { valid: false, reason: 'empty url' };
+    const isMono = monoUrl.includes('mono.css') || monoUrl.includes('mono.csv');
+    if (!isMono) return { valid: true }; // only validate mono URLs
+    try {
+        const fetchHeaders = {
+            'User-Agent': (headers && headers['user-agent']) || getRandomUA(),
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+        };
+        if (headers?.referer) fetchHeaders['Referer'] = headers.referer;
+        if (headers?.origin) fetchHeaders['Origin'] = headers.origin;
+
+        const resp = await fetch(monoUrl, {
+            headers: fetchHeaders,
+            agent: monoUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+            timeout: 10000,
+        });
+        if (!resp.ok) return { valid: false, reason: `HTTP ${resp.status}` };
+        const body = await resp.text();
+        if (!body.startsWith('#EXTM3U')) return { valid: false, reason: 'not HLS' };
+
+        let totalSegments = 0, imageSegments = 0;
+        for (const line of body.split('\n')) {
+            const t = line.trim();
+            if (t && !t.startsWith('#')) {
+                totalSegments++;
+                if (IMAGE_SEGMENT_RE.test(t)) imageSegments++;
+            }
+        }
+        if (totalSegments > 0 && imageSegments === totalSegments) {
+            return { valid: false, reason: `all ${totalSegments} segments are image files` };
+        }
+        if (totalSegments > 0 && imageSegments > totalSegments / 2) {
+            return { valid: false, reason: `${imageSegments}/${totalSegments} segments are image files` };
+        }
+        return { valid: true };
+    } catch (e) {
+        // Network error during validation — don't block caching, let proxy handle it
+        return { valid: true };
+    }
+}
+
 /**
  * Find stream URL in HTML/JS text
  */
@@ -581,6 +630,13 @@ async function extractStreamUrl(page, channelId, options = {}) {
 
         // 3. Cache result or failure
         if (streamUrl) {
+            // Validate mono manifest before caching
+            const extractValidation = await validateMonoManifest(streamUrl, requestHeaders);
+            if (!extractValidation.valid) {
+                console.warn(`  [!] Extracted mono manifest poisoned for channel ${channelId}: ${extractValidation.reason}`);
+                // Return URL but don't cache — proxy will return 502 and trigger re-resolve
+                return { streamUrl, ckParam, requestHeaders, cached: false, poisoned: true };
+            }
             urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });
             saveUrlCache();
         } else {
@@ -650,6 +706,12 @@ async function resolveChannelUrl(channelId, options = {}) {
                     'accept-language': 'en-US,en;q=0.9'
                 };
             } catch (_) {}
+            // Validate mono manifest before caching
+            const probeValidation = await validateMonoManifest(httpProbed, probeHeaders);
+            if (!probeValidation.valid) {
+                console.warn(`  [!] HTTP probe mono manifest poisoned for channel ${channelId}: ${probeValidation.reason}`);
+                continue; // try next watch page host
+            }
             urlCache.set(channelId, { streamUrl: httpProbed, ckParam: null, requestHeaders: probeHeaders, timestamp: Date.now() });
             saveUrlCache();
             console.log(`[DLStreams Resolver] Channel ${channelId}: OK [HTTP-PROBE]`);
@@ -669,10 +731,17 @@ async function resolveChannelUrl(channelId, options = {}) {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9'
         };
-        urlCache.set(channelId, { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, timestamp: Date.now() });
-        saveUrlCache();
-        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
-        return { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, cached: false };
+        // Validate mono manifest before caching
+        const lookupValidation = await validateMonoManifest(directUrl, lookupHeaders);
+        if (!lookupValidation.valid) {
+            console.warn(`  [!] Direct lookup mono manifest poisoned for channel ${channelId}: ${lookupValidation.reason}`);
+            // Don't cache, fall through to Puppeteer
+        } else {
+            urlCache.set(channelId, { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, timestamp: Date.now() });
+            saveUrlCache();
+            console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
+            return { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, cached: false };
+        }
     }
 
     // --- Slow-path: full Puppeteer browser render ---

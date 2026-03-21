@@ -730,11 +730,30 @@ router.get('/stream', async (req, res) => {
                 return res.status(400).json({ error: 'URL required' });
             }
 
+            // Safety net: block DLStreams segment requests for image-like URLs
+            // These come from poisoned mono manifests and will never decode as video
+            const dlChannelId = req.query.dlChannelId;
+            const IMAGE_EXT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
+            if (dlChannelId) {
+                try {
+                    const segUrl = new URL(url);
+                    if (IMAGE_EXT_RE.test(segUrl.pathname) ||
+                        (segUrl.searchParams.get('response-content-type') || '').startsWith('image/')) {
+                        console.warn(`[Proxy] Blocking image-like DLStreams segment: ${url.substring(0, 100)}`);
+                        return res.status(410).send('Image segment blocked');
+                    }
+                } catch (_) {
+                    if (IMAGE_EXT_RE.test(url)) {
+                        console.warn(`[Proxy] Blocking image-like DLStreams segment: ${url.substring(0, 100)}`);
+                        return res.status(410).send('Image segment blocked');
+                    }
+                }
+            }
+
             // For DLStreams mono.css/mono.csv URLs, inject cached Referer/Origin headers
             const isDlStreamsMono = url.includes('mono.css') || url.includes('mono.csv');
             let dlCachedHeaders = null;
             if (isDlStreamsMono) {
-                const dlChannelId = req.query.dlChannelId;
                 if (dlChannelId) {
                     dlCachedHeaders = getCachedHeaders(dlChannelId);
                 }
@@ -942,6 +961,94 @@ router.get('/stream', async (req, res) => {
                 const baseUrl = finalUrlObj.origin + finalUrlObj.pathname.substring(0, finalUrlObj.pathname.lastIndexOf('/') + 1);
                 const queryStr = finalUrlObj.search;
 
+                // --- DLStreams poisoned-manifest detection ---
+                // Some mono.css manifests contain image-like segment URIs (.png, .jpg, etc.)
+                // that are not valid video segments. Detect and sanitize them.
+                const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
+                if (isDlStreamsMono) {
+                    const lines = manifest.split('\n');
+                    let totalSegments = 0;
+                    let imageSegments = 0;
+                    for (const line of lines) {
+                        const t = line.trim();
+                        if (t && !t.startsWith('#')) {
+                            totalSegments++;
+                            // Resolve to absolute URL to check extension reliably
+                            try {
+                                const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : new URL(t, baseUrl).href;
+                                const pathname = new URL(absUrl).pathname;
+                                if (IMAGE_SEGMENT_RE.test(pathname)) imageSegments++;
+                            } catch (_) {
+                                if (IMAGE_SEGMENT_RE.test(t)) imageSegments++;
+                            }
+                        }
+                    }
+                    if (totalSegments > 0 && imageSegments > 0) {
+                        console.warn(`[Proxy] DLStreams manifest has ${imageSegments}/${totalSegments} image-like segments`);
+                        if (imageSegments === totalSegments) {
+                            // ALL segments are images — fully poisoned manifest
+                            console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments are images). Returning 502.`);
+                            return res.status(502).send('Poisoned manifest: all segments are image files');
+                        }
+                        // Mixed manifest — strip image segment blocks (#EXTINF + URL pairs)
+                        const cleanLines = [];
+                        let skipNextSegment = false;
+                        for (const line of lines) {
+                            const t = line.trim();
+                            if (t && !t.startsWith('#')) {
+                                // This is a segment URL line
+                                try {
+                                    const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : new URL(t, baseUrl).href;
+                                    const pathname = new URL(absUrl).pathname;
+                                    if (IMAGE_SEGMENT_RE.test(pathname)) {
+                                        // Drop this segment URL (and the preceding #EXTINF was already skipped via flag)
+                                        continue;
+                                    }
+                                } catch (_) {
+                                    if (IMAGE_SEGMENT_RE.test(t)) continue;
+                                }
+                                skipNextSegment = false;
+                                cleanLines.push(line);
+                            } else if (t.startsWith('#EXTINF')) {
+                                // Peek ahead: check if next non-empty line is an image segment
+                                // We can't peek ahead easily in a single pass, so mark and handle below
+                                // Instead, buffer #EXTINF and only emit if the next segment is valid
+                                skipNextSegment = true;
+                                cleanLines.push(line); // push tentatively
+                            } else {
+                                if (skipNextSegment && t === '') {
+                                    cleanLines.push(line);
+                                } else {
+                                    skipNextSegment = false;
+                                    cleanLines.push(line);
+                                }
+                            }
+                        }
+                        // Second pass: remove orphaned #EXTINF lines whose segment was removed
+                        const finalLines = [];
+                        for (let i = 0; i < cleanLines.length; i++) {
+                            const ct = cleanLines[i].trim();
+                            if (ct.startsWith('#EXTINF')) {
+                                // Check if next non-empty line is a segment URL
+                                let j = i + 1;
+                                while (j < cleanLines.length && cleanLines[j].trim() === '') j++;
+                                if (j < cleanLines.length && !cleanLines[j].trim().startsWith('#')) {
+                                    finalLines.push(cleanLines[i]); // keep #EXTINF, segment follows
+                                }
+                                // else: orphaned #EXTINF, drop it
+                            } else {
+                                finalLines.push(cleanLines[i]);
+                            }
+                        }
+                        manifest = finalLines.join('\n');
+                        console.log(`[Proxy] Sanitized DLStreams manifest: removed ${imageSegments} image segments`);
+                    }
+                }
+
+                // Build suffix for rewritten URLs (sourceId + dlChannelId for DLStreams)
+                const rewriteSuffix = (sourceId ? '&sourceId=' + sourceId : '')
+                    + (isDlStreamsMono && dlChannelId ? '&dlChannelId=' + encodeURIComponent(dlChannelId) : '');
+
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
                     if (trimmed === '' || trimmed.startsWith('#')) {
@@ -955,7 +1062,7 @@ router.get('/stream', async (req, res) => {
                                     if (!p1.includes('?') && queryStr) {
                                         absoluteUrl += queryStr;
                                     }
-                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}"`;
+                                    return `URI="${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${rewriteSuffix}"`;
                                 } catch (e) {
                                     return match;
                                 }
@@ -976,7 +1083,7 @@ router.get('/stream', async (req, res) => {
                                 absoluteUrl += queryStr;
                             }
                         }
-                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${sourceId ? '&sourceId=' + sourceId : ''}`;
+                        return `${req.protocol}://${req.get('host')}${req.baseUrl}/stream?url=${encodeURIComponent(absoluteUrl)}${rewriteSuffix}`;
                     } catch (e) { return line; }
                 }).join('\n');
 

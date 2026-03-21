@@ -995,6 +995,7 @@ class VideoPlayer {
         this._dlstreamsColdStartRetried = false;
         this._fatalMediaRecoveryCount = 0;
         this._dlstreamsMediaErrorRefreshAttempted = false;
+        this._dlstreamsFragErrorRefreshAttempted = false;
         this._totalMediaErrorCount = 0;
         this._nativeDecodeErrorCount = 0;
 
@@ -1467,6 +1468,43 @@ class VideoPlayer {
                                 console.log(`Fatal media error (attempt ${this._fatalMediaRecoveryCount}/4), attempting recovery...`);
                                 this.lastRecoveryAttempt = now;
                                 this.hls.recoverMediaError();
+                            }
+                        } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.details === 'fragLoadError' && isDlstreamsChannel) {
+                            // Fatal segment load error on DLStreams — likely a poisoned manifest
+                            // with image or dead segment URLs. Force re-resolve.
+                            console.error(`[Player] DLStreams fatal fragLoadError — segments unplayable. Forcing re-resolve...`);
+                            try { this.hls.stopLoad(); } catch (_) { }
+                            try { this.hls.destroy(); } catch (_) { }
+                            this.hls = null;
+                            if (!this._dlstreamsFragErrorRefreshAttempted) {
+                                this._dlstreamsFragErrorRefreshAttempted = true;
+                                const dlChId = String(channel.tvgId).replace('dl_', '');
+                                fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
+                                    .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
+                                    .then(resolved => {
+                                        if (resolved?.streamUrl) {
+                                            channel.streamUrl = resolved.streamUrl;
+                                            if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
+                                            console.log('[Player] DLStreams re-resolved after fragLoadError. Retrying play...');
+                                            this.play(channel);
+                                        } else {
+                                            throw new Error('Empty streamUrl');
+                                        }
+                                    })
+                                    .catch(err => {
+                                        console.error('[Player] DLStreams frag-error re-resolve failed:', err.message);
+                                        this.showError(
+                                            'DLStreams stream is currently unavailable.<br><br>' +
+                                            'The stream segments are invalid or blocked.<br>' +
+                                            'Try again in a minute or switch channel.'
+                                        );
+                                    });
+                            } else {
+                                this.showError(
+                                    'DLStreams stream is currently unavailable.<br><br>' +
+                                    'The stream segments are invalid or blocked after re-resolve.<br>' +
+                                    'Try again in a minute or switch channel.'
+                                );
                             }
                         } else {
                             console.error('Fatal HLS error:', data);

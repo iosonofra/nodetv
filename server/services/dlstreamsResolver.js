@@ -409,6 +409,7 @@ async function resolveDirectChannelLookup(channelId, refererUrl = null) {
     // working host when one CDN node is poisoned/down.
     const keyPriority = [`premium${cid}`, cid];
     const referer = `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${cid}`;
+    const triedUrls = new Set();
 
     for (const channelKey of keyPriority) {
         for (const host of hosts) {
@@ -438,9 +439,27 @@ async function resolveDirectChannelLookup(channelId, refererUrl = null) {
                     : `https://${host}/proxy/${serverKey}/premium${cid}/mono.css`;
 
                 if (!isValidStreamUrl(monoUrl)) continue;
+                // Skip if we already tried this exact mono URL from a different host/key combo
+                if (triedUrls.has(monoUrl)) continue;
+                triedUrls.add(monoUrl);
 
                 console.log(`  [*] Resolved stream via direct server_lookup (${host}, key=${channelKey}): ${monoUrl}`);
-                return monoUrl;
+
+                // Validate manifest content before returning — if poisoned, try next host/key
+                const probeHeaders = {
+                    'user-agent': getRandomUA(),
+                    'referer': 'https://freestyleridesx.lol/',
+                    'origin': 'https://freestyleridesx.lol',
+                    'accept': '*/*',
+                    'accept-language': 'en-US,en;q=0.9'
+                };
+                const validation = await validateMonoManifest(monoUrl, probeHeaders);
+                if (!validation.valid) {
+                    console.warn(`  [!] Direct lookup mono poisoned (${host}, key=${channelKey}): ${validation.reason} — trying next`);
+                    continue;
+                }
+
+                return { url: monoUrl, headers: probeHeaders };
             } catch (_) {
                 // Try next host
             }
@@ -711,18 +730,12 @@ async function extractStreamUrl(page, channelId, options = {}) {
                     'accept-language': 'en-US,en;q=0.9'
                 };
             } else {
-                // Try direct server_lookup as last resort
+                // Try direct server_lookup as last resort (already validates manifest internally)
                 const directFallback = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
-                if (directFallback && isValidStreamUrl(directFallback)) {
-                    console.log(`  [*] Resolved stream URL via direct server_lookup fallback: ${directFallback}`);
-                    streamUrl = directFallback;
-                    requestHeaders = {
-                        'user-agent': getRandomUA(),
-                        'referer': 'https://freestyleridesx.lol/',
-                        'origin': 'https://freestyleridesx.lol',
-                        'accept': '*/*',
-                        'accept-language': 'en-US,en;q=0.9'
-                    };
+                if (directFallback?.url && isValidStreamUrl(directFallback.url)) {
+                    console.log(`  [*] Resolved stream URL via direct server_lookup fallback: ${directFallback.url}`);
+                    streamUrl = directFallback.url;
+                    requestHeaders = directFallback.headers;
                 } else {
                     console.log(`  [!] Diagnostic HTML dumped to ${diagPath} (no stream found)`);
                 }
@@ -739,15 +752,26 @@ async function extractStreamUrl(page, channelId, options = {}) {
             const extractValidation = await validateMonoManifest(streamUrl, requestHeaders);
             if (!extractValidation.valid) {
                 console.warn(`  [!] Extracted mono manifest invalid for channel ${channelId}: ${extractValidation.reason}`);
-                if (extractValidation.cdnDown) {
-                    // CDN is genuinely down (HTTP 5xx) — don't return a known-dead URL
-                    // Client would just waste time retrying before eventually failing
-                    console.warn(`  [!] CDN is down for channel ${channelId}, not returning dead URL`);
-                    failureCache.set(channelId, { timestamp: Date.now(), error: `CDN down: ${extractValidation.reason}` });
-                    return { streamUrl: null, ckParam: null, requestHeaders: null, cached: false };
+
+                // The intercepted URL is bad — try to find a clean alternative via direct lookup
+                // before giving up. Different CDN hosts may return different server_keys.
+                console.log(`  [~] Intercepted URL poisoned — trying alternative CDN hosts for channel ${channelId}...`);
+                const altResult = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+                if (altResult?.url && altResult.url !== streamUrl) {
+                    console.log(`  [+] Found clean alternative via direct lookup: ${altResult.url}`);
+                    urlCache.set(channelId, { streamUrl: altResult.url, ckParam: null, requestHeaders: altResult.headers, timestamp: Date.now() });
+                    saveUrlCache();
+                    return { streamUrl: altResult.url, ckParam: null, requestHeaders: altResult.headers, cached: false };
                 }
-                // Content-level poisoning — return URL but don't cache, proxy will sanitize/reject
-                return { streamUrl, ckParam, requestHeaders, cached: false, poisoned: true };
+
+                // Puppeteer is the last resort — if even this URL is bad, don't return it.
+                // Returning a poisoned URL just causes an infinite 503 loop at the proxy.
+                const failReason = extractValidation.cdnDown
+                    ? `CDN down: ${extractValidation.reason}`
+                    : `Poisoned manifest: ${extractValidation.reason}`;
+                console.warn(`  [!] Not returning bad URL for channel ${channelId}: ${failReason}`);
+                failureCache.set(channelId, { timestamp: Date.now(), error: failReason });
+                return { streamUrl: null, ckParam: null, requestHeaders: null, cached: false, poisoned: !extractValidation.cdnDown };
             }
             urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });
             saveUrlCache();
@@ -847,31 +871,16 @@ async function resolveChannelUrl(channelId, options = {}) {
         }
     }
 
-    // --- Fast-path B: direct server_lookup on known CDN hosts ---
+    // --- Fast-path B: direct server_lookup on known CDN hosts (validates manifest internally) ---
     console.log(`  [~] Trying direct server_lookup for channel ${channelId}...`);
-    const directUrl = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
-    if (directUrl && isValidStreamUrl(directUrl) && !(rejectedUrl && directUrl === rejectedUrl)) {
-        console.log(`  [+] Direct server_lookup succeeded for channel ${channelId}: ${directUrl.substring(0, 80)}`);
-
-        const lookupHeaders = {
-            'user-agent': getRandomUA(),
-            'referer': 'https://freestyleridesx.lol/',
-            'origin': 'https://freestyleridesx.lol',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9'
-        };
-        // Validate mono manifest before caching
-        const lookupValidation = await validateMonoManifest(directUrl, lookupHeaders);
-        if (!lookupValidation.valid) {
-            console.warn(`  [!] Direct lookup mono manifest poisoned for channel ${channelId}: ${lookupValidation.reason}`);
-            // Don't cache, fall through to Puppeteer
-        } else {
-            urlCache.set(channelId, { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, timestamp: Date.now() });
-            saveUrlCache();
-            console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
-            return { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, cached: false };
-        }
-    } else if (directUrl && rejectedUrl && directUrl === rejectedUrl) {
+    const directResult = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
+    if (directResult?.url && isValidStreamUrl(directResult.url) && !(rejectedUrl && directResult.url === rejectedUrl)) {
+        console.log(`  [+] Direct server_lookup succeeded for channel ${channelId}: ${directResult.url.substring(0, 80)}`);
+        urlCache.set(channelId, { streamUrl: directResult.url, ckParam: null, requestHeaders: directResult.headers, timestamp: Date.now() });
+        saveUrlCache();
+        console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
+        return { streamUrl: directResult.url, ckParam: null, requestHeaders: directResult.headers, cached: false };
+    } else if (directResult?.url && rejectedUrl && directResult.url === rejectedUrl) {
         console.log(`  [!] Direct lookup returned rejected URL for channel ${channelId}, skipping to Puppeteer...`);
     }
 

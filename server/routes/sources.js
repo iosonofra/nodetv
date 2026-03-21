@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 const { sources } = require('../db');
 const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
@@ -52,16 +54,28 @@ router.get('/backup', async (req, res) => {
             version: 1,
             exported_at: new Date().toISOString(),
             exported_by: req.user.username || String(req.user.id),
-            sources: ownSources.map(s => ({
-                type: s.type,
-                name: s.name,
-                url: s.url,
-                username: s.username || null,
-                password: s.password || null,
-                useWarp: !!s.useWarp,
-                enabled: s.enabled !== false,
-                is_public: !!s.is_public,
-            }))
+            sources: ownSources.map(s => {
+                const entry = {
+                    type: s.type,
+                    name: s.name,
+                    url: s.url,
+                    username: s.username || null,
+                    password: s.password || null,
+                    useWarp: !!s.useWarp,
+                    enabled: s.enabled !== false,
+                    is_public: !!s.is_public,
+                };
+                // Embed content of local M3U/EPG files so they survive restore
+                if (s.url && !s.url.startsWith('http://') && !s.url.startsWith('https://')) {
+                    try {
+                        const filePath = path.resolve(s.url);
+                        if (fs.existsSync(filePath)) {
+                            entry.file_content = fs.readFileSync(filePath, 'utf8');
+                        }
+                    } catch (_) { }
+                }
+                return entry;
+            })
         };
         const date = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
         res.setHeader('Content-Disposition', `attachment; filename="sources-backup-${date}.json"`);
@@ -401,6 +415,20 @@ router.post('/restore', async (req, res) => {
                     const parts = sanitizedUrl.split(/[\\/]/);
                     const dataIndex = parts.indexOf('data');
                     if (dataIndex !== -1) sanitizedUrl = parts.slice(dataIndex).join('/');
+                }
+                // Restore local playlist file if embedded in backup
+                if (s.file_content && sanitizedUrl && !sanitizedUrl.startsWith('http://') && !sanitizedUrl.startsWith('https://')) {
+                    try {
+                        const filePath = path.resolve(sanitizedUrl);
+                        const dirPath = path.dirname(filePath);
+                        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+                        if (!fs.existsSync(filePath)) {
+                            fs.writeFileSync(filePath, s.file_content, 'utf8');
+                            console.log(`[Sources] Restore: wrote local file ${filePath}`);
+                        }
+                    } catch (fileErr) {
+                        console.warn(`[Sources] Restore: could not write local file for "${s.name}": ${fileErr.message}`);
+                    }
                 }
                 const created = await sources.create({
                     type: s.type,

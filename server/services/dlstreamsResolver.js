@@ -128,8 +128,9 @@ function isSuspiciousSegmentUrl(rawUrl) {
 }
 
 /**
- * Validate a mono.css/mono.csv manifest by fetching it and checking for poisoned
- * (image-like) segment URLs. Returns { valid: true } or { valid: false, reason }.
+ * Validate a mono.css/mono.csv manifest by fetching it, checking for poisoned
+ * segment URLs, and probing one real segment to verify it contains video data.
+ * Returns { valid: true } or { valid: false, reason, cdnDown? }.
  */
 async function validateMonoManifest(monoUrl, headers = null) {
     if (!monoUrl) return { valid: false, reason: 'empty url' };
@@ -149,28 +150,101 @@ async function validateMonoManifest(monoUrl, headers = null) {
             agent: monoUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
             timeout: 10000,
         });
-        if (!resp.ok) return { valid: false, reason: `HTTP ${resp.status}` };
+        if (!resp.ok) return { valid: false, reason: `HTTP ${resp.status}`, cdnDown: resp.status >= 500 };
         const body = await resp.text();
         if (!body.startsWith('#EXTM3U')) return { valid: false, reason: 'not HLS' };
 
-        let totalSegments = 0, poisonedSegments = 0;
+        // Collect segment URLs and check for suspicious patterns
+        const segmentUrls = [];
+        let poisonedSegments = 0;
+        // Resolve relative segment URLs against the mono manifest base
+        let manifestBase = monoUrl;
+        try { manifestBase = monoUrl.substring(0, monoUrl.lastIndexOf('/') + 1); } catch (_) {}
+
         for (const line of body.split('\n')) {
             const t = line.trim();
             if (t && !t.startsWith('#')) {
-                totalSegments++;
-                if (isSuspiciousSegmentUrl(t)) poisonedSegments++;
+                const absUrl = (t.startsWith('http://') || t.startsWith('https://'))
+                    ? t
+                    : (() => { try { return new URL(t, manifestBase).href; } catch (_) { return t; } })();
+                segmentUrls.push(absUrl);
+                if (isSuspiciousSegmentUrl(absUrl)) poisonedSegments++;
             }
         }
+
+        const totalSegments = segmentUrls.length;
         if (totalSegments > 0 && poisonedSegments === totalSegments) {
             return { valid: false, reason: `all ${totalSegments} segments are suspicious (image/fake-host)` };
         }
         if (totalSegments > 0 && poisonedSegments > totalSegments / 2) {
             return { valid: false, reason: `${poisonedSegments}/${totalSegments} segments are suspicious (image/fake-host)` };
         }
+
+        // --- Content probe: fetch one real segment and verify it's actual video data ---
+        // This catches poisoned manifests with normal-looking .ts URLs that serve non-video content
+        const cleanSegments = segmentUrls.filter(u => !isSuspiciousSegmentUrl(u));
+        if (cleanSegments.length > 0) {
+            // Probe the last segment (most likely to exist on a live rolling manifest)
+            const probeUrl = cleanSegments[cleanSegments.length - 1];
+            try {
+                const probeResp = await fetch(probeUrl, {
+                    headers: fetchHeaders,
+                    agent: probeUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent,
+                    timeout: 6000,
+                });
+                if (!probeResp.ok) {
+                    // Segment 404/5xx = CDN path is broken
+                    return { valid: false, reason: `segment HTTP ${probeResp.status}`, cdnDown: probeResp.status >= 500 };
+                }
+                // Read first 188 bytes (one MPEG-TS packet) to check sync byte
+                const probeBuf = await readFirstBytes(probeResp, 188);
+                if (probeBuf && probeBuf.length > 0) {
+                    const firstByte = probeBuf[0];
+                    // MPEG-TS sync byte = 0x47; AAC ADTS sync = 0xFF
+                    if (firstByte !== 0x47 && firstByte !== 0xFF) {
+                        // Check if it looks like HTML/text (common poisoning: serve error pages as .ts)
+                        const textSnippet = probeBuf.subarray(0, 50).toString('utf8');
+                        const looksLikeHtml = textSnippet.includes('<') || textSnippet.includes('error') || textSnippet.includes('<!DOCTYPE');
+                        return {
+                            valid: false,
+                            reason: looksLikeHtml
+                                ? `segment is HTML/text, not video (first byte: 0x${firstByte.toString(16)})`
+                                : `segment not MPEG-TS/AAC (first byte: 0x${firstByte.toString(16)})`
+                        };
+                    }
+                }
+            } catch (_) {
+                // Network error probing segment — don't block on this, URL pattern checks passed
+            }
+        }
+
         return { valid: true };
     } catch (e) {
         // Network error during validation — don't block caching, let proxy handle it
         return { valid: true };
+    }
+}
+
+/**
+ * Read first N bytes from a fetch Response without consuming the whole body.
+ */
+async function readFirstBytes(response, n) {
+    try {
+        const reader = response.body[Symbol.asyncIterator]
+            ? response.body[Symbol.asyncIterator]()
+            : null;
+        if (!reader) {
+            // node-fetch: read buffer and slice
+            const buf = await response.buffer();
+            return buf.subarray(0, n);
+        }
+        const { value, done } = await reader.next();
+        // Clean up the stream
+        if (reader.return) reader.return().catch(() => {});
+        if (done || !value) return Buffer.alloc(0);
+        return Buffer.from(value).subarray(0, n);
+    } catch (_) {
+        return Buffer.alloc(0);
     }
 }
 
@@ -330,11 +404,14 @@ async function resolveDirectChannelLookup(channelId, refererUrl = null) {
         } catch (_) {}
     }
 
-    const channelIdVariants = [`premium${cid}`, cid];
+    // Try the most common key format first (`premium<id>`) across ALL hosts,
+    // then fall back to bare `<id>`. This maximizes the chance of finding a
+    // working host when one CDN node is poisoned/down.
+    const keyPriority = [`premium${cid}`, cid];
     const referer = `https://freestyleridesx.lol/premiumtv/daddyhd.php?id=${cid}`;
 
-    for (const host of hosts) {
-        for (const channelKey of channelIdVariants) {
+    for (const channelKey of keyPriority) {
+        for (const host of hosts) {
             try {
                 const lookupUrl = `https://${host}/server_lookup?channel_id=${encodeURIComponent(channelKey)}`;
                 const resp = await fetch(lookupUrl, {
@@ -365,7 +442,7 @@ async function resolveDirectChannelLookup(channelId, refererUrl = null) {
                 console.log(`  [*] Resolved stream via direct server_lookup (${host}, key=${channelKey}): ${monoUrl}`);
                 return monoUrl;
             } catch (_) {
-                // Try next variant/host
+                // Try next host
             }
         }
     }
@@ -661,8 +738,15 @@ async function extractStreamUrl(page, channelId, options = {}) {
             // Validate mono manifest before caching
             const extractValidation = await validateMonoManifest(streamUrl, requestHeaders);
             if (!extractValidation.valid) {
-                console.warn(`  [!] Extracted mono manifest poisoned for channel ${channelId}: ${extractValidation.reason}`);
-                // Return URL but don't cache — proxy will return 502 and trigger re-resolve
+                console.warn(`  [!] Extracted mono manifest invalid for channel ${channelId}: ${extractValidation.reason}`);
+                if (extractValidation.cdnDown) {
+                    // CDN is genuinely down (HTTP 5xx) — don't return a known-dead URL
+                    // Client would just waste time retrying before eventually failing
+                    console.warn(`  [!] CDN is down for channel ${channelId}, not returning dead URL`);
+                    failureCache.set(channelId, { timestamp: Date.now(), error: `CDN down: ${extractValidation.reason}` });
+                    return { streamUrl: null, ckParam: null, requestHeaders: null, cached: false };
+                }
+                // Content-level poisoning — return URL but don't cache, proxy will sanitize/reject
                 return { streamUrl, ckParam, requestHeaders, cached: false, poisoned: true };
             }
             urlCache.set(channelId, { streamUrl, ckParam, requestHeaders, timestamp: Date.now() });

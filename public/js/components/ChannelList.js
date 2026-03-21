@@ -1217,6 +1217,12 @@ class ChannelList {
                 
                 console.log(`[ChannelList] DLStreams resolved: ${streamUrl?.substring(0, 80)}... (cached: ${resolved.cached})`);
 
+                // If the resolver flagged this URL as poisoned, warn but still try —
+                // the proxy will catch it and the player error handler will re-resolve
+                if (resolved.poisoned) {
+                    console.warn(`[ChannelList] DLStreams resolver flagged URL as poisoned — proxy will validate`);
+                }
+
                 // If DRM keys were resolved, inject them as properties for Shaka Player
                 if (resolved.clearKeys) {
                     channel.properties = channel.properties || {};

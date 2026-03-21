@@ -885,14 +885,22 @@ router.get('/stream', async (req, res) => {
 
             if (!response.ok) {
                 console.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
-                if (response.status === 403) {
+                // Log Cloudflare/HTML error pages for diagnostics
+                const errContentType = response.headers.get('content-type') || '';
+                if (response.status === 403 || (isDlStreamsMono && errContentType.includes('text/html'))) {
                     const errorBody = await response.text().catch(() => 'N/A');
-                    console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
+                    const isCfPage = errorBody.includes('cloudflare') || errorBody.includes('cf-ray') || errorBody.includes('cf-error');
+                    console.error(`[Proxy] ${response.status} response (${isCfPage ? 'Cloudflare error page' : 'HTML body'}): ${errorBody.substring(0, 200)}`);
                 }
                 // Invalidate cached DLStreams URL on persistent upstream failure
                 if (isDlStreamsMono && dlChannelId && response.status >= 400) {
                     console.warn(`[Proxy] Invalidating cached DLStreams URL for channel ${dlChannelId} (upstream ${response.status})`);
                     invalidateCachedUrl(dlChannelId);
+                }
+                // Return 503 for DLStreams mono CDN failures — VideoPlayer cold-start handler
+                // only triggers on 502, so 503 bypasses it and goes straight to force re-resolve
+                if (isDlStreamsMono && response.status >= 500) {
+                    return res.status(503).json({ error: 'CDN upstream error', upstreamStatus: response.status, cdnDown: true });
                 }
                 return res.status(response.status).send(`Failed to fetch stream: ${response.statusText}`);
             }
@@ -948,7 +956,7 @@ router.get('/stream', async (req, res) => {
                         console.warn(`[Proxy] Invalidating cached DLStreams URL for channel ${dlChannelId} (faux-200 error)`);
                         invalidateCachedUrl(dlChannelId);
                     }
-                    return res.status(502).send(`Upstream error: ${bodySnippet.substring(0, 100)}`);
+                    return res.status(503).json({ error: 'CDN faux-200 error', poisoned: true });
                 }
             }
 
@@ -1010,11 +1018,11 @@ router.get('/stream', async (req, res) => {
                         console.warn(`[Proxy] DLStreams manifest has ${poisonedSegments}/${totalSegments} suspicious segments`);
                         if (poisonedSegments === totalSegments) {
                             // ALL segments are suspicious — fully poisoned manifest
-                            console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments suspicious). Returning 502.`);
+                            console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments suspicious). Returning 503.`);
                             if (dlChannelId) {
                                 invalidateCachedUrl(dlChannelId);
                             }
-                            return res.status(502).send('Poisoned manifest: all segments suspicious');
+                            return res.status(503).json({ error: 'Poisoned manifest', reason: 'all segments suspicious', poisoned: true });
                         }
                         // Mixed manifest — strip poisoned segment blocks (#EXTINF + URL pairs)
                         const cleanLines = [];

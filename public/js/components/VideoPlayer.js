@@ -135,10 +135,11 @@ class VideoPlayer {
             // Stall recovery settings
             nudgeOffset: 0.2,              // Larger nudge steps for recovery (default 0.1)
             nudgeMaxRetry: 6,              // More retry attempts (default 3)
-            // Faster recovery from errors
-            levelLoadingMaxRetry: 4,
-            manifestLoadingMaxRetry: 4,
-            fragLoadingMaxRetry: 6,
+            // Faster recovery from errors — DLStreams uses fewer retries to fail fast
+            // when the CDN is genuinely down (spares ~10s of wasted 502 retries)
+            levelLoadingMaxRetry: opts.isDlstreams ? 2 : 4,
+            manifestLoadingMaxRetry: opts.isDlstreams ? 2 : 4,
+            fragLoadingMaxRetry: opts.isDlstreams ? 3 : 6,
             // Low latency mode off for more stable audio
             lowLatencyMode: false,
             // Caption/Subtitle settings
@@ -1362,9 +1363,7 @@ class VideoPlayer {
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel));
                             this.hls.startLoad();
                         } else if (manifestCode === 502 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsColdStartRetried) {
-                            // 502 = our proxy returned "CDN returned HTML (cold-start)".
-                            // The URL is still valid — no need to force-re-resolve, just wait
-                            // a moment for the CDN to finish warming up and retry the manifest.
+                            // 502 = genuine CDN cold-start (transient). Wait a moment and retry.
                             this._dlstreamsColdStartRetried = true;
                             console.log(`[Player] DLStreams 502 cold-start detected for channel. Retrying manifest in 3s...`);
                             setTimeout(() => {
@@ -1373,48 +1372,19 @@ class VideoPlayer {
                                 this.hls.loadSource(coldRetryUrl);
                                 this.hls.startLoad();
                             }, 3000);
+                        } else if (manifestCode === 503 && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
+                            // 503 = CDN down or poisoned manifest. Skip cold-start wait,
+                            // go straight to force re-resolve to get a fresh URL.
+                            this._dlstreamsRefreshAttempted = true;
+                            this._dlstreamsColdStartRetried = true; // skip cold-start if re-resolve returns same code
+                            const dlChannelId = String(channel.tvgId).replace('dl_', '');
+                            console.log(`[Player] DLStreams 503 (CDN down/poisoned) for channel ${dlChannelId}. Force re-resolving...`);
+                            this._dlstreamsForceReResolve(channel, dlChannelId);
                         } else if (isManifestLoadFailure && isDlstreamsChannel && this.isUsingProxy && !this._dlstreamsRefreshAttempted) {
                             this._dlstreamsRefreshAttempted = true;
                             const dlChannelId = String(channel.tvgId).replace('dl_', '');
                             console.log(`[Player] DLStreams manifest load failed (${manifestCode}) on proxied URL. Forcing re-resolve for channel ${dlChannelId}...`);
-
-                            fetch(`/api/scraper/dlstreams/resolve/${dlChannelId}?forceRefresh=true`, { cache: 'no-store' })
-                                .then(async (r) => {
-                                    if (!r.ok) {
-                                        const e = await r.json().catch(() => ({}));
-                                        throw new Error(e.error || `Resolve failed (${r.status})`);
-                                    }
-                                    return r.json();
-                                })
-                                .then((resolved) => {
-                                    if (!resolved || !resolved.streamUrl) {
-                                        throw new Error('Empty streamUrl from force resolve');
-                                    }
-                                    // If resolver returned the same dead URL, don't retry — go straight to error
-                                    if (resolved.streamUrl === this.currentUrl) {
-                                        console.warn('[Player] DLStreams re-resolve returned same URL. CDN path is dead.');
-                                        this._dlstreamsRefreshAttempted = true;
-                                        try { this.hls.stopLoad(); } catch (_) { }
-                                        try { this.hls.destroy(); } catch (_) { }
-                                        this.hls = null;
-                                        this.showError(
-                                            'DLStreams stream is currently unavailable.<br><br>' +
-                                            'The CDN path for this channel is down. Try again later or switch channel.'
-                                        );
-                                        return;
-                                    }
-                                    if (resolved.proxyHeaders) {
-                                        channel.proxyHeaders = resolved.proxyHeaders;
-                                    }
-                                    this.currentUrl = resolved.streamUrl;
-                                    const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel);
-                                    console.log('[Player] DLStreams token refreshed. Retrying manifest via proxy...');
-                                    this.hls.loadSource(refreshedProxyUrl);
-                                    this.hls.startLoad();
-                                })
-                                .catch((err) => {
-                                    console.error('[Player] DLStreams force re-resolve failed:', err.message || err);
-                                });
+                            this._dlstreamsForceReResolve(channel, dlChannelId);
                         } else if (isManifestLoadFailure && isDlstreamsChannel && this._dlstreamsRefreshAttempted) {
                             console.error(`[Player] DLStreams manifest still failing after refresh (${manifestCode}). Stopping retries.`);
                             try { this.hls.stopLoad(); } catch (_) { }
@@ -1439,33 +1409,10 @@ class VideoPlayer {
                                 this.hls = null;
 
                                 if (isDlstreamsChannel && !this._dlstreamsMediaErrorRefreshAttempted) {
-                                    // One-shot: try force-refreshing the DLStreams URL
                                     this._dlstreamsMediaErrorRefreshAttempted = true;
                                     const dlChId = String(channel.tvgId).replace('dl_', '');
                                     console.log(`[Player] DLStreams media decode failure — forcing re-resolve for channel ${dlChId}...`);
-                                    fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
-                                        .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
-                                        .then(resolved => {
-                                            if (resolved?.streamUrl && resolved.streamUrl !== this.currentUrl) {
-                                                channel.streamUrl = resolved.streamUrl;
-                                                if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
-                                                console.log('[Player] DLStreams re-resolved after media error. Retrying play...');
-                                                this._fatalMediaRecoveryCount = 0;
-                                                this.play(channel, resolved.streamUrl);
-                                            } else if (resolved?.streamUrl === this.currentUrl) {
-                                                throw new Error('Re-resolve returned same dead URL');
-                                            } else {
-                                                throw new Error('Empty streamUrl');
-                                            }
-                                        })
-                                        .catch(err => {
-                                            console.error('[Player] DLStreams media-error re-resolve failed:', err.message);
-                                            this.showError(
-                                                'DLStreams stream is currently unavailable.<br><br>' +
-                                                'The stream segments could not be decoded (invalid or blocked content).<br>' +
-                                                'Try again in a minute or switch channel.'
-                                            );
-                                        });
+                                    this._dlstreamsForceReResolve(channel, dlChId);
                                 } else {
                                     this.showError(
                                         isDlstreamsChannel
@@ -1486,7 +1433,6 @@ class VideoPlayer {
                             }
                         } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR && data.details === 'fragLoadError' && isDlstreamsChannel) {
                             // Fatal segment load error on DLStreams — likely a poisoned manifest
-                            // with image or dead segment URLs. Force re-resolve.
                             console.error(`[Player] DLStreams fatal fragLoadError — segments unplayable. Forcing re-resolve...`);
                             try { this.hls.stopLoad(); } catch (_) { }
                             try { this.hls.destroy(); } catch (_) { }
@@ -1494,28 +1440,7 @@ class VideoPlayer {
                             if (!this._dlstreamsFragErrorRefreshAttempted) {
                                 this._dlstreamsFragErrorRefreshAttempted = true;
                                 const dlChId = String(channel.tvgId).replace('dl_', '');
-                                fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
-                                    .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
-                                    .then(resolved => {
-                                        if (resolved?.streamUrl && resolved.streamUrl !== this.currentUrl) {
-                                            channel.streamUrl = resolved.streamUrl;
-                                            if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
-                                            console.log('[Player] DLStreams re-resolved after fragLoadError. Retrying play...');
-                                            this.play(channel, resolved.streamUrl);
-                                        } else if (resolved?.streamUrl === this.currentUrl) {
-                                            throw new Error('Re-resolve returned same dead URL');
-                                        } else {
-                                            throw new Error('Empty streamUrl');
-                                        }
-                                    })
-                                    .catch(err => {
-                                        console.error('[Player] DLStreams frag-error re-resolve failed:', err.message);
-                                        this.showError(
-                                            'DLStreams stream is currently unavailable.<br><br>' +
-                                            'The stream segments are invalid or blocked.<br>' +
-                                            'Try again in a minute or switch channel.'
-                                        );
-                                    });
+                                this._dlstreamsForceReResolve(channel, dlChId);
                             } else {
                                 this.showError(
                                     'DLStreams stream is currently unavailable.<br><br>' +
@@ -1593,6 +1518,51 @@ class VideoPlayer {
             console.error('Error playing channel:', err);
             this.showError('Failed to play channel');
         }
+    }
+
+    /**
+     * DLStreams: force re-resolve and retry with fresh URL.
+     * Shared by 503 handler and generic manifest-load-failure handler.
+     */
+    _dlstreamsForceReResolve(channel, dlChannelId) {
+        fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChannelId)}?forceRefresh=true`, { cache: 'no-store' })
+            .then(async (r) => {
+                if (!r.ok) {
+                    const e = await r.json().catch(() => ({}));
+                    throw new Error(e.error || `Resolve failed (${r.status})`);
+                }
+                return r.json();
+            })
+            .then((resolved) => {
+                if (!resolved || !resolved.streamUrl) {
+                    throw new Error('Empty streamUrl from force resolve');
+                }
+                // If resolver returned the same dead URL, don't retry
+                if (resolved.streamUrl === this.currentUrl) {
+                    console.warn('[Player] DLStreams re-resolve returned same URL. CDN path is dead.');
+                    throw new Error('CDN path is dead (same URL returned)');
+                }
+                if (resolved.proxyHeaders) {
+                    channel.proxyHeaders = resolved.proxyHeaders;
+                }
+                this.currentUrl = resolved.streamUrl;
+                const refreshedProxyUrl = this.getProxiedUrl(this.currentUrl, channel.sourceId, channel?.proxyHeaders, channel);
+                console.log('[Player] DLStreams re-resolved. Retrying manifest via proxy...');
+                if (!this.hls) return;
+                this.hls.loadSource(refreshedProxyUrl);
+                this.hls.startLoad();
+            })
+            .catch((err) => {
+                console.error('[Player] DLStreams force re-resolve failed:', err.message || err);
+                try { this.hls?.stopLoad(); } catch (_) { }
+                try { this.hls?.destroy(); } catch (_) { }
+                this.hls = null;
+                this.showError(
+                    'DLStreams stream is currently unavailable.<br><br>' +
+                    'The CDN path for this channel is down or serving poisoned content.<br>' +
+                    'Try again in a minute or switch channel.'
+                );
+            });
     }
 
     /**

@@ -731,12 +731,14 @@ router.get('/stream', async (req, res) => {
             }
 
             // Safety net: block DLStreams segment requests for image-like URLs
-            // These come from poisoned mono manifests and will never decode as video
+            // These come from poisoned mono manifests and will never decode as video.
+            // EXCEPTION: AES-128 encrypted manifests use obfuscated URLs deliberately —
+            // image extensions and cloud storage hosts are camouflage, not poison.
             const dlChannelId = req.query.dlChannelId;
+            const isEncryptedSegment = req.query.encrypted === '1';
             const IMAGE_EXT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
-            // Hosts that are never legitimate HLS segment CDNs (poisoned manifests use these)
             const FAKE_HOST_RE = /firebasestorage\.googleapis\.com|storage\.cloud\.google\.com|drive\.google\.com|pastebin\.com|paste\.ee/i;
-            if (dlChannelId) {
+            if (dlChannelId && !isEncryptedSegment) {
                 try {
                     const segUrl = new URL(url);
                     if (IMAGE_EXT_RE.test(segUrl.pathname) ||
@@ -1002,7 +1004,13 @@ router.get('/stream', async (req, res) => {
                     }
                     return false;
                 };
-                if (isDlStreamsMono) {
+                // AES-128 encrypted manifests use obfuscated segment URLs deliberately —
+                // image extensions and cloud storage hosts are camouflage, not poison.
+                const isEncryptedManifest = /EXT-X-KEY:METHOD=AES-128/i.test(manifest);
+                if (isDlStreamsMono && isEncryptedManifest) {
+                    console.log(`[Proxy] DLStreams manifest is AES-128 encrypted — skipping poison checks`);
+                }
+                if (isDlStreamsMono && !isEncryptedManifest) {
                     const lines = manifest.split('\n');
                     let totalSegments = 0;
                     let poisonedSegments = 0;
@@ -1076,7 +1084,8 @@ router.get('/stream', async (req, res) => {
 
                 // Build suffix for rewritten URLs (sourceId + dlChannelId for DLStreams)
                 const rewriteSuffix = (sourceId ? '&sourceId=' + sourceId : '')
-                    + (isDlStreamsMono && dlChannelId ? '&dlChannelId=' + encodeURIComponent(dlChannelId) : '');
+                    + (isDlStreamsMono && dlChannelId ? '&dlChannelId=' + encodeURIComponent(dlChannelId) : '')
+                    + (isDlStreamsMono && isEncryptedManifest ? '&encrypted=1' : '');
 
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
@@ -1272,8 +1281,9 @@ router.get('/stream', async (req, res) => {
             // Safety net: validate MPEG-TS sync byte for DLStreams segments.
             // Poisoned manifests can point to fake .ts files on cloud storage that contain
             // non-video data, causing persistent media decode errors and playback stalls.
+            // EXCEPTION: AES-128 encrypted segments are ciphertext — they won't start with 0x47.
             const isDlSegment = !!dlChannelId && !isDlStreamsMono && finalUrl.includes('.ts');
-            if (isDlSegment && firstChunk.length > 0 && firstChunk[0] !== 0x47) {
+            if (isDlSegment && !isEncryptedSegment && firstChunk.length > 0 && firstChunk[0] !== 0x47) {
                 console.warn(`[Proxy] DLStreams segment is not valid MPEG-TS (first byte: 0x${firstChunk[0].toString(16)}): ${finalUrl.substring(0, 120)}`);
                 invalidateCachedUrl(dlChannelId);
                 return res.status(410).send('Invalid MPEG-TS segment');

@@ -154,6 +154,21 @@ async function validateMonoManifest(monoUrl, headers = null) {
         const body = await resp.text();
         if (!body.startsWith('#EXTM3U')) return { valid: false, reason: 'not HLS' };
 
+        // AES-128 encrypted manifests use obfuscated segment URLs (image extensions,
+        // cloud storage hosts) deliberately. URL-pattern checks and content probes
+        // will false-positive on these since the segments are encrypted ciphertext.
+        const isEncrypted = /EXT-X-KEY:METHOD=AES-128/i.test(body);
+        if (isEncrypted) {
+            // Verify segments exist and are reachable (just check count, not URLs)
+            let segCount = 0;
+            for (const line of body.split('\n')) {
+                const t = line.trim();
+                if (t && !t.startsWith('#')) segCount++;
+            }
+            if (segCount === 0) return { valid: false, reason: 'encrypted manifest with no segments' };
+            return { valid: true, encrypted: true };
+        }
+
         // Collect segment URLs and check for suspicious patterns
         const segmentUrls = [];
         let poisonedSegments = 0;

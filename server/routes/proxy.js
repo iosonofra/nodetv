@@ -965,6 +965,20 @@ router.get('/stream', async (req, res) => {
                 // Some mono.css manifests contain image-like segment URIs (.png, .jpg, etc.)
                 // that are not valid video segments. Detect and sanitize them.
                 const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
+                // Check if a URL is an image-like segment (pathname extension OR query params)
+                const isImageSegmentUrl = (absoluteUrl) => {
+                    try {
+                        const parsed = new URL(absoluteUrl);
+                        if (IMAGE_SEGMENT_RE.test(parsed.pathname)) return true;
+                        const rct = parsed.searchParams.get('response-content-type') || '';
+                        if (rct.startsWith('image/')) return true;
+                        const rcd = parsed.searchParams.get('response-content-disposition') || '';
+                        if (IMAGE_SEGMENT_RE.test(rcd)) return true;
+                    } catch (_) {
+                        if (IMAGE_SEGMENT_RE.test(absoluteUrl)) return true;
+                    }
+                    return false;
+                };
                 if (isDlStreamsMono) {
                     const lines = manifest.split('\n');
                     let totalSegments = 0;
@@ -973,14 +987,8 @@ router.get('/stream', async (req, res) => {
                         const t = line.trim();
                         if (t && !t.startsWith('#')) {
                             totalSegments++;
-                            // Resolve to absolute URL to check extension reliably
-                            try {
-                                const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : new URL(t, baseUrl).href;
-                                const pathname = new URL(absUrl).pathname;
-                                if (IMAGE_SEGMENT_RE.test(pathname)) imageSegments++;
-                            } catch (_) {
-                                if (IMAGE_SEGMENT_RE.test(t)) imageSegments++;
-                            }
+                            const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : (() => { try { return new URL(t, baseUrl).href; } catch(_) { return t; } })();
+                            if (isImageSegmentUrl(absUrl)) imageSegments++;
                         }
                     }
                     if (totalSegments > 0 && imageSegments > 0) {
@@ -997,15 +1005,10 @@ router.get('/stream', async (req, res) => {
                             const t = line.trim();
                             if (t && !t.startsWith('#')) {
                                 // This is a segment URL line
-                                try {
-                                    const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : new URL(t, baseUrl).href;
-                                    const pathname = new URL(absUrl).pathname;
-                                    if (IMAGE_SEGMENT_RE.test(pathname)) {
-                                        // Drop this segment URL (and the preceding #EXTINF was already skipped via flag)
-                                        continue;
-                                    }
-                                } catch (_) {
-                                    if (IMAGE_SEGMENT_RE.test(t)) continue;
+                                const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : (() => { try { return new URL(t, baseUrl).href; } catch(_) { return t; } })();
+                                if (isImageSegmentUrl(absUrl)) {
+                                    // Drop this image segment URL
+                                    continue;
                                 }
                                 skipNextSegment = false;
                                 cleanLines.push(line);

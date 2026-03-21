@@ -100,6 +100,23 @@ function isValidStreamUrl(url) {
 const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
 
 /**
+ * Check if a segment URL looks like an image (by pathname extension or query params).
+ */
+function isImageSegmentUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        if (IMAGE_SEGMENT_RE.test(parsed.pathname)) return true;
+        const rct = parsed.searchParams.get('response-content-type') || '';
+        if (rct.startsWith('image/')) return true;
+        const rcd = parsed.searchParams.get('response-content-disposition') || '';
+        if (IMAGE_SEGMENT_RE.test(rcd)) return true;
+    } catch (_) {
+        if (IMAGE_SEGMENT_RE.test(rawUrl)) return true;
+    }
+    return false;
+}
+
+/**
  * Validate a mono.css/mono.csv manifest by fetching it and checking for poisoned
  * (image-like) segment URLs. Returns { valid: true } or { valid: false, reason }.
  */
@@ -130,7 +147,7 @@ async function validateMonoManifest(monoUrl, headers = null) {
             const t = line.trim();
             if (t && !t.startsWith('#')) {
                 totalSegments++;
-                if (IMAGE_SEGMENT_RE.test(t)) imageSegments++;
+                if (isImageSegmentUrl(t)) imageSegments++;
             }
         }
         if (totalSegments > 0 && imageSegments === totalSegments) {

@@ -356,6 +356,7 @@ class DlstreamsService {
     async resolveStreamUrl(channelId, options = {}) {
         console.log(`[DLStreams] Resolving stream URL for channel ${channelId}...`);
         const result = await resolveChannelUrl(channelId, {
+            forceRefresh: options.forceRefresh || false,
             bypassFailureCache: options.forceRefresh || options.bypassFailureCache || false
         });
 

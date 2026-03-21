@@ -15,7 +15,7 @@ const { Readable } = require('stream');
 const { requireAuth } = require('../auth');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 const fetch = require('node-fetch');
-const { getCachedHeaders, getAnyDlstreamsHeaders } = require('../services/dlstreamsResolver');
+const { getCachedHeaders, getAnyDlstreamsHeaders, invalidateCachedUrl } = require('../services/dlstreamsResolver');
 
 // Global agents to ignore certificate errors for upstream media sources
 const globalHttpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -886,6 +886,11 @@ router.get('/stream', async (req, res) => {
                     const errorBody = await response.text().catch(() => 'N/A');
                     console.error(`403 Response body: ${errorBody.substring(0, 200)}`);
                 }
+                // Invalidate cached DLStreams URL on persistent upstream failure
+                if (isDlStreamsMono && dlChannelId && response.status >= 400) {
+                    console.warn(`[Proxy] Invalidating cached DLStreams URL for channel ${dlChannelId} (upstream ${response.status})`);
+                    invalidateCachedUrl(dlChannelId);
+                }
                 return res.status(response.status).send(`Failed to fetch stream: ${response.statusText}`);
             }
 
@@ -935,6 +940,11 @@ router.get('/stream', async (req, res) => {
                 const bodySnippet = firstChunk.subarray(0, 200).toString('utf8');
                 if (bodySnippet.includes('Upstream error') || bodySnippet.includes('404') || bodySnippet.includes('Not Found') || bodySnippet.includes('error')) {
                     console.error(`[Proxy] CDN returned faux-200 error for mono URL: ${bodySnippet.substring(0, 100)}`);
+                    // Invalidate cached DLStreams URL so next resolve fetches a fresh one
+                    if (dlChannelId) {
+                        console.warn(`[Proxy] Invalidating cached DLStreams URL for channel ${dlChannelId} (faux-200 error)`);
+                        invalidateCachedUrl(dlChannelId);
+                    }
                     return res.status(502).send(`Upstream error: ${bodySnippet.substring(0, 100)}`);
                 }
             }
@@ -996,6 +1006,9 @@ router.get('/stream', async (req, res) => {
                         if (imageSegments === totalSegments) {
                             // ALL segments are images — fully poisoned manifest
                             console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments are images). Returning 502.`);
+                            if (dlChannelId) {
+                                invalidateCachedUrl(dlChannelId);
+                            }
                             return res.status(502).send('Poisoned manifest: all segments are image files');
                         }
                         // Mixed manifest — strip image segment blocks (#EXTINF + URL pairs)

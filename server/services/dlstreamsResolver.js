@@ -867,6 +867,20 @@ function getAnyDlstreamsHeaders() {
     return null;
 }
 
+/**
+ * Invalidate a cached URL for a specific channel (e.g. when proxy detects persistent upstream failures)
+ */
+function invalidateCachedUrl(channelId) {
+    const key = String(channelId);
+    if (urlCache.has(key)) {
+        console.log(`[DLStreams Resolver] Cache invalidated for channel ${key} (upstream failure)`);
+        urlCache.delete(key);
+        saveUrlCache();
+        return true;
+    }
+    return false;
+}
+
 module.exports = {
     extractStreamUrl,
     resolveChannelUrl,
@@ -874,6 +888,7 @@ module.exports = {
     fetchCategories,
     getCachedHeaders,
     getAnyDlstreamsHeaders,
+    invalidateCachedUrl,
     getLaunchOptions,
     BASE_URL,
     CHROMIUM_PATH

@@ -99,13 +99,19 @@ function isValidStreamUrl(url) {
 
 const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
 
+// Hosts that are never legitimate HLS segment CDNs.
+// Poisoned manifests redirect segments to cloud storage buckets with fake .ts files.
+const FAKE_SEGMENT_HOST_RE = /firebasestorage\.googleapis\.com|storage\.cloud\.google\.com|drive\.google\.com|docs\.google\.com|pastebin\.com|paste\.ee|hastebin\.com|ghostbin\.co|ix\.io|dpaste\./i;
+
 /**
- * Check if a segment URL looks like an image (by pathname extension or query params).
+ * Check if a segment URL looks like an image (by pathname extension or query params)
+ * or is hosted on a known non-CDN cloud storage service.
  */
-function isImageSegmentUrl(rawUrl) {
+function isSuspiciousSegmentUrl(rawUrl) {
     try {
         const parsed = new URL(rawUrl);
         if (IMAGE_SEGMENT_RE.test(parsed.pathname)) return true;
+        if (FAKE_SEGMENT_HOST_RE.test(parsed.hostname)) return true;
         const rct = parsed.searchParams.get('response-content-type') || '';
         if (rct.startsWith('image/')) return true;
         const rcd = parsed.searchParams.get('response-content-disposition') || '';
@@ -142,19 +148,19 @@ async function validateMonoManifest(monoUrl, headers = null) {
         const body = await resp.text();
         if (!body.startsWith('#EXTM3U')) return { valid: false, reason: 'not HLS' };
 
-        let totalSegments = 0, imageSegments = 0;
+        let totalSegments = 0, poisonedSegments = 0;
         for (const line of body.split('\n')) {
             const t = line.trim();
             if (t && !t.startsWith('#')) {
                 totalSegments++;
-                if (isImageSegmentUrl(t)) imageSegments++;
+                if (isSuspiciousSegmentUrl(t)) poisonedSegments++;
             }
         }
-        if (totalSegments > 0 && imageSegments === totalSegments) {
-            return { valid: false, reason: `all ${totalSegments} segments are image files` };
+        if (totalSegments > 0 && poisonedSegments === totalSegments) {
+            return { valid: false, reason: `all ${totalSegments} segments are suspicious (image/fake-host)` };
         }
-        if (totalSegments > 0 && imageSegments > totalSegments / 2) {
-            return { valid: false, reason: `${imageSegments}/${totalSegments} segments are image files` };
+        if (totalSegments > 0 && poisonedSegments > totalSegments / 2) {
+            return { valid: false, reason: `${poisonedSegments}/${totalSegments} segments are suspicious (image/fake-host)` };
         }
         return { valid: true };
     } catch (e) {

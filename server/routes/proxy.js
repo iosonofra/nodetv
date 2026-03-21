@@ -734,18 +734,21 @@ router.get('/stream', async (req, res) => {
             // These come from poisoned mono manifests and will never decode as video
             const dlChannelId = req.query.dlChannelId;
             const IMAGE_EXT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
+            // Hosts that are never legitimate HLS segment CDNs (poisoned manifests use these)
+            const FAKE_HOST_RE = /firebasestorage\.googleapis\.com|storage\.cloud\.google\.com|drive\.google\.com|pastebin\.com|paste\.ee/i;
             if (dlChannelId) {
                 try {
                     const segUrl = new URL(url);
                     if (IMAGE_EXT_RE.test(segUrl.pathname) ||
-                        (segUrl.searchParams.get('response-content-type') || '').startsWith('image/')) {
-                        console.warn(`[Proxy] Blocking image-like DLStreams segment: ${url.substring(0, 100)}`);
-                        return res.status(410).send('Image segment blocked');
+                        (segUrl.searchParams.get('response-content-type') || '').startsWith('image/') ||
+                        FAKE_HOST_RE.test(segUrl.hostname)) {
+                        console.warn(`[Proxy] Blocking suspicious DLStreams segment: ${url.substring(0, 120)}`);
+                        return res.status(410).send('Suspicious segment blocked');
                     }
                 } catch (_) {
                     if (IMAGE_EXT_RE.test(url)) {
-                        console.warn(`[Proxy] Blocking image-like DLStreams segment: ${url.substring(0, 100)}`);
-                        return res.status(410).send('Image segment blocked');
+                        console.warn(`[Proxy] Blocking suspicious DLStreams segment: ${url.substring(0, 120)}`);
+                        return res.status(410).send('Suspicious segment blocked');
                     }
                 }
             }
@@ -975,11 +978,13 @@ router.get('/stream', async (req, res) => {
                 // Some mono.css manifests contain image-like segment URIs (.png, .jpg, etc.)
                 // that are not valid video segments. Detect and sanitize them.
                 const IMAGE_SEGMENT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp)(\?|$)/i;
-                // Check if a URL is an image-like segment (pathname extension OR query params)
-                const isImageSegmentUrl = (absoluteUrl) => {
+                const FAKE_HOST_RE = /firebasestorage\.googleapis\.com|storage\.cloud\.google\.com|drive\.google\.com|pastebin\.com|paste\.ee/i;
+                // Check if a URL is a suspicious/poisoned segment (image ext, fake host, etc.)
+                const isSuspiciousSegmentUrl = (absoluteUrl) => {
                     try {
                         const parsed = new URL(absoluteUrl);
                         if (IMAGE_SEGMENT_RE.test(parsed.pathname)) return true;
+                        if (FAKE_HOST_RE.test(parsed.hostname)) return true;
                         const rct = parsed.searchParams.get('response-content-type') || '';
                         if (rct.startsWith('image/')) return true;
                         const rcd = parsed.searchParams.get('response-content-disposition') || '';
@@ -992,26 +997,26 @@ router.get('/stream', async (req, res) => {
                 if (isDlStreamsMono) {
                     const lines = manifest.split('\n');
                     let totalSegments = 0;
-                    let imageSegments = 0;
+                    let poisonedSegments = 0;
                     for (const line of lines) {
                         const t = line.trim();
                         if (t && !t.startsWith('#')) {
                             totalSegments++;
                             const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : (() => { try { return new URL(t, baseUrl).href; } catch(_) { return t; } })();
-                            if (isImageSegmentUrl(absUrl)) imageSegments++;
+                            if (isSuspiciousSegmentUrl(absUrl)) poisonedSegments++;
                         }
                     }
-                    if (totalSegments > 0 && imageSegments > 0) {
-                        console.warn(`[Proxy] DLStreams manifest has ${imageSegments}/${totalSegments} image-like segments`);
-                        if (imageSegments === totalSegments) {
-                            // ALL segments are images — fully poisoned manifest
-                            console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments are images). Returning 502.`);
+                    if (totalSegments > 0 && poisonedSegments > 0) {
+                        console.warn(`[Proxy] DLStreams manifest has ${poisonedSegments}/${totalSegments} suspicious segments`);
+                        if (poisonedSegments === totalSegments) {
+                            // ALL segments are suspicious — fully poisoned manifest
+                            console.error(`[Proxy] Fully poisoned DLStreams manifest (all segments suspicious). Returning 502.`);
                             if (dlChannelId) {
                                 invalidateCachedUrl(dlChannelId);
                             }
-                            return res.status(502).send('Poisoned manifest: all segments are image files');
+                            return res.status(502).send('Poisoned manifest: all segments suspicious');
                         }
-                        // Mixed manifest — strip image segment blocks (#EXTINF + URL pairs)
+                        // Mixed manifest — strip poisoned segment blocks (#EXTINF + URL pairs)
                         const cleanLines = [];
                         let skipNextSegment = false;
                         for (const line of lines) {
@@ -1019,8 +1024,8 @@ router.get('/stream', async (req, res) => {
                             if (t && !t.startsWith('#')) {
                                 // This is a segment URL line
                                 const absUrl = (t.startsWith('http://') || t.startsWith('https://')) ? t : (() => { try { return new URL(t, baseUrl).href; } catch(_) { return t; } })();
-                                if (isImageSegmentUrl(absUrl)) {
-                                    // Drop this image segment URL
+                                if (isSuspiciousSegmentUrl(absUrl)) {
+                                    // Drop this poisoned segment URL
                                     continue;
                                 }
                                 skipNextSegment = false;
@@ -1057,7 +1062,7 @@ router.get('/stream', async (req, res) => {
                             }
                         }
                         manifest = finalLines.join('\n');
-                        console.log(`[Proxy] Sanitized DLStreams manifest: removed ${imageSegments} image segments`);
+                        console.log(`[Proxy] Sanitized DLStreams manifest: removed ${poisonedSegments} poisoned segments`);
                     }
                 }
 
@@ -1256,6 +1261,15 @@ router.get('/stream', async (req, res) => {
             }
 
             // Binary content (Video Segment or Key): Collect and send
+            // Safety net: validate MPEG-TS sync byte for DLStreams segments.
+            // Poisoned manifests can point to fake .ts files on cloud storage that contain
+            // non-video data, causing persistent media decode errors and playback stalls.
+            const isDlSegment = !!dlChannelId && !isDlStreamsMono && finalUrl.includes('.ts');
+            if (isDlSegment && firstChunk.length > 0 && firstChunk[0] !== 0x47) {
+                console.warn(`[Proxy] DLStreams segment is not valid MPEG-TS (first byte: 0x${firstChunk[0].toString(16)}): ${finalUrl.substring(0, 120)}`);
+                invalidateCachedUrl(dlChannelId);
+                return res.status(410).send('Invalid MPEG-TS segment');
+            }
             console.log(`[Proxy] Serving binary content (${contentType}) at status ${response.status}`);
             res.status(response.status);
             res.set('Content-Type', contentType || 'application/octet-stream');

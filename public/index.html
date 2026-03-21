@@ -559,6 +559,30 @@
                     d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
                 </svg> button next to EPG sources for manual refresh</p>
             </div>
+
+            <!-- Backup & Restore Sources -->
+            <div class="source-section">
+              <div class="section-header">
+                <h3>Backup &amp; Restore</h3>
+              </div>
+              <p class="hint">Export your sources to a JSON file, or import a previously saved backup.<br>Importing uses <em>merge</em> mode — sources with the same name and type are skipped.</p>
+              <div class="setting-item" style="gap: var(--space-sm); flex-wrap: wrap;">
+                <button class="btn btn-secondary" id="backup-sources">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:1em;height:1em;vertical-align:middle;margin-right:4px;">
+                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/>
+                  </svg>
+                  Export Sources
+                </button>
+                <button class="btn btn-secondary" id="restore-sources">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:1em;height:1em;vertical-align:middle;margin-right:4px;">
+                    <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
+                  </svg>
+                  Import Sources
+                </button>
+                <input type="file" id="restore-file-input" accept=".json" style="display:none;">
+              </div>
+              <div id="restore-result" style="display:none; margin-top:var(--space-md);"></div>
+            </div>
           </div>
 
           <!-- Player Tab -->

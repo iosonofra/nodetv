@@ -40,6 +40,39 @@ router.get('/status', async (req, res) => {
     }
 });
 
+// Export all user sources as a JSON backup
+router.get('/backup', async (req, res) => {
+    try {
+        const allSources = await sources.getAll(req.user.id, req.user.role);
+        // Only include sources owned by the user (admins get everything)
+        const ownSources = allSources.filter(s =>
+            s.user_id === req.user.id || req.user.role === 'admin'
+        );
+        const backup = {
+            version: 1,
+            exported_at: new Date().toISOString(),
+            exported_by: req.user.username || String(req.user.id),
+            sources: ownSources.map(s => ({
+                type: s.type,
+                name: s.name,
+                url: s.url,
+                username: s.username || null,
+                password: s.password || null,
+                useWarp: !!s.useWarp,
+                enabled: s.enabled !== false,
+                is_public: !!s.is_public,
+            }))
+        };
+        const date = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        res.setHeader('Content-Disposition', `attachment; filename="sources-backup-${date}.json"`);
+        res.setHeader('Content-Type', 'application/json');
+        res.json(backup);
+    } catch (err) {
+        console.error('Error creating sources backup:', err);
+        res.status(500).json({ error: 'Failed to create backup' });
+    }
+});
+
 // Get sources by type
 router.get('/type/:type', async (req, res) => {
     try {
@@ -325,6 +358,72 @@ router.get('/:id/estimate', async (req, res) => {
     } catch (err) {
         console.error('Error estimating M3U size:', err);
         res.status(500).json({ error: 'Failed to estimate playlist size', message: err.message });
+    }
+});
+
+// Restore sources from a JSON backup
+router.post('/restore', async (req, res) => {
+    try {
+        const { sources: importSources, mode = 'merge' } = req.body;
+
+        if (!Array.isArray(importSources) || importSources.length === 0) {
+            return res.status(400).json({ error: 'No sources to import' });
+        }
+
+        const validTypes = ['xtream', 'm3u', 'epg'];
+        for (const s of importSources) {
+            if (!s.type || !validTypes.includes(s.type)) {
+                return res.status(400).json({ error: `Invalid source type: "${s.type}"` });
+            }
+            if (!s.name || !s.url) {
+                return res.status(400).json({ error: `Source "${s.name || '(unnamed)'}" is missing required fields (name, url)` });
+            }
+        }
+
+        // Load existing sources for duplicate detection
+        const existing = await sources.getAll(req.user.id, req.user.role);
+        const existingKeys = new Set(existing.map(s => `${s.type}::${s.name}`));
+
+        let imported = 0;
+        let skipped = 0;
+        const errors = [];
+
+        for (const s of importSources) {
+            const key = `${s.type}::${s.name}`;
+            if (mode === 'merge' && existingKeys.has(key)) {
+                skipped++;
+                continue;
+            }
+            try {
+                // Sanitize path if it looks like an absolute Windows path
+                let sanitizedUrl = s.url;
+                if (sanitizedUrl && sanitizedUrl.includes('\\') && sanitizedUrl.includes('data')) {
+                    const parts = sanitizedUrl.split(/[\\/]/);
+                    const dataIndex = parts.indexOf('data');
+                    if (dataIndex !== -1) sanitizedUrl = parts.slice(dataIndex).join('/');
+                }
+                const created = await sources.create({
+                    type: s.type,
+                    name: s.name,
+                    url: sanitizedUrl,
+                    username: s.username || null,
+                    password: s.password || null,
+                    useWarp: !!s.useWarp,
+                    enabled: s.enabled !== false,
+                    is_public: !!s.is_public,
+                }, req.user.id);
+                syncService.syncSource(created.id).catch(console.error);
+                imported++;
+            } catch (err) {
+                errors.push(`${s.name}: ${err.message}`);
+            }
+        }
+
+        console.log(`[Sources] Restore: ${imported} imported, ${skipped} skipped, ${errors.length} errors`);
+        res.json({ imported, skipped, errors });
+    } catch (err) {
+        console.error('Error restoring sources:', err);
+        res.status(500).json({ error: 'Failed to restore sources' });
     }
 });
 

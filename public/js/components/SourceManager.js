@@ -26,6 +26,19 @@ class SourceManager {
         document.getElementById('add-m3u').addEventListener('click', () => this.showAddModal('m3u'));
         document.getElementById('add-epg').addEventListener('click', () => this.showAddModal('epg'));
 
+        // Backup & Restore buttons
+        document.getElementById('backup-sources')?.addEventListener('click', () => this.backupSources());
+        document.getElementById('restore-sources')?.addEventListener('click', () => {
+            document.getElementById('restore-file-input')?.click();
+        });
+        document.getElementById('restore-file-input')?.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+                this.restoreSourcesFromFile(file);
+                e.target.value = ''; // reset so same file can be selected again
+            }
+        });
+
         // Initialize content browser
         this.initContentBrowser();
 
@@ -1349,6 +1362,88 @@ class SourceManager {
 
             // Optional: Update status text/badge in .source-info
         });
+    }
+
+    /**
+     * Export all sources to a JSON backup file (downloaded by the browser).
+     */
+    async backupSources() {
+        const btn = document.getElementById('backup-sources');
+        if (btn) { btn.disabled = true; btn.textContent = 'Exporting…'; }
+        try {
+            const backup = await API.sources.backup();
+            const json = JSON.stringify(backup, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const date = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+            a.href = url;
+            a.download = `sources-backup-${date}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('[SourceManager] Backup failed:', err);
+            alert(`Export failed: ${err.message}`);
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:1em;height:1em;vertical-align:middle;margin-right:4px;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg> Export Sources'; }
+        }
+    }
+
+    /**
+     * Import sources from a JSON backup file.
+     * @param {File} file
+     */
+    async restoreSourcesFromFile(file) {
+        const resultEl = document.getElementById('restore-result');
+        const btn = document.getElementById('restore-sources');
+
+        const showResult = (html, isError = false) => {
+            if (!resultEl) return;
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = `<p class="hint" style="color:${isError ? 'var(--color-error, #ef4444)' : 'var(--color-success, #22c55e)'};margin:0;">${html}</p>`;
+        };
+
+        try {
+            const text = await file.text();
+            let backup;
+            try {
+                backup = JSON.parse(text);
+            } catch {
+                showResult('Invalid JSON file.', true);
+                return;
+            }
+
+            if (!backup.sources || !Array.isArray(backup.sources)) {
+                showResult('File does not look like a valid sources backup.', true);
+                return;
+            }
+
+            if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+            if (resultEl) resultEl.style.display = 'none';
+
+            const result = await API.sources.restore(backup.sources, 'merge');
+
+            let msg = `Imported ${result.imported} source${result.imported !== 1 ? 's' : ''}`;
+            if (result.skipped > 0) msg += `, skipped ${result.skipped} (already exist)`;
+            if (result.errors && result.errors.length > 0) {
+                msg += `<br><span style="color:var(--color-warning,#f59e0b);">Errors: ${result.errors.join(', ')}</span>`;
+            }
+            showResult(msg);
+
+            if (result.imported > 0) {
+                await this.loadSources();
+                if (window.app?.channelList?.loadSources) {
+                    await window.app.channelList.loadSources().catch(() => {});
+                }
+            }
+        } catch (err) {
+            console.error('[SourceManager] Restore failed:', err);
+            showResult(`Import failed: ${err.message}`, true);
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:1em;height:1em;vertical-align:middle;margin-right:4px;"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg> Import Sources'; }
+        }
     }
 }
 

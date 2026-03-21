@@ -1438,7 +1438,7 @@ class VideoPlayer {
                                                 if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
                                                 console.log('[Player] DLStreams re-resolved after media error. Retrying play...');
                                                 this._fatalMediaRecoveryCount = 0;
-                                                this.play(channel);
+                                                this.play(channel, resolved.streamUrl);
                                             } else {
                                                 throw new Error('Empty streamUrl');
                                             }
@@ -1486,7 +1486,7 @@ class VideoPlayer {
                                             channel.streamUrl = resolved.streamUrl;
                                             if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
                                             console.log('[Player] DLStreams re-resolved after fragLoadError. Retrying play...');
-                                            this.play(channel);
+                                            this.play(channel, resolved.streamUrl);
                                         } else {
                                             throw new Error('Empty streamUrl');
                                         }

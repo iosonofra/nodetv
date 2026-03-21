@@ -48,6 +48,11 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const failureCache = new Map();
 const FAILURE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
+// Recently-rejected URLs (channelId -> { url, timestamp })
+// Prevents forceRefresh from re-discovering the same dead CDN URL
+const rejectedUrlCache = new Map();
+const REJECTED_URL_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 /**
  * Load cache from file
  */
@@ -431,10 +436,10 @@ function getLaunchOptions() {
  */
 async function extractStreamUrl(page, channelId, options = {}) {
     channelId = String(channelId);
-    const { bypassFailureCache } = options;
+    const { bypassFailureCache, forceRefresh } = options;
     // 1. Check cache first
     const cached = urlCache.get(channelId);
-    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+    if (!forceRefresh && cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
         // Invalidate cache for mono.css/mono.csv URLs without requestHeaders (can't proxy without them)
         const isMono = cached.streamUrl && (cached.streamUrl.includes('mono.css') || cached.streamUrl.includes('mono.csv'));
         if (isMono && !cached.requestHeaders) {
@@ -671,7 +676,7 @@ async function extractStreamUrl(page, channelId, options = {}) {
         failureCache.set(channelId, { timestamp: Date.now(), error: err.message });
     }
 
-    return { streamUrl, ckParam };
+    return { streamUrl, ckParam, requestHeaders };
 }
 
 /**
@@ -707,6 +712,17 @@ async function resolveChannelUrl(channelId, options = {}) {
 
     const playerUrl = `${BASE_URL}/watch.php?id=${channelId}`;
 
+    // When forceRefresh is set, check if we have a recently-rejected URL to avoid
+    // re-discovering the same dead CDN path via fast paths
+    let rejectedUrl = null;
+    if (forceRefresh) {
+        const rejected = rejectedUrlCache.get(channelId);
+        if (rejected && (Date.now() - rejected.timestamp) < REJECTED_URL_TTL_MS) {
+            rejectedUrl = rejected.url;
+            console.log(`  [*] Will skip recently-rejected URL: ${rejectedUrl.substring(0, 80)}`);
+        }
+    }
+
     // --- Fast-path A: HTTP probe of watch pages ---
     const watchPageHosts = [
         playerUrl,
@@ -716,6 +732,11 @@ async function resolveChannelUrl(channelId, options = {}) {
     for (const watchUrl of watchPageHosts) {
         const httpProbed = await resolveViaHttpProbe(watchUrl, new Set(), `${BASE_URL}/`).catch(() => null);
         if (httpProbed && isValidStreamUrl(httpProbed)) {
+            // Skip if this is the same URL that was recently rejected
+            if (rejectedUrl && httpProbed === rejectedUrl) {
+                console.log(`  [!] HTTP probe returned rejected URL for channel ${channelId}, skipping...`);
+                continue;
+            }
             console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId}: ${httpProbed.substring(0, 80)}`);
             // Try to get referer headers from the watch page host
             let probeHeaders = null;
@@ -745,8 +766,9 @@ async function resolveChannelUrl(channelId, options = {}) {
     // --- Fast-path B: direct server_lookup on known CDN hosts ---
     console.log(`  [~] Trying direct server_lookup for channel ${channelId}...`);
     const directUrl = await resolveDirectChannelLookup(channelId, playerUrl).catch(() => null);
-    if (directUrl && isValidStreamUrl(directUrl)) {
+    if (directUrl && isValidStreamUrl(directUrl) && !(rejectedUrl && directUrl === rejectedUrl)) {
         console.log(`  [+] Direct server_lookup succeeded for channel ${channelId}: ${directUrl.substring(0, 80)}`);
+
         const lookupHeaders = {
             'user-agent': getRandomUA(),
             'referer': 'https://freestyleridesx.lol/',
@@ -765,6 +787,8 @@ async function resolveChannelUrl(channelId, options = {}) {
             console.log(`[DLStreams Resolver] Channel ${channelId}: OK [DIRECT-LOOKUP]`);
             return { streamUrl: directUrl, ckParam: null, requestHeaders: lookupHeaders, cached: false };
         }
+    } else if (directUrl && rejectedUrl && directUrl === rejectedUrl) {
+        console.log(`  [!] Direct lookup returned rejected URL for channel ${channelId}, skipping to Puppeteer...`);
     }
 
     // --- Slow-path: full Puppeteer browser render ---
@@ -778,6 +802,13 @@ async function resolveChannelUrl(channelId, options = {}) {
 
         if (result.streamUrl && result.streamUrl.startsWith("chrome-extension://")) {
             if (result.streamUrl.includes("#")) result.streamUrl = result.streamUrl.split("#")[1];
+        }
+
+        // If Puppeteer resolved to the same rejected URL (via its internal fallback),
+        // the CDN path is genuinely dead — don't return it
+        if (rejectedUrl && result.streamUrl === rejectedUrl) {
+            console.log(`  [!] Puppeteer also resolved to rejected URL for channel ${channelId}. CDN path is dead.`);
+            result.streamUrl = null;
         }
 
         console.log(`[DLStreams Resolver] Channel ${channelId}: ${result.streamUrl ? 'OK' : 'FAIL'} ${result.cached ? '[CACHED]' : '[PUPPETEER]'}`);
@@ -879,7 +910,14 @@ function getAnyDlstreamsHeaders() {
 function invalidateCachedUrl(channelId) {
     const key = String(channelId);
     if (urlCache.has(key)) {
-        console.log(`[DLStreams Resolver] Cache invalidated for channel ${key} (upstream failure)`);
+        const entry = urlCache.get(key);
+        // Remember the rejected URL so forceRefresh doesn't re-discover the same dead URL
+        if (entry.streamUrl) {
+            rejectedUrlCache.set(key, { url: entry.streamUrl, timestamp: Date.now() });
+            console.log(`[DLStreams Resolver] Cache invalidated for channel ${key} (upstream failure). Rejected URL: ${entry.streamUrl.substring(0, 80)}`);
+        } else {
+            console.log(`[DLStreams Resolver] Cache invalidated for channel ${key} (upstream failure)`);
+        }
         urlCache.delete(key);
         saveUrlCache();
         return true;

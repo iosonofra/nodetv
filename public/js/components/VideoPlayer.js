@@ -1390,6 +1390,19 @@ class VideoPlayer {
                                     if (!resolved || !resolved.streamUrl) {
                                         throw new Error('Empty streamUrl from force resolve');
                                     }
+                                    // If resolver returned the same dead URL, don't retry — go straight to error
+                                    if (resolved.streamUrl === this.currentUrl) {
+                                        console.warn('[Player] DLStreams re-resolve returned same URL. CDN path is dead.');
+                                        this._dlstreamsRefreshAttempted = true;
+                                        try { this.hls.stopLoad(); } catch (_) { }
+                                        try { this.hls.destroy(); } catch (_) { }
+                                        this.hls = null;
+                                        this.showError(
+                                            'DLStreams stream is currently unavailable.<br><br>' +
+                                            'The CDN path for this channel is down. Try again later or switch channel.'
+                                        );
+                                        return;
+                                    }
                                     if (resolved.proxyHeaders) {
                                         channel.proxyHeaders = resolved.proxyHeaders;
                                     }
@@ -1433,12 +1446,14 @@ class VideoPlayer {
                                     fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
                                         .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
                                         .then(resolved => {
-                                            if (resolved?.streamUrl) {
+                                            if (resolved?.streamUrl && resolved.streamUrl !== this.currentUrl) {
                                                 channel.streamUrl = resolved.streamUrl;
                                                 if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
                                                 console.log('[Player] DLStreams re-resolved after media error. Retrying play...');
                                                 this._fatalMediaRecoveryCount = 0;
                                                 this.play(channel, resolved.streamUrl);
+                                            } else if (resolved?.streamUrl === this.currentUrl) {
+                                                throw new Error('Re-resolve returned same dead URL');
                                             } else {
                                                 throw new Error('Empty streamUrl');
                                             }
@@ -1482,11 +1497,13 @@ class VideoPlayer {
                                 fetch(`/api/scraper/dlstreams/resolve/${encodeURIComponent(dlChId)}?forceRefresh=true`, { cache: 'no-store' })
                                     .then(r => r.ok ? r.json() : Promise.reject(new Error(`Resolve ${r.status}`)))
                                     .then(resolved => {
-                                        if (resolved?.streamUrl) {
+                                        if (resolved?.streamUrl && resolved.streamUrl !== this.currentUrl) {
                                             channel.streamUrl = resolved.streamUrl;
                                             if (resolved.proxyHeaders) channel.proxyHeaders = resolved.proxyHeaders;
                                             console.log('[Player] DLStreams re-resolved after fragLoadError. Retrying play...');
                                             this.play(channel, resolved.streamUrl);
+                                        } else if (resolved?.streamUrl === this.currentUrl) {
+                                            throw new Error('Re-resolve returned same dead URL');
                                         } else {
                                             throw new Error('Empty streamUrl');
                                         }

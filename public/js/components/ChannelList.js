@@ -1275,6 +1275,11 @@ class ChannelList {
                             const resolved = await res.json();
                             if (!resolved.streamUrl) return;
                             let freshUrl = resolved.streamUrl;
+                            // Don't replay if resolver returned the same dead URL
+                            if (freshUrl === streamUrl) {
+                                console.warn('[ChannelList] Re-resolve returned same URL, not replaying');
+                                return;
+                            }
                             console.log('[ChannelList] Re-resolving with fresh URL:', freshUrl.substring(0, 80));
                             window.app.player.play(channel, freshUrl);
                         } catch (e) {

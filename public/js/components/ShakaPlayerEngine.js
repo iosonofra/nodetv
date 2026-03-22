@@ -106,11 +106,20 @@ class ShakaPlayerEngine {
         // We only care about restoring the base URL for the manifest itself
         if (type !== shaka.net.NetworkingEngine.RequestType.MANIFEST) return;
 
-        // If the manifest was loaded through our proxy, restore the original
+        // If the manifest was loaded through our proxy, restore the actual
         // upstream URL so Shaka can resolve relative segment URLs correctly.
-        // handleRequestFilter will intercept the resolved URLs and proxy them.
+        // Prefer X-Upstream-Url header (post-redirect, set by proxy) over
+        // extracting from query string (pre-redirect, may be wrong).
         if (response.uri && response.uri.includes('/api/proxy/stream')) {
             try {
+                // Prefer the actual upstream URL from the proxy (includes redirects)
+                const upstreamUrl = response.headers && response.headers['x-upstream-url'];
+                if (upstreamUrl) {
+                    console.log(`[ShakaPlayer] Restoring manifest base URI to (upstream): ${upstreamUrl}`);
+                    response.uri = upstreamUrl;
+                    return;
+                }
+                // Fallback: extract from proxy query string
                 const urlParams = new URLSearchParams(response.uri.split('?')[1]);
                 const originalUrl = urlParams.get('url');
 

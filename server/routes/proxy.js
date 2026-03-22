@@ -925,16 +925,16 @@ router.get('/stream', async (req, res) => {
             }
 
             if (!response.ok) {
-                console.error(`Upstream error for ${finalUrl.substring(0, 120)}: ${response.status} ${response.statusText}`);
-                if (response.status === 403) {
-                    console.error(`[Proxy] Request headers sent:`, JSON.stringify({ Referer: headers['Referer'], Origin: headers['Origin'] || '(not sent)', Host: new URL(finalUrl).host }));
+                console.error(`Upstream error for ${finalUrl.substring(0, 200)}: ${response.status} ${response.statusText}`);
+                if (response.status === 403 || response.status === 404) {
+                    console.error(`[Proxy] Request headers sent:`, JSON.stringify({ Referer: headers['Referer'] || '(not sent)', Origin: headers['Origin'] || '(not sent)', Host: new URL(finalUrl).host }));
                 }
                 // Log Cloudflare/HTML error pages for diagnostics
                 const errContentType = response.headers.get('content-type') || '';
-                if (response.status === 403 || (isDlStreamsMono && errContentType.includes('text/html'))) {
+                if (response.status === 403 || response.status === 404 || (isDlStreamsMono && errContentType.includes('text/html'))) {
                     const errorBody = await response.text().catch(() => 'N/A');
                     const isCfPage = errorBody.includes('cloudflare') || errorBody.includes('cf-ray') || errorBody.includes('cf-error');
-                    console.error(`[Proxy] ${response.status} response (${isCfPage ? 'Cloudflare error page' : 'HTML body'}): ${errorBody.substring(0, 200)}`);
+                    console.error(`[Proxy] ${response.status} response (${isCfPage ? 'Cloudflare error page' : errContentType || 'unknown'}): ${errorBody.substring(0, 300)}`);
                 }
                 // Invalidate cached DLStreams URL on persistent upstream failure
                 if (isDlStreamsMono && dlChannelId && response.status >= 400) {
@@ -1327,6 +1327,10 @@ router.get('/stream', async (req, res) => {
                 }
 
                 res.set('Content-Type', 'application/dash+xml');
+                // Send the actual upstream URL (post-redirect) so the client can
+                // use it as the base URI for resolving relative segment URLs.
+                res.set('X-Upstream-Url', urlForMpd);
+                res.set('Access-Control-Expose-Headers', 'X-Upstream-Url');
                 return res.send(mpd);
             }
 

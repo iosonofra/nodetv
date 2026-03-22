@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const inInfoLogo = document.getElementById('info-logo');
     const inInfoType = document.getElementById('info-type');
     const inInfoUrl = document.getElementById('info-url');
+    const inInfoProxy = document.getElementById('info-proxy');
 
     // Result outputs
     const outHex = document.getElementById('res-clearkey-hex');
@@ -277,6 +278,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial update
     updateResults();
 
+    // Build a proxied URL through the backend
+    function getProxiedUrl(url, extraHeaders) {
+        let proxied = `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+        if (extraHeaders && Object.keys(extraHeaders).length > 0) {
+            try {
+                proxied += `&headers=${encodeURIComponent(btoa(JSON.stringify(extraHeaders)))}`;
+            } catch (e) {
+                console.warn('[Tester] Failed to encode proxy headers:', e.message);
+            }
+        }
+        return proxied;
+    }
+
     // Playback logic
     async function testVideo() {
         const url = inInfoUrl.value.trim();
@@ -288,6 +302,18 @@ document.addEventListener('DOMContentLoaded', () => {
         hideError();
         loading.style.display = 'block';
         video.pause();
+
+        // Collect custom headers
+        const headerElems = headersContainer.querySelectorAll('.header-row');
+        const headers = {};
+        headerElems.forEach(row => {
+            const n = row.querySelector('.hdr-name').value.trim();
+            const v = row.querySelector('.hdr-val').value.trim();
+            if (n && v) headers[n] = v;
+        });
+
+        const useProxy = inInfoProxy && inInfoProxy.checked;
+        const playUrl = useProxy ? getProxiedUrl(url, headers) : url;
 
         // Stop previous
         if (hlsPlayer) {
@@ -311,15 +337,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const [k, v] = clearkey.split(':');
                 clearKeys[k] = v;
             }
-
-            // Request filters for headers
-            const headerElems = headersContainer.querySelectorAll('.header-row');
-            const headers = {};
-            headerElems.forEach(row => {
-                const n = row.querySelector('.hdr-name').value.trim();
-                const v = row.querySelector('.hdr-val').value.trim();
-                if (n && v) headers[n] = v;
-            });
 
             // Setup Shaka DRM
             const drmCfg = {};
@@ -352,7 +369,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const networkingEngine = shakaPlayer.getNetworkingEngine();
             if (networkingEngine) {
                 networkingEngine.clearAllRequestFilters();
-                if (Object.keys(headers).length > 0) {
+                if (useProxy) {
+                    // When using proxy, rewrite all segment/manifest/license requests through backend
+                    networkingEngine.registerRequestFilter((type, request) => {
+                        const reqUrl = request.uris[0];
+                        // Don't double-proxy URLs already going through our proxy
+                        if (reqUrl && !reqUrl.includes('/api/proxy/stream')) {
+                            request.uris[0] = getProxiedUrl(reqUrl, headers);
+                        }
+                    });
+                } else if (Object.keys(headers).length > 0) {
                     networkingEngine.registerRequestFilter((type, request) => {
                         for (const [key, value] of Object.entries(headers)) {
                             request.headers[key] = value;
@@ -362,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                await shakaPlayer.load(url);
+                await shakaPlayer.load(playUrl);
                 video.play();
                 loading.style.display = 'none';
             } catch (e) {
@@ -372,9 +398,17 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // HLS
             video.controls = true; // Use native controls for fallback
-            if (Hls.isSupported() && (inInfoType.value === 'm3u8' || url.includes('.m3u8'))) {
-                hlsPlayer = new Hls();
-                hlsPlayer.loadSource(url);
+            const isHls = inInfoType.value === 'm3u8' || url.includes('.m3u8') || url.includes('mono.css') || url.includes('mono.csv');
+            if (Hls.isSupported() && isHls) {
+                hlsPlayer = new Hls({
+                    xhrSetup: useProxy ? (xhr, xhrUrl) => {
+                        // Rewrite sub-requests (segments, keys) through proxy
+                        if (!xhrUrl.includes('/api/proxy/stream')) {
+                            xhr.open('GET', getProxiedUrl(xhrUrl, headers), true);
+                        }
+                    } : undefined
+                });
+                hlsPlayer.loadSource(playUrl);
                 hlsPlayer.attachMedia(video);
                 hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
                     video.play();
@@ -387,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 // Direct
-                video.src = url;
+                video.src = useProxy ? playUrl : url;
                 video.play().then(() => {
                     loading.style.display = 'none';
                 }).catch(e => {

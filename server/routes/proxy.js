@@ -762,15 +762,15 @@ router.get('/stream', async (req, res) => {
             let dlCachedHeaders = null;
             if (dlChannelId) {
                 dlCachedHeaders = getCachedHeaders(dlChannelId);
-            }
-            if (!dlCachedHeaders && isDlStreamsMono) {
-                // Fallback: try to find any cached entry with headers for the same CDN host
-                dlCachedHeaders = getAnyDlstreamsHeaders();
+                // Fallback: try ANY cached DLStreams entry (same CDN expects same Referer)
+                if (!dlCachedHeaders) {
+                    dlCachedHeaders = getAnyDlstreamsHeaders();
+                }
             }
             if (dlCachedHeaders) {
                 console.log(`[Proxy] Using DLStreams headers for ${isDlStreamsMono ? 'mono URL' : 'key/segment'}:`, dlCachedHeaders.referer || dlCachedHeaders.origin || '(none)');
-            } else if (isDlStreamsMono) {
-                console.warn(`[Proxy] No cached DLStreams headers available for mono URL - CDN may reject`);
+            } else if (dlChannelId) {
+                console.warn(`[Proxy] No cached DLStreams headers available for channel ${dlChannelId} - CDN may reject`);
             }
 
             // Check if this source requires Warp proxy
@@ -1282,11 +1282,25 @@ router.get('/stream', async (req, res) => {
             // Poisoned manifests can point to fake .ts files on cloud storage that contain
             // non-video data, causing persistent media decode errors and playback stalls.
             // EXCEPTION: AES-128 encrypted segments are ciphertext — they won't start with 0x47.
-            const isDlSegment = !!dlChannelId && !isDlStreamsMono && finalUrl.includes('.ts');
+            const isDlSegment = !!dlChannelId && !isDlStreamsMono;
             if (isDlSegment && !isEncryptedSegment && firstChunk.length > 0 && firstChunk[0] !== 0x47) {
                 console.warn(`[Proxy] DLStreams segment is not valid MPEG-TS (first byte: 0x${firstChunk[0].toString(16)}): ${finalUrl.substring(0, 120)}`);
                 invalidateCachedUrl(dlChannelId);
                 return res.status(410).send('Invalid MPEG-TS segment');
+            }
+            // Faux-200 detection for encrypted segments: cloud storage (Firebase, S3, etc.)
+            // may return HTML/JSON error pages with HTTP 200 instead of actual segment data.
+            // Encrypted ciphertext never starts with '<' or '{"' — detect and block.
+            if (isDlSegment && isEncryptedSegment && firstChunk.length > 0) {
+                const firstByte = firstChunk[0];
+                // 0x3C = '<' (HTML), 0x7B = '{' (JSON)
+                if (firstByte === 0x3C || firstByte === 0x7B) {
+                    const snippet = firstChunk.subarray(0, 200).toString('utf8');
+                    console.warn(`[Proxy] DLStreams encrypted segment is actually HTML/JSON (faux-200): ${snippet.substring(0, 100)}`);
+                    console.warn(`[Proxy] Upstream URL: ${finalUrl.substring(0, 150)}`);
+                    invalidateCachedUrl(dlChannelId);
+                    return res.status(410).send('Invalid encrypted segment (faux-200)');
+                }
             }
             console.log(`[Proxy] Serving binary content (${contentType}) at status ${response.status}`);
             res.status(response.status);

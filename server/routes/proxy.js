@@ -755,22 +755,22 @@ router.get('/stream', async (req, res) => {
                 }
             }
 
-            // For DLStreams mono.css/mono.csv URLs, inject cached Referer/Origin headers
+            // For DLStreams URLs, inject cached Referer/Origin headers
+            // Needed for manifest (mono.css/csv), key, and encrypted segment requests —
+            // the CDN validates Referer/Origin on all sub-requests, not just the manifest.
             const isDlStreamsMono = url.includes('mono.css') || url.includes('mono.csv');
             let dlCachedHeaders = null;
-            if (isDlStreamsMono) {
-                if (dlChannelId) {
-                    dlCachedHeaders = getCachedHeaders(dlChannelId);
-                }
+            if (dlChannelId) {
+                dlCachedHeaders = getCachedHeaders(dlChannelId);
+            }
+            if (!dlCachedHeaders && isDlStreamsMono) {
                 // Fallback: try to find any cached entry with headers for the same CDN host
-                if (!dlCachedHeaders) {
-                    dlCachedHeaders = getAnyDlstreamsHeaders();
-                }
-                if (dlCachedHeaders) {
-                    console.log(`[Proxy] Using DLStreams headers for mono URL:`, dlCachedHeaders.referer || dlCachedHeaders.origin || '(none)');
-                } else {
-                    console.warn(`[Proxy] No cached DLStreams headers available for mono URL - CDN may reject`);
-                }
+                dlCachedHeaders = getAnyDlstreamsHeaders();
+            }
+            if (dlCachedHeaders) {
+                console.log(`[Proxy] Using DLStreams headers for ${isDlStreamsMono ? 'mono URL' : 'key/segment'}:`, dlCachedHeaders.referer || dlCachedHeaders.origin || '(none)');
+            } else if (isDlStreamsMono) {
+                console.warn(`[Proxy] No cached DLStreams headers available for mono URL - CDN may reject`);
             }
 
             // Check if this source requires Warp proxy

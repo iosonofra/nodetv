@@ -1256,10 +1256,11 @@ class ChannelList {
         if (window.app?.shakaPlayer && (isMpd || hasDrm)) {
             // It's a DASH stream or has DRM metadata, use Shaka Player
             console.log('[ChannelList] Managed adaptive stream detected (MPD/DRM). Using Shaka Player...');
-            // Proactively force proxy when custom stream headers are present —
-            // these would trigger a CORS preflight that CDNs typically reject.
-            const hasCustomHeaders = channel.properties && channel.properties['inputstream.adaptive.stream_headers'];
-            window.app.shakaPlayer.play(channel, streamUrl, !!hasCustomHeaders);
+            // Proactively force proxy for MPD/DRM streams — CDNs serving
+            // encrypted DASH content almost never include CORS headers, so a
+            // direct browser fetch will always fail with a preflight error.
+            // Skipping the doomed direct attempt avoids the ~2-3s retry delay.
+            window.app.shakaPlayer.play(channel, streamUrl, true);
         } else if (window.app?.player) {
             // Default to HLS Player for .m3u8 and raw .ts
             window.app.player.play(channel, streamUrl);

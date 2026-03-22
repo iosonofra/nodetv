@@ -1083,9 +1083,15 @@ router.get('/stream', async (req, res) => {
                 }
 
                 // Build suffix for rewritten URLs (sourceId + dlChannelId for DLStreams)
+                // Forward the same headers from the manifest request to key/segment sub-requests
+                // so they use the exact same Referer/Origin that the CDN expects.
+                const headersForSuffix = (isDlStreamsMono && req.query.headers)
+                    ? '&headers=' + encodeURIComponent(req.query.headers)
+                    : '';
                 const rewriteSuffix = (sourceId ? '&sourceId=' + sourceId : '')
                     + (isDlStreamsMono && dlChannelId ? '&dlChannelId=' + encodeURIComponent(dlChannelId) : '')
-                    + (isDlStreamsMono && isEncryptedManifest ? '&encrypted=1' : '');
+                    + (isDlStreamsMono && isEncryptedManifest ? '&encrypted=1' : '')
+                    + headersForSuffix;
 
                 manifest = manifest.split('\n').map(line => {
                     const trimmed = line.trim();
@@ -1283,6 +1289,18 @@ router.get('/stream', async (req, res) => {
             // non-video data, causing persistent media decode errors and playback stalls.
             // EXCEPTION: AES-128 encrypted segments are ciphertext — they won't start with 0x47.
             const isDlSegment = !!dlChannelId && !isDlStreamsMono;
+            if (isDlSegment) {
+                const isKeyUrl = finalUrl.includes('/key/');
+                const clength = response.headers.get('content-length');
+                console.log(`[Proxy] DLStreams ${isEncryptedSegment ? 'encrypted ' : ''}${isKeyUrl ? 'KEY' : 'segment'}: ${finalUrl.substring(0, 100)}... (Content-Type: ${contentType}, Content-Length: ${clength}, first-byte: 0x${firstChunk[0]?.toString(16) || 'N/A'})`);
+                // AES-128 key must be exactly 16 bytes
+                if (isKeyUrl && clength && parseInt(clength) !== 16) {
+                    console.error(`[Proxy] DLStreams KEY has wrong length: ${clength} bytes (expected 16). CDN may have returned error page.`);
+                    const snippet = firstChunk.subarray(0, 200).toString('utf8');
+                    console.error(`[Proxy] Key response body: ${snippet.substring(0, 200)}`);
+                    return res.status(410).send('Invalid AES-128 key (wrong length)');
+                }
+            }
             if (isDlSegment && !isEncryptedSegment && firstChunk.length > 0 && firstChunk[0] !== 0x47) {
                 console.warn(`[Proxy] DLStreams segment is not valid MPEG-TS (first byte: 0x${firstChunk[0].toString(16)}): ${finalUrl.substring(0, 120)}`);
                 invalidateCachedUrl(dlChannelId);

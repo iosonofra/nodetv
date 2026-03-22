@@ -861,14 +861,15 @@ async function resolveChannelUrl(channelId, options = {}) {
                 continue;
             }
             console.log(`  [+] Fast HTTP probe succeeded for channel ${channelId}: ${httpProbed.substring(0, 80)}`);
-            // Try to get referer headers from the watch page host
+            // Use freestyleridesx.lol as the referer/origin for CDN requests,
+            // regardless of which watch page host the probe used.
+            // The CDN validates Referer/Origin against freestyleridesx.lol.
             let probeHeaders = null;
             try {
-                const watchOrigin = new URL(watchUrl).origin;
                 probeHeaders = {
                     'user-agent': getRandomUA(),
-                    'referer': watchOrigin + '/',
-                    'origin': watchOrigin,
+                    'referer': 'https://freestyleridesx.lol/',
+                    'origin': 'https://freestyleridesx.lol',
                     'accept': '*/*',
                     'accept-language': 'en-US,en;q=0.9'
                 };

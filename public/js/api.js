@@ -97,6 +97,15 @@ const API = {
         saveCategories: (categories) => API.request('PUT', '/scraper/dlstreams/categories', { categories })
     },
 
+    // SportsOnline Scraper
+    sportsonline: {
+        getStatus: () => API.request('GET', '/sportsonline/status'),
+        getLogs: () => API.request('GET', '/sportsonline/logs'),
+        run: () => API.request('POST', '/sportsonline/run'),
+        updateSettings: (data) => API.request('PUT', '/sportsonline/settings', data),
+        download: () => '/api/sportsonline/download'
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

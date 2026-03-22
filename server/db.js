@@ -119,6 +119,10 @@ function getDefaultSettings() {
     dlstreamsConcurrencyLimit: 4,  // default: 4 parallel pages
     dlstreamsHoursBefore: 3,       // include events that started up to N hours ago
     dlstreamsHoursAfter: 3,        // include events starting in the next N hours
+    // SportsOnline scraper settings
+    sportsonlineAutoRun: false,
+    sportsonlineInterval: '1',        // hours
+    sportsonlineConcurrency: 4,       // parallel HTTP connections
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

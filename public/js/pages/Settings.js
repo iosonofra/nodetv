@@ -31,6 +31,9 @@ class SettingsPage {
 
         // DLStreams scraper management (admin only)
         this.initDlstreamsManagement();
+
+        // SportsOnline scraper management (admin only)
+        this.initSportsonlineManagement();
     }
 
     initPlayerSettings() {
@@ -903,6 +906,10 @@ class SettingsPage {
             clearInterval(this._dlstreamsInterval);
             this._dlstreamsInterval = null;
         }
+        if (this._sportsonlineInterval) {
+            clearInterval(this._sportsonlineInterval);
+            this._sportsonlineInterval = null;
+        }
     }
 
     // ==========================================
@@ -1390,6 +1397,277 @@ class SettingsPage {
         }
     }
 
+    // ==========================================
+    // SportsOnline Scraper Management
+    // ==========================================
+
+    initSportsonlineManagement() {
+        const runBtn = document.getElementById('so-run-scraper');
+        const clearLogsBtn = document.getElementById('clear-so-logs');
+        const saveSettingsBtn = document.getElementById('save-so-settings');
+        const autoRunToggle = document.getElementById('setting-so-auto-run');
+        const intervalContainer = document.getElementById('so-interval-container');
+
+        if (runBtn) {
+            runBtn.addEventListener('click', () => this.runSportsonline());
+        }
+
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => this.clearSportsonlineLogs());
+        }
+
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => this.saveSportsonlineSettings());
+        }
+
+        if (autoRunToggle && intervalContainer) {
+            autoRunToggle.addEventListener('change', () => {
+                intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
+            });
+        }
+    }
+
+    async saveSportsonlineSettings() {
+        const autoRunToggle = document.getElementById('setting-so-auto-run');
+        const intervalSelect = document.getElementById('setting-so-interval');
+        const concurrencyInput = document.getElementById('setting-so-concurrency');
+        const saveBtn = document.getElementById('save-so-settings');
+
+        if (!autoRunToggle || !intervalSelect) return;
+
+        if (saveBtn) saveBtn.disabled = true;
+
+        let concurrency = 4;
+        if (concurrencyInput) {
+            concurrency = parseInt(concurrencyInput.value, 10);
+            if (isNaN(concurrency) || concurrency < 1) concurrency = 4;
+        }
+
+        try {
+            await API.sportsonline.updateSettings({
+                sportsonlineAutoRun: autoRunToggle.checked,
+                sportsonlineInterval: intervalSelect.value,
+                sportsonlineConcurrency: concurrency
+            });
+            this.appendSportsonlineLog('SportsOnline settings updated successfully.');
+            this.loadSportsonlineStatus();
+        } catch (err) {
+            this.appendSportsonlineLog('Error saving SportsOnline settings: ' + err.message);
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
+    async runSportsonline() {
+        const runBtn = document.getElementById('so-run-scraper');
+        if (runBtn) runBtn.disabled = true;
+
+        try {
+            await API.sportsonline.run();
+            this.appendSportsonlineLog('SportsOnline scraper started...');
+            this.loadSportsonlineStatus();
+        } catch (err) {
+            this.appendSportsonlineLog('Error starting SportsOnline: ' + err.message);
+            if (runBtn) runBtn.disabled = false;
+        }
+    }
+
+    async loadSportsonlineStatus() {
+        try {
+            const status = await API.sportsonline.getStatus();
+            const statusText = document.getElementById('so-status-text');
+            const spinner = document.getElementById('so-loading-spinner');
+            const runBtn = document.getElementById('so-run-scraper');
+            const fileInfoContainer = document.getElementById('so-file-info');
+
+            if (statusText) {
+                statusText.textContent = status.isRunning ? 'Running' : 'Idle';
+                statusText.style.color = status.isRunning ? 'var(--color-accent)' : 'var(--color-text-secondary)';
+            }
+
+            if (spinner) {
+                spinner.style.display = status.isRunning ? 'block' : 'none';
+            }
+
+            if (runBtn) {
+                runBtn.disabled = status.isRunning;
+            }
+
+            // Display file info
+            const fileDetails = document.getElementById('so-file-details');
+            if (fileDetails && status.fileInfo) {
+                if (status.fileInfo.exists) {
+                    const sizeKB = (status.fileInfo.size / 1024).toFixed(1);
+                    const lastUpdated = new Date(status.fileInfo.mtime).toLocaleString();
+                    fileDetails.innerHTML = `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Output File:</span>
+                                <span style="font-weight: 500; font-family: monospace;">sportsonline.m3u</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">File Size:</span>
+                                <span style="font-weight: 500;">${sizeKB} KB</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Last Modified:</span>
+                                <span style="font-weight: 500;">${lastUpdated}</span>
+                            </div>
+                        </div>
+                    `;
+                    fileInfoContainer.style.display = 'block';
+                } else {
+                    fileDetails.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
+                    fileInfoContainer.style.display = 'block';
+                    const actions = document.getElementById('so-file-actions');
+                    if (actions) actions.style.display = 'none';
+                }
+            }
+
+            // Display Cron/Auto-run info
+            const cronInfo = document.getElementById('so-cron-info');
+            if (cronInfo && status.autoRunInfo) {
+                const info = status.autoRunInfo;
+
+                const autoRunToggle = document.getElementById('setting-so-auto-run');
+                const intervalSelect = document.getElementById('setting-so-interval');
+                const intervalContainer = document.getElementById('so-interval-container');
+                const concurrencyInput = document.getElementById('setting-so-concurrency');
+
+                if (autoRunToggle && !this._soSettingsInitialized) {
+                    autoRunToggle.checked = info.enabled;
+                    if (intervalSelect) intervalSelect.value = String(info.intervalHours);
+                    if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    if (concurrencyInput && status.sportsonlineConcurrency) {
+                        concurrencyInput.value = status.sportsonlineConcurrency;
+                    }
+                    this._soSettingsInitialized = true;
+                }
+
+                if (info.enabled) {
+                    const nextRun = info.nextRunExpected ? new Date(info.nextRunExpected).toLocaleString() : 'Pending';
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                                <span style="color: var(--color-text-secondary);">Auto-run active: every ${info.intervalHours}h</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="hint">Next run:</span>
+                                <span style="font-weight: 500; margin-left: 4px; color: var(--color-accent);">${nextRun}</span>
+                            </div>
+                        </div>
+                    `;
+                    cronInfo.style.display = 'block';
+                } else {
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
+                            <div class="status-badge status-offline" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                            <span class="hint">Auto-run is currently disabled.</span>
+                        </div>
+                    `;
+                    cronInfo.style.display = 'block';
+                }
+            }
+
+            const statusString = status.isRunning ? 'running' : 'idle';
+            if (this._lastSoStatus === 'running' && statusString === 'idle') {
+                this.loadSportsonlineHistory();
+                if (this.app.sourceManager) {
+                    this.app.sourceManager.loadSources();
+                }
+            }
+            this._lastSoStatus = statusString;
+        } catch (err) {
+            console.warn('Failed to load SportsOnline status:', err);
+        }
+    }
+
+    async loadSportsonlineLogs() {
+        try {
+            const data = await API.sportsonline.getLogs();
+            if (data.logs) {
+                const logsContainer = document.getElementById('so-logs');
+                if (logsContainer) {
+                    if (this._lastSoLogsLength !== data.logs.length) {
+                        logsContainer.innerHTML = data.logs.map(log =>
+                            `<div class="log-entry">${this.escapeHtml(log)}</div>`
+                        ).join('');
+                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                        this._lastSoLogsLength = data.logs.length;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to load SportsOnline logs:', err);
+        }
+    }
+
+    async loadSportsonlineHistory() {
+        const historyList = document.getElementById('so-history-list');
+        if (!historyList) return;
+
+        try {
+            const data = await API.sportsonline.getStatus();
+            const history = data.history || [];
+
+            if (history.length === 0) {
+                historyList.innerHTML = '<p class="hint">No history available yet.</p>';
+                return;
+            }
+
+            historyList.innerHTML = history.slice(0, 10).map(item => `
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success !== false ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                ${new Date(item.timestamp).toLocaleString()}
+                                ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
+                            </div>
+                            <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
+                        </div>
+                        <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">
+                            ${item.success !== false ? 'Success' : 'Failed'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Error loading SportsOnline history:', err);
+        }
+    }
+
+    startSportsonlineStatusPolling() {
+        if (this._sportsonlineInterval) return;
+
+        this.loadSportsonlineStatus();
+        this.loadSportsonlineHistory();
+        this.loadSportsonlineLogs();
+
+        this._sportsonlineInterval = setInterval(() => {
+            this.loadSportsonlineStatus();
+            this.loadSportsonlineLogs();
+        }, 5000);
+    }
+
+    appendSportsonlineLog(message) {
+        const logsContainer = document.getElementById('so-logs');
+        if (!logsContainer) return;
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsContainer.appendChild(entry);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    clearSportsonlineLogs() {
+        const logsContainer = document.getElementById('so-logs');
+        if (logsContainer) {
+            logsContainer.innerHTML = '<div class="log-entry" style="color: var(--color-text-muted);">Logs cleared.</div>';
+        }
+    }
+
     appendLog(message) {
         const logsContainer = document.getElementById('scraper-logs');
         if (!logsContainer) return;
@@ -1471,6 +1749,7 @@ class SettingsPage {
         if (isAdmin) {
             this.startScraperStatusPolling();
             this.startDlstreamsStatusPolling();
+            this.startSportsonlineStatusPolling();
         }
 
         // Refresh ALL player settings from server

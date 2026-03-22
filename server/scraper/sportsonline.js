@@ -29,11 +29,13 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function fetchText(url, retries = 2) {
+async function fetchText(url, retries = 2, referer = null) {
     for (let i = 0; i <= retries; i++) {
         try {
+            const headers = { 'User-Agent': UA };
+            if (referer) headers['Referer'] = referer;
             const res = await fetch(url, {
-                headers: { 'User-Agent': UA },
+                headers,
                 timeout: 15000
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -136,7 +138,7 @@ async function resolveStreamFromPhp(phpUrl) {
     if (embedUrl.startsWith('//')) embedUrl = 'https:' + embedUrl;
 
     // Step 2: Fetch embed page → extract var src = "..."
-    const embedHtml = await fetchText(embedUrl);
+    const embedHtml = await fetchText(embedUrl, 2, phpUrl);
     const srcMatch = embedHtml.match(/var\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
     if (!srcMatch) {
         throw new Error('No stream src found in embed page');

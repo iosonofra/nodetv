@@ -127,16 +127,19 @@ class ShakaPlayerEngine {
     handleRequestFilter(type, request) {
         if (!request.uris || request.uris.length === 0) return;
 
-        // Apply custom DRM headers if they exist
-        if (this.currentDrmHeaders) {
+        // Apply custom DRM headers ONLY when proxying — setting them on direct
+        // cross-origin requests causes CORS preflight failures because CDNs
+        // typically don't whitelist custom headers like User-Agent in their
+        // Access-Control-Allow-Headers response.
+        const shouldProxy = (this.currentChannel && this.currentChannel.useWarp) || this.isUsingProxy;
+
+        if (this.currentDrmHeaders && shouldProxy) {
             for (const [k, v] of Object.entries(this.currentDrmHeaders)) {
                 request.headers[k] = v;
             }
         }
 
         // Proxy if channel explicitly uses WARP OR if we're forcing proxy for Mixed Content / CORS
-        const shouldProxy = (this.currentChannel && this.currentChannel.useWarp) || this.isUsingProxy;
-
         if (shouldProxy) {
             const RequestType = shaka.net.NetworkingEngine.RequestType;
             if (type === RequestType.MANIFEST ||

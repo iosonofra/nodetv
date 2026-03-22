@@ -1256,7 +1256,10 @@ class ChannelList {
         if (window.app?.shakaPlayer && (isMpd || hasDrm)) {
             // It's a DASH stream or has DRM metadata, use Shaka Player
             console.log('[ChannelList] Managed adaptive stream detected (MPD/DRM). Using Shaka Player...');
-            window.app.shakaPlayer.play(channel, streamUrl);
+            // Proactively force proxy when custom stream headers are present —
+            // these would trigger a CORS preflight that CDNs typically reject.
+            const hasCustomHeaders = channel.properties && channel.properties['inputstream.adaptive.stream_headers'];
+            window.app.shakaPlayer.play(channel, streamUrl, !!hasCustomHeaders);
         } else if (window.app?.player) {
             // Default to HLS Player for .m3u8 and raw .ts
             window.app.player.play(channel, streamUrl);

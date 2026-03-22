@@ -853,9 +853,15 @@ router.get('/stream', async (req, res) => {
                 'User-Agent': customHeaders['User-Agent'] || customHeaders['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Origin': getOrigin(),
                 'Referer': getReferer()
             };
+
+            // Only send Origin when a CORS-aware CDN specifically needs it.
+            // Many streaming CDNs (e.g. sportsonline) reject requests with Origin
+            // because they expect <video> element requests (Referer only, no CORS).
+            if (dlCachedHeaders?.origin || isPluto || isFancode) {
+                headers['Origin'] = getOrigin();
+            }
 
             // Apply all other custom headers
             Object.entries(customHeaders).forEach(([k, v]) => {
@@ -886,7 +892,10 @@ router.get('/stream', async (req, res) => {
             }
 
             if (!response.ok) {
-                console.error(`Upstream error for ${url.substring(0, 80)}...: ${response.status} ${response.statusText}`);
+                console.error(`Upstream error for ${finalUrl.substring(0, 120)}: ${response.status} ${response.statusText}`);
+                if (response.status === 403) {
+                    console.error(`[Proxy] Request headers sent:`, JSON.stringify({ Referer: headers['Referer'], Origin: headers['Origin'] || '(not sent)', Host: new URL(finalUrl).host }));
+                }
                 // Log Cloudflare/HTML error pages for diagnostics
                 const errContentType = response.headers.get('content-type') || '';
                 if (response.status === 403 || (isDlStreamsMono && errContentType.includes('text/html'))) {

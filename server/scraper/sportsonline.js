@@ -210,8 +210,7 @@ function buildM3U(resolvedChannels) {
         // The CDN validates these and returns 403 without them
         let streamLine = ch.streamUrl;
         if (ch.embedUrl) {
-            const embedOrigin = new URL(ch.embedUrl).origin;
-            streamLine += `|Referer=${encodeURIComponent(ch.embedUrl)}&Origin=${encodeURIComponent(embedOrigin)}`;
+            streamLine += `|Referer=${encodeURIComponent(ch.embedUrl)}`;
         }
         lines.push(streamLine);
     }

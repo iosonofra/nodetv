@@ -1085,9 +1085,14 @@ router.get('/stream', async (req, res) => {
                 // Build suffix for rewritten URLs (sourceId + dlChannelId for DLStreams)
                 // Forward the same headers from the manifest request to key/segment sub-requests
                 // so they use the exact same Referer/Origin that the CDN expects.
-                const headersForSuffix = (isDlStreamsMono && req.query.headers)
-                    ? '&headers=' + encodeURIComponent(req.query.headers)
-                    : '';
+                let headersForSuffix = '';
+                if (isDlStreamsMono && req.query.headers) {
+                    headersForSuffix = '&headers=' + encodeURIComponent(req.query.headers);
+                } else if (Object.keys(customHeaders).length > 0) {
+                    // Forward custom headers (Kodi pipe or base64) to sub-requests
+                    const b64 = Buffer.from(JSON.stringify(customHeaders)).toString('base64');
+                    headersForSuffix = '&headers=' + encodeURIComponent(b64);
+                }
                 const rewriteSuffix = (sourceId ? '&sourceId=' + sourceId : '')
                     + (isDlStreamsMono && dlChannelId ? '&dlChannelId=' + encodeURIComponent(dlChannelId) : '')
                     + (isDlStreamsMono && isEncryptedManifest ? '&encrypted=1' : '')

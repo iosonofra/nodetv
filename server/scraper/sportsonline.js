@@ -205,7 +205,15 @@ function buildM3U(resolvedChannels) {
         const desc = eventDesc.length > 200 ? eventDesc.substring(0, 197) + '...' : eventDesc;
 
         lines.push(`#EXTINF:-1 tvg-name="${ch.name}" group-title="${ch.category}",${ch.name} - ${desc}`);
-        lines.push(ch.streamUrl);
+
+        // Append Kodi-style headers so the proxy sends the correct Referer/Origin
+        // The CDN validates these and returns 403 without them
+        let streamLine = ch.streamUrl;
+        if (ch.embedUrl) {
+            const embedOrigin = new URL(ch.embedUrl).origin;
+            streamLine += `|Referer=${encodeURIComponent(ch.embedUrl)}&Origin=${encodeURIComponent(embedOrigin)}`;
+        }
+        lines.push(streamLine);
     }
 
     return lines.join('\n');

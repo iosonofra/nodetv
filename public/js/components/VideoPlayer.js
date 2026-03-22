@@ -1198,9 +1198,11 @@ class VideoPlayer {
             const isPageHttps = window.location.protocol === 'https:';
             const isUrlHttp = streamUrl.startsWith('http:');
             const isDlstreamsChannel = !!(channel && channel.tvgId && String(channel.tvgId).startsWith('dl_'));
+            const hasKodiHeaders = streamUrl.includes('|');
             const needsProxy = this.settings.forceProxy ||
                 (channel && channel.useWarp) ||
                 isDlstreamsChannel ||
+                hasKodiHeaders ||
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;

@@ -60,23 +60,23 @@ class ShakaPlayerEngine {
                 dash: {
                     ignoreMinBufferTime: true,
                     ignoreSuggestedPresentationDelay: true,
-                    autoCorrectDrift: true,
-                    xhrWithCredentials: true
+                    autoCorrectDrift: true
                 },
-                retryParameters: { maxAttempts: 5, baseDelay: 1000, backoffFactor: 2 }
+                retryParameters: { maxAttempts: 4, baseDelay: 300, backoffFactor: 2 }
             },
             streaming: {
-                bufferingGoal: 45,
-                rebufferingGoal: 4.0,
-                bufferBehind: 30,
+                bufferingGoal: 30,
+                rebufferingGoal: 1.0,
+                bufferBehind: 20,
                 lowLatencyMode: false,
-                segmentPrefetchLimit: 5,
+                segmentPrefetchLimit: 2,
                 stallThreshold: 6,
                 safeSeekOffset: 15,
                 smallGapLimit: 1.0,
                 jumpLargeGaps: true,
                 inaccurateManifestTolerance: 1.0,
-                ignoreTextStreamFailures: true
+                ignoreTextStreamFailures: true,
+                retryParameters: { maxAttempts: 4, baseDelay: 300, backoffFactor: 2 }
             },
             abr: {
                 enabled: true,

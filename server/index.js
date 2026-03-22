@@ -100,6 +100,7 @@ app.use('/api/probe', require('./routes/probe'));
 app.use('/api/subtitle', require('./routes/subtitle'));
 app.use('/api/scraper', require('./routes/scraper'));
 app.use('/api/sportsonline', require('./routes/sportsonline'));
+app.use('/api/pepperlive', require('./routes/pepperlive'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/history', require('./routes/history'));
 
@@ -140,6 +141,10 @@ app.listen(PORT, async () => {
         // Start the SportsOnline scraper auto-run
         const sportsonlineService = require('./services/sportsonlineService');
         sportsonlineService.startAutoRun();
+
+        // Start the PepperLive scraper auto-run
+        const pepperLiveService = require('./services/pepperLiveService');
+        pepperLiveService.startAutoRun();
 
         // Detect hardware acceleration capabilities
         try {

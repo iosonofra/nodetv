@@ -123,6 +123,9 @@ function getDefaultSettings() {
     sportsonlineAutoRun: false,
     sportsonlineInterval: '1',        // hours
     sportsonlineConcurrency: 4,       // parallel HTTP connections
+    // PepperLive scraper settings
+    pepperLiveAutoRun: false,
+    pepperLiveInterval: '1',              // hours
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

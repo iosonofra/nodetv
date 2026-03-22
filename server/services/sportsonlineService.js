@@ -1,8 +1,12 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const { sources, users, settings } = require('../db');
 const syncService = require('./syncService');
+
+// Use the same HTTPS agent as the proxy to ensure consistent outgoing IP/TLS behavior
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 class SportsonlineService {
     constructor() {
@@ -330,6 +334,26 @@ class SportsonlineService {
         console.log(`[SportsOnline] Resolving fresh URL for ${phpUrl.substring(phpUrl.lastIndexOf('/') + 1)}`);
         const result = await this.resolveStreamUrl(phpUrl);
 
+        // Verify the CDN URL actually works from this server before caching
+        const fetch = require('node-fetch');
+        const verifyRes = await fetch(result.streamUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            agent: httpsAgent,
+            timeout: 10000
+        });
+        const verifyBody = await verifyRes.text().catch(() => '');
+        if (!verifyRes.ok) {
+            console.error(`[SportsOnline] CDN verification failed: ${verifyRes.status} for ${result.streamUrl.substring(0, 80)}`);
+            console.error(`[SportsOnline] CDN body: ${verifyBody.substring(0, 200)}`);
+            throw new Error(`CDN returned ${verifyRes.status} after resolution`);
+        }
+        if (!verifyBody.includes('#EXT')) {
+            console.error(`[SportsOnline] CDN returned non-HLS content (${verifyBody.length} bytes): ${verifyBody.substring(0, 100)}`);
+            throw new Error('CDN returned non-HLS content');
+        }
+        console.log(`[SportsOnline] CDN verification OK for ${phpUrl.substring(phpUrl.lastIndexOf('/') + 1)} (${verifyBody.length} bytes, HLS)`);
+
+
         // Cache the result
         this._urlCache.set(phpUrl, {
             streamUrl: result.streamUrl,
@@ -338,6 +362,15 @@ class SportsonlineService {
         });
 
         return { streamUrl: result.streamUrl, embedUrl: result.embedUrl, cached: false };
+    }
+
+    /**
+     * Invalidate a cached URL (e.g., on CDN 403)
+     */
+    invalidateCache(phpUrl) {
+        if (this._urlCache.delete(phpUrl)) {
+            console.log(`[SportsOnline] Cache invalidated for ${phpUrl.substring(phpUrl.lastIndexOf('/') + 1)}`);
+        }
     }
 
     /**
@@ -360,6 +393,7 @@ class SportsonlineService {
         // Step 1: Fetch PHP page → extract iframe
         const phpRes = await fetch(phpUrl, {
             headers: { 'User-Agent': UA },
+            agent: httpsAgent,
             timeout: 15000
         });
         if (!phpRes.ok) throw new Error(`PHP page HTTP ${phpRes.status}`);
@@ -380,14 +414,17 @@ class SportsonlineService {
         // Step 2: Fetch embed → extract var src
         const embedRes = await fetch(embedUrl, {
             headers: { 'User-Agent': UA, 'Referer': phpUrl },
+            agent: httpsAgent,
             timeout: 15000
         });
         if (!embedRes.ok) throw new Error(`Embed page HTTP ${embedRes.status}`);
         const embedHtml = await embedRes.text();
+        console.log(`[SportsOnline] Embed page ${embedRes.status}, ${embedHtml.length} bytes`);
 
         const srcMatch = embedHtml.match(/var\s+src\s*=\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
         if (!srcMatch) throw new Error('No stream src in embed page');
 
+        console.log(`[SportsOnline] Resolved: ${srcMatch[1].substring(0, 100)}`);
         return { streamUrl: srcMatch[1], embedUrl };
     }
 }

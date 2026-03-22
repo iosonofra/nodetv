@@ -733,14 +733,24 @@ router.get('/stream', async (req, res) => {
             // SportsOnline: PHP page URLs need on-demand resolution.
             // CDN tokens are IP-bound, so we must resolve from this server.
             const sportsonlineService = require('../services/sportsonlineService');
+            const originalPhpUrl = req.query.url; // preserve for cache invalidation
             const isSportsonlinePhp = /sportzsonline\.click\/.*\.php|sportsonline\.st\/.*\.php|sportsonlin.*\.xyz\/.*\.php/i.test(url);
             if (isSportsonlinePhp) {
                 try {
+                    // On retry (attempt > 1), invalidate cache first so we get a fresh token
+                    if (attempt > 1) {
+                        sportsonlineService.invalidateCache(url);
+                    }
                     const resolved = await sportsonlineService.resolveAndCache(url);
                     console.log(`[Proxy] SportsOnline resolved: ${url.substring(url.lastIndexOf('/') + 1)} → ${resolved.streamUrl.substring(0, 80)}... (cached: ${resolved.cached})`);
                     url = resolved.streamUrl;
                 } catch (resolveErr) {
                     console.error(`[Proxy] SportsOnline resolve failed for ${url.substring(url.lastIndexOf('/') + 1)}: ${resolveErr.message}`);
+                    if (attempt < maxRetries) {
+                        console.log(`[Proxy] SportsOnline: retrying resolution (attempt ${attempt}/${maxRetries})...`);
+                        await new Promise(r => setTimeout(r, 500));
+                        continue;
+                    }
                     return res.status(502).json({ error: `Failed to resolve stream: ${resolveErr.message}` });
                 }
             }

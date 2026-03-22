@@ -34,6 +34,9 @@ class SettingsPage {
 
         // SportsOnline scraper management (admin only)
         this.initSportsonlineManagement();
+
+        // PepperLive scraper management (admin only)
+        this.initPepperLiveManagement();
     }
 
     initPlayerSettings() {
@@ -910,6 +913,10 @@ class SettingsPage {
             clearInterval(this._sportsonlineInterval);
             this._sportsonlineInterval = null;
         }
+        if (this._pepperLiveInterval) {
+            clearInterval(this._pepperLiveInterval);
+            this._pepperLiveInterval = null;
+        }
     }
 
     // ==========================================
@@ -1668,6 +1675,265 @@ class SettingsPage {
         }
     }
 
+    // ==========================================
+    // PepperLive Scraper Management
+    // ==========================================
+
+    initPepperLiveManagement() {
+        const runBtn = document.getElementById('pl-run-scraper');
+        const clearLogsBtn = document.getElementById('clear-pl-logs');
+        const saveSettingsBtn = document.getElementById('save-pl-settings');
+        const autoRunToggle = document.getElementById('setting-pl-auto-run');
+        const intervalContainer = document.getElementById('pl-interval-container');
+
+        if (runBtn) {
+            runBtn.addEventListener('click', () => this.runPepperLive());
+        }
+
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => this.clearPepperLiveLogs());
+        }
+
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => this.savePepperLiveSettings());
+        }
+
+        if (autoRunToggle && intervalContainer) {
+            autoRunToggle.addEventListener('change', () => {
+                intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
+            });
+        }
+    }
+
+    async savePepperLiveSettings() {
+        const autoRunToggle = document.getElementById('setting-pl-auto-run');
+        const intervalSelect = document.getElementById('setting-pl-interval');
+        const saveBtn = document.getElementById('save-pl-settings');
+
+        if (!autoRunToggle || !intervalSelect) return;
+
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            await API.pepperlive.updateSettings({
+                pepperLiveAutoRun: autoRunToggle.checked,
+                pepperLiveInterval: intervalSelect.value
+            });
+            this.appendPepperLiveLog('PepperLive settings updated successfully.');
+            this.loadPepperLiveStatus();
+        } catch (err) {
+            this.appendPepperLiveLog('Error saving PepperLive settings: ' + err.message);
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
+    async runPepperLive() {
+        const runBtn = document.getElementById('pl-run-scraper');
+        if (runBtn) runBtn.disabled = true;
+
+        try {
+            await API.pepperlive.run();
+            this.appendPepperLiveLog('PepperLive scraper started...');
+            this.loadPepperLiveStatus();
+        } catch (err) {
+            this.appendPepperLiveLog('Error starting PepperLive: ' + err.message);
+            if (runBtn) runBtn.disabled = false;
+        }
+    }
+
+    async loadPepperLiveStatus() {
+        try {
+            const status = await API.pepperlive.getStatus();
+            const statusText = document.getElementById('pl-status-text');
+            const spinner = document.getElementById('pl-loading-spinner');
+            const runBtn = document.getElementById('pl-run-scraper');
+            const fileInfoContainer = document.getElementById('pl-file-info');
+
+            if (statusText) {
+                statusText.textContent = status.isRunning ? 'Running' : 'Idle';
+                statusText.style.color = status.isRunning ? 'var(--color-accent)' : 'var(--color-text-secondary)';
+            }
+
+            if (spinner) {
+                spinner.style.display = status.isRunning ? 'block' : 'none';
+            }
+
+            if (runBtn) {
+                runBtn.disabled = status.isRunning;
+            }
+
+            // Display file info
+            const fileDetails = document.getElementById('pl-file-details');
+            if (fileDetails && status.fileInfo) {
+                if (status.fileInfo.exists) {
+                    const sizeKB = (status.fileInfo.size / 1024).toFixed(1);
+                    const lastUpdated = new Date(status.fileInfo.mtime).toLocaleString();
+                    fileDetails.innerHTML = `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Output File:</span>
+                                <span style="font-weight: 500; font-family: monospace;">pepperlive.m3u</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">File Size:</span>
+                                <span style="font-weight: 500;">${sizeKB} KB</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Last Modified:</span>
+                                <span style="font-weight: 500;">${lastUpdated}</span>
+                            </div>
+                        </div>
+                    `;
+                    fileInfoContainer.style.display = 'block';
+                } else {
+                    fileDetails.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
+                    fileInfoContainer.style.display = 'block';
+                    const actions = document.getElementById('pl-file-actions');
+                    if (actions) actions.style.display = 'none';
+                }
+            }
+
+            // Display Cron/Auto-run info
+            const cronInfo = document.getElementById('pl-cron-info');
+            if (cronInfo && status.autoRunInfo) {
+                const info = status.autoRunInfo;
+
+                const autoRunToggle = document.getElementById('setting-pl-auto-run');
+                const intervalSelect = document.getElementById('setting-pl-interval');
+                const intervalContainer = document.getElementById('pl-interval-container');
+
+                if (autoRunToggle && !this._plSettingsInitialized) {
+                    autoRunToggle.checked = info.enabled;
+                    if (intervalSelect) intervalSelect.value = String(info.intervalHours);
+                    if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    this._plSettingsInitialized = true;
+                }
+
+                if (info.enabled) {
+                    const nextRun = info.nextRunExpected ? new Date(info.nextRunExpected).toLocaleString() : 'Pending';
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                                <span style="color: var(--color-text-secondary);">Auto-run active: every ${info.intervalHours}h</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="hint">Next run:</span>
+                                <span style="font-weight: 500; margin-left: 4px; color: var(--color-accent);">${nextRun}</span>
+                            </div>
+                        </div>
+                    `;
+                    cronInfo.style.display = 'block';
+                } else {
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
+                            <div class="status-badge status-offline" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                            <span class="hint">Auto-run is currently disabled.</span>
+                        </div>
+                    `;
+                    cronInfo.style.display = 'block';
+                }
+            }
+
+            const statusString = status.isRunning ? 'running' : 'idle';
+            if (this._lastPlStatus === 'running' && statusString === 'idle') {
+                this.loadPepperLiveHistory();
+                if (this.app.sourceManager) {
+                    this.app.sourceManager.loadSources();
+                }
+            }
+            this._lastPlStatus = statusString;
+        } catch (err) {
+            console.warn('Failed to load PepperLive status:', err);
+        }
+    }
+
+    async loadPepperLiveLogs() {
+        try {
+            const data = await API.pepperlive.getLogs();
+            if (data.logs) {
+                const logsContainer = document.getElementById('pl-logs');
+                if (logsContainer) {
+                    if (this._lastPlLogsLength !== data.logs.length) {
+                        logsContainer.innerHTML = data.logs.map(log =>
+                            `<div class="log-entry">${this.escapeHtml(log)}</div>`
+                        ).join('');
+                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                        this._lastPlLogsLength = data.logs.length;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to load PepperLive logs:', err);
+        }
+    }
+
+    async loadPepperLiveHistory() {
+        const historyList = document.getElementById('pl-history-list');
+        if (!historyList) return;
+
+        try {
+            const data = await API.pepperlive.getStatus();
+            const history = data.history || [];
+
+            if (history.length === 0) {
+                historyList.innerHTML = '<p class="hint">No history available yet.</p>';
+                return;
+            }
+
+            historyList.innerHTML = history.slice(0, 10).map(item => `
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success !== false ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                ${new Date(item.timestamp).toLocaleString()}
+                                ${item.type === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
+                            </div>
+                            <div class="hint" style="font-size: 0.75rem;">Duration: ${item.duration || 0}s | Channels: ${item.channelsCount || 0}</div>
+                        </div>
+                        <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">
+                            ${item.success !== false ? 'Success' : 'Failed'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Error loading PepperLive history:', err);
+        }
+    }
+
+    startPepperLiveStatusPolling() {
+        if (this._pepperLiveInterval) return;
+
+        this.loadPepperLiveStatus();
+        this.loadPepperLiveHistory();
+        this.loadPepperLiveLogs();
+
+        this._pepperLiveInterval = setInterval(() => {
+            this.loadPepperLiveStatus();
+            this.loadPepperLiveLogs();
+        }, 5000);
+    }
+
+    appendPepperLiveLog(message) {
+        const logsContainer = document.getElementById('pl-logs');
+        if (!logsContainer) return;
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsContainer.appendChild(entry);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    clearPepperLiveLogs() {
+        const logsContainer = document.getElementById('pl-logs');
+        if (logsContainer) {
+            logsContainer.innerHTML = '<div class="log-entry" style="color: var(--color-text-muted);">Logs cleared.</div>';
+        }
+    }
+
     appendLog(message) {
         const logsContainer = document.getElementById('scraper-logs');
         if (!logsContainer) return;
@@ -1750,6 +2016,7 @@ class SettingsPage {
             this.startScraperStatusPolling();
             this.startDlstreamsStatusPolling();
             this.startSportsonlineStatusPolling();
+            this.startPepperLiveStatusPolling();
         }
 
         // Refresh ALL player settings from server

@@ -106,6 +106,15 @@ const API = {
         download: () => '/api/sportsonline/download'
     },
 
+    // PepperLive Scraper
+    pepperlive: {
+        getStatus: () => API.request('GET', '/pepperlive/status'),
+        getLogs: () => API.request('GET', '/pepperlive/logs'),
+        run: () => API.request('POST', '/pepperlive/run'),
+        updateSettings: (data) => API.request('PUT', '/pepperlive/settings', data),
+        download: () => '/api/pepperlive/download'
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

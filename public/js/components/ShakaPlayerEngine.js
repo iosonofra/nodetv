@@ -192,20 +192,15 @@ class ShakaPlayerEngine {
         this.isActive = true;
         this.currentChannel = channel;
 
-        // Auto-detect Mixed Content (HTTPS page, HTTP stream)
-        const isPageHttps = window.location.protocol === 'https:';
-        const isUrlHttp = streamUrl.startsWith('http:');
-
-        // Only proactively proxy if user has Warp enabled OR if we're on HTTPS and stream is HTTP
-        // However, if the user says "the proxy is active even where not present", 
-        // they might be on HTTPS and we're forcing it.
-        // Let's only force it if it's REALLY needed (retry on error is safer).
-        /*
-        if (isPageHttps && isUrlHttp && !forceProxy) {
-            console.log('[ShakaPlayer] Mixed Content detected (HTTPS app, HTTP stream). Proactively enabling proxy.');
+        // MPD/DRM streams on external CDNs virtually never support CORS.
+        // Proactively route through our backend proxy to avoid the failed
+        // direct attempt + retry delay (~3-5s wasted).
+        const isMpd = streamUrl && streamUrl.toLowerCase().includes('.mpd');
+        const isExternal = streamUrl && streamUrl.startsWith('http') && !streamUrl.includes(window.location.host);
+        if (!forceProxy && isExternal && isMpd) {
+            console.log('[ShakaPlayer] External MPD detected — proactively enabling proxy to avoid CORS delays.');
             forceProxy = true;
         }
-        */
 
         this.isUsingProxy = forceProxy;
         this.hasClearKeys = false; // reset — set to true below when clearKeys are configured

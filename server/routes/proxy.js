@@ -722,6 +722,7 @@ router.post('/drm', express.raw({ type: '*/*', limit: '10mb' }), async (req, res
 router.get('/stream', async (req, res) => {
     const maxRetries = 2;
     let lastError = null;
+    let stripRefererOnRetry = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -871,7 +872,10 @@ router.get('/stream', async (req, res) => {
                 if (customHeaders['referer']) return customHeaders['referer'];
                 if (isPluto) return 'https://pluto.tv/';
                 if (isFancode) return 'https://fancode.com/';
-                return (browserOrigin || urlObj.origin) + '/';
+                // Default: use CDN's own origin as Referer.
+                // Sending the browser's origin (e.g. itv.iosonofra.click) triggers
+                // hotlink protection on CDNs that validate Referer (e.g. aiv-cdn.net).
+                return urlObj.origin + '/';
             };
 
             const headers = {
@@ -902,6 +906,13 @@ router.get('/stream', async (req, res) => {
                 headers['Range'] = rangeHeader;
             }
 
+            // On 403 retry: strip Referer/Origin to mimic native players (Kodi, VLC)
+            // that don't send these headers. Some CDNs reject unknown Referers.
+            if (stripRefererOnRetry) {
+                delete headers['Referer'];
+                delete headers['Origin'];
+            }
+
             const fetchOptions = {
                 headers,
                 agent: proxyAgent || (finalUrl.startsWith('https://') ? globalHttpsAgent : globalHttpAgent)
@@ -913,6 +924,15 @@ router.get('/stream', async (req, res) => {
             if (response.status >= 500 && attempt < maxRetries) {
                 console.log(`[Proxy] Upstream 5xx error (attempt ${attempt}/${maxRetries}), retrying in 500ms...`);
                 await new Promise(r => setTimeout(r, 500));
+                continue;
+            }
+
+            // Retry 403 without Referer — some CDNs (e.g. aiv-cdn.net) reject ANY
+            // Referer that isn't explicitly whitelisted, but accept no-Referer requests
+            // (like native video players / Kodi).
+            if (response.status === 403 && attempt < maxRetries) {
+                console.log(`[Proxy] 403 with Referer "${headers['Referer']}" — retrying without Referer/Origin...`);
+                stripRefererOnRetry = true;
                 continue;
             }
 

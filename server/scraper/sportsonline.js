@@ -206,13 +206,9 @@ function buildM3U(resolvedChannels) {
 
         lines.push(`#EXTINF:-1 tvg-name="${ch.name}" group-title="${ch.category}",${ch.name} - ${desc}`);
 
-        // Append Kodi-style headers so the proxy sends the correct Referer/Origin
-        // The CDN validates these and returns 403 without them
-        let streamLine = ch.streamUrl;
-        if (ch.embedUrl) {
-            streamLine += `|Referer=${encodeURIComponent(ch.embedUrl)}`;
-        }
-        lines.push(streamLine);
+        // Store the PHP page URL (not the resolved CDN URL) because CDN tokens
+        // are IP-bound and expire. The proxy resolves fresh URLs on-demand.
+        lines.push(ch.url);
     }
 
     return lines.join('\n');

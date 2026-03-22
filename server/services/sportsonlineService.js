@@ -14,6 +14,11 @@ class SportsonlineService {
         this._autoRunTimer = null;
         this._autoRunInterval = 60 * 60 * 1000;
 
+        // Cache for resolved CDN URLs (keyed by PHP page URL)
+        // CDN tokens are IP-bound and last ~6h, cache for 2h to be safe
+        this._urlCache = new Map(); // phpUrl → { streamUrl, embedUrl, resolvedAt }
+        this._cacheTTL = 2 * 60 * 60 * 1000; // 2 hours
+
         this.dataDir = path.join(__dirname, '../../data/scraper');
         this.historyFile = path.join(this.dataDir, 'sportsonline_history.json');
         this.playlistFile = path.join(this.dataDir, 'sportsonline.m3u');
@@ -306,6 +311,42 @@ class SportsonlineService {
             this._autoRunTimer = null;
             console.log('[SportsOnline] Auto-run disabled');
         }
+    }
+
+    /**
+     * Resolve a stream URL on-demand with caching.
+     * CDN tokens are IP-bound, so the URL must be resolved from the same
+     * server that will proxy the stream. Cached for 2h.
+     */
+    async resolveAndCache(phpUrl) {
+        // Check cache first
+        const cached = this._urlCache.get(phpUrl);
+        if (cached && (Date.now() - cached.resolvedAt) < this._cacheTTL) {
+            console.log(`[SportsOnline] Cache hit for ${phpUrl.substring(phpUrl.lastIndexOf('/') + 1)}`);
+            return { streamUrl: cached.streamUrl, embedUrl: cached.embedUrl, cached: true };
+        }
+
+        // Resolve fresh
+        console.log(`[SportsOnline] Resolving fresh URL for ${phpUrl.substring(phpUrl.lastIndexOf('/') + 1)}`);
+        const result = await this.resolveStreamUrl(phpUrl);
+
+        // Cache the result
+        this._urlCache.set(phpUrl, {
+            streamUrl: result.streamUrl,
+            embedUrl: result.embedUrl || null,
+            resolvedAt: Date.now()
+        });
+
+        return { streamUrl: result.streamUrl, embedUrl: result.embedUrl, cached: false };
+    }
+
+    /**
+     * Check if a URL looks like a sportsonline PHP page URL
+     */
+    static isSportsonlinePhpUrl(url) {
+        return /sportzsonline\.click\/.*\.php/i.test(url)
+            || /sportsonline\.st\/.*\.php/i.test(url)
+            || /sportsonlin.*\.xyz\/.*\.php/i.test(url);
     }
 
     /**

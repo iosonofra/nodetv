@@ -730,6 +730,21 @@ router.get('/stream', async (req, res) => {
                 return res.status(400).json({ error: 'URL required' });
             }
 
+            // SportsOnline: PHP page URLs need on-demand resolution.
+            // CDN tokens are IP-bound, so we must resolve from this server.
+            const sportsonlineService = require('../services/sportsonlineService');
+            const isSportsonlinePhp = /sportzsonline\.click\/.*\.php|sportsonline\.st\/.*\.php|sportsonlin.*\.xyz\/.*\.php/i.test(url);
+            if (isSportsonlinePhp) {
+                try {
+                    const resolved = await sportsonlineService.resolveAndCache(url);
+                    console.log(`[Proxy] SportsOnline resolved: ${url.substring(url.lastIndexOf('/') + 1)} → ${resolved.streamUrl.substring(0, 80)}... (cached: ${resolved.cached})`);
+                    url = resolved.streamUrl;
+                } catch (resolveErr) {
+                    console.error(`[Proxy] SportsOnline resolve failed for ${url.substring(url.lastIndexOf('/') + 1)}: ${resolveErr.message}`);
+                    return res.status(502).json({ error: `Failed to resolve stream: ${resolveErr.message}` });
+                }
+            }
+
             // Safety net: block DLStreams segment requests for image-like URLs
             // These come from poisoned mono manifests and will never decode as video.
             // EXCEPTION: AES-128 encrypted manifests use obfuscated URLs deliberately —

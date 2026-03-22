@@ -90,7 +90,7 @@ router.post('/resolve', async (req, res) => {
             return res.status(400).json({ error: 'Valid url required in request body' });
         }
 
-        const result = await sportsonlineService.resolveStreamUrl(url);
+        const result = await sportsonlineService.resolveAndCache(url);
 
         if (!result.streamUrl) {
             return res.status(404).json({ error: 'Could not resolve stream URL' });

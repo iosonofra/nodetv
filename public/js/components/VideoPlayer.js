@@ -1193,7 +1193,9 @@ class VideoPlayer {
                 'pluto.tv',
                 'dlstreams.top',
                 'zhdcdn.zip',
-                'hhkys.com'
+                'hhkys.com',
+                'sportzsonline.click',
+                'sportsonline.st'
             ];
             const isPageHttps = window.location.protocol === 'https:';
             const isUrlHttp = streamUrl.startsWith('http:');
@@ -1219,7 +1221,8 @@ class VideoPlayer {
                 lowerOriginalUrlForType.includes('.m3u8') ||
                 lowerOriginalUrlForType.includes('m3u8') ||
                 /\/mono\.(css|csv)(\?|$|%23|#)/i.test(originalUrlForType) ||
-                /(?:%2f|\/)mono\.(css|csv)(?:%3f|\?|$|%23|#)/i.test(finalUrl);
+                /(?:%2f|\/)mono\.(css|csv)(?:%3f|\?|$|%23|#)/i.test(finalUrl) ||
+                /sportzsonline\.click\/.*\.php|sportsonline\.st\/.*\.php/i.test(originalUrlForType);
 
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams

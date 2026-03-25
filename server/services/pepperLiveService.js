@@ -39,6 +39,7 @@ class PepperLiveService {
         const currentSettings = await settings.get();
         const intervalHours = parseInt(currentSettings.pepperLiveInterval) || 1;
         const autoRunEnabled = currentSettings.pepperLiveAutoRun === true;
+        const useWarp = currentSettings.pepperLiveUseWarp === true;
 
         let nextRun = null;
         if (autoRunEnabled && this.lastRun) {
@@ -55,6 +56,7 @@ class PepperLiveService {
             autoRunInfo: {
                 enabled: autoRunEnabled,
                 intervalHours,
+                useWarp,
                 nextRunExpected: nextRun,
                 isTimerActive: !!this._autoRunTimer
             }
@@ -90,10 +92,23 @@ class PepperLiveService {
 
         const scriptPath = path.join(__dirname, '../scraper/pepperlive.js');
 
+        // Resolve SOCKS5 proxy URL from settings if pepperLiveUseWarp is enabled
+        let proxyEnv = {};
+        try {
+            const currentSettings = await settings.get();
+            if (currentSettings.pepperLiveUseWarp && currentSettings.warpProxyUrl) {
+                proxyEnv.SOCKS_PROXY_URL = currentSettings.warpProxyUrl;
+                this.addLog(`[*] Warp proxy enabled: ${currentSettings.warpProxyUrl}`);
+            }
+        } catch (e) {
+            this.addLog(`[!] Could not read warp settings: ${e.message}`);
+        }
+
         this.currentProcess = spawn(process.execPath, [scriptPath], {
             env: {
                 ...process.env,
                 SCRAPER_RUN_TYPE: runType,
+                ...proxyEnv,
             }
         });
 

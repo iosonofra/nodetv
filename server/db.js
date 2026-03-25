@@ -126,6 +126,7 @@ function getDefaultSettings() {
     // PepperLive scraper settings
     pepperLiveAutoRun: false,
     pepperLiveInterval: '1',              // hours
+    pepperLiveUseWarp: false,             // use Warp SOCKS5 proxy for scraper requests
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

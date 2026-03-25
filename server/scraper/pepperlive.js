@@ -6,9 +6,15 @@
  */
 
 const fetch = require('node-fetch');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+
+// SOCKS5 proxy agent (e.g. Cloudflare Warp)
+const PROXY_URL = process.env.SOCKS_PROXY_URL || null;
+const proxyAgent = PROXY_URL ? new SocksProxyAgent(PROXY_URL, { tls: { rejectUnauthorized: false } }) : null;
+if (PROXY_URL) console.log(`[*] Using SOCKS5 proxy: ${PROXY_URL}`);
 
 const DATA_DIR = path.join(__dirname, '../../data/scraper');
 if (!fs.existsSync(DATA_DIR)) {
@@ -152,14 +158,16 @@ function cleanMpdUrl(fullUrl) {
  */
 async function fetchJson(targetUrl) {
     try {
-        const res = await fetch(targetUrl, {
+        const fetchOpts = {
             headers: {
                 'User-Agent': UA,
                 'Cache-Control': 'no-cache',
                 'Pragma': 'no-cache',
             },
             timeout: TIMEOUT,
-        });
+        };
+        if (proxyAgent) fetchOpts.agent = proxyAgent;
+        const res = await fetch(targetUrl, fetchOpts);
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.toLowerCase().includes('json')) {
             return await res.json();

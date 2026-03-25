@@ -1715,9 +1715,11 @@ class SettingsPage {
         if (saveBtn) saveBtn.disabled = true;
 
         try {
+            const useWarpToggle = document.getElementById('setting-pl-use-warp');
             await API.pepperlive.updateSettings({
                 pepperLiveAutoRun: autoRunToggle.checked,
-                pepperLiveInterval: intervalSelect.value
+                pepperLiveInterval: intervalSelect.value,
+                pepperLiveUseWarp: useWarpToggle ? useWarpToggle.checked : false
             });
             this.appendPepperLiveLog('PepperLive settings updated successfully.');
             this.loadPepperLiveStatus();
@@ -1807,6 +1809,8 @@ class SettingsPage {
                     autoRunToggle.checked = info.enabled;
                     if (intervalSelect) intervalSelect.value = String(info.intervalHours);
                     if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    const useWarpToggle = document.getElementById('setting-pl-use-warp');
+                    if (useWarpToggle) useWarpToggle.checked = !!info.useWarp;
                     this._plSettingsInitialized = true;
                 }
 

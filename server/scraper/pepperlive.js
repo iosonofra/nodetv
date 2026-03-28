@@ -36,13 +36,19 @@ const BASE_URLS = [
     'https://www.pepperlive.info',
 ];
 
+const GUIDE_PATHS = ['/', '/index.php'];
+
 const POSSIBILI_NOMI = [
     'links.json', 'mpd.json', 'canali.json', 'channels.json',
     'mpd_links.json', 'streams.json', 'data.json', 'config.json',
+    'links_v2.json', 'links_new.json', 'canali_mpd.json',
+];
+
+// These already include a path prefix — don't combine with VARIANTI_PATH
+const NOMI_CON_PATH = [
     'api/links.json', 'api/channels.json', 'api/mpd.json',
     'assets/links.json', 'json/links.json', 'player/links.json',
     'live/links.json', 'update/links.json', 'cdn/links.json',
-    'links_v2.json', 'links_new.json', 'canali_mpd.json',
 ];
 
 const VARIANTI_PATH = ['', 'api/', 'data/', 'assets/', 'json/', 'cdn/', 'update/', 'player/', 'live/'];
@@ -82,6 +88,32 @@ const CANALI_RINOMINA = {
 // ── Helpers ──────────────────────────────────────────────────
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function decodeHtmlEntities(text) {
+    if (!text) return '';
+    return text
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+        .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+}
+
+function stripHtml(text) {
+    if (!text) return '';
+    return decodeHtmlEntities(text.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function normalizeChannelId(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sanitizeM3uAttr(value) {
+    return String(value || '').replace(/"/g, "'").trim();
+}
 
 /**
  * Extract KID and KEY from the base64-encoded ck= parameter.
@@ -178,6 +210,125 @@ async function fetchJson(targetUrl) {
     }
 }
 
+/**
+ * Fetch HTML/text from a URL, returning empty string on failure.
+ */
+async function fetchText(targetUrl) {
+    try {
+        const fetchOpts = {
+            headers: {
+                'User-Agent': UA,
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            timeout: TIMEOUT,
+        };
+        if (proxyAgent) fetchOpts.agent = proxyAgent;
+        const res = await fetch(targetUrl, fetchOpts);
+        if (!res.ok) return '';
+        return await res.text();
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Parse homepage guide cards and return event rows with channel IDs.
+ */
+function parseGuideEvents(html, pageUrl) {
+    if (!html) return [];
+
+    const categories = [];
+    const categoryRe = /<div\s+class="category-label">([\s\S]*?)<\/div>/gi;
+    let categoryMatch;
+    while ((categoryMatch = categoryRe.exec(html)) !== null) {
+        categories.push({ index: categoryMatch.index, text: stripHtml(categoryMatch[1]) });
+    }
+
+    const events = [];
+    const dedupe = new Set();
+    let categoryIdx = 0;
+    let currentCategory = 'Eventi';
+
+    const cardRe = /<div\s+class="match-card[^\"]*">([\s\S]*?)<div\s+class="btn-group">([\s\S]*?)<\/div>\s*<\/div>/gi;
+    let cardMatch;
+
+    while ((cardMatch = cardRe.exec(html)) !== null) {
+        while (categoryIdx < categories.length && categories[categoryIdx].index <= cardMatch.index) {
+            currentCategory = categories[categoryIdx].text || currentCategory;
+            categoryIdx++;
+        }
+
+        const cardHead = cardMatch[1] || '';
+        const buttons = cardMatch[2] || '';
+
+        const timeMatch = cardHead.match(/<div\s+class="ora-txt">([\s\S]*?)<\/div>/i);
+        const teamsMatch = cardHead.match(/<div\s+class="teams-box">([\s\S]*?)<\/div>/i);
+        const timeText = stripHtml(timeMatch ? timeMatch[1] : '');
+        const titleText = stripHtml(teamsMatch ? teamsMatch[1] : '');
+        if (!titleText) continue;
+
+        const btnRe = /<a[^>]*href="([^\"]*live\.php\?ch=[^\"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+        let btnMatch;
+
+        while ((btnMatch = btnRe.exec(buttons)) !== null) {
+            const href = btnMatch[1];
+            const label = stripHtml(btnMatch[2]).toUpperCase() || 'LINK';
+
+            let channelId = null;
+            try {
+                const resolved = new URL(href, pageUrl);
+                channelId = resolved.searchParams.get('ch');
+            } catch {
+                continue;
+            }
+
+            if (!channelId) continue;
+            const dedupeKey = `${currentCategory}|${timeText}|${titleText}|${label}|${channelId}`;
+            if (dedupe.has(dedupeKey)) continue;
+            dedupe.add(dedupeKey);
+
+            events.push({
+                category: currentCategory,
+                time: timeText,
+                title: titleText,
+                quality: label,
+                channelId,
+            });
+        }
+    }
+
+    return events;
+}
+
+/**
+ * Fetch and parse events from PepperLive homepage.
+ */
+async function fetchGuideEvents() {
+    const ts = Math.floor(Date.now() / 1000);
+    const cacheBusters = [`?_=${ts}`, `?v=${ts}`, ''];
+
+    for (const base of BASE_URLS) {
+        const b = base.replace(/\/+$/, '');
+        for (const guidePath of GUIDE_PATHS) {
+            const p = guidePath.startsWith('/') ? guidePath : `/${guidePath}`;
+            for (const q of cacheBusters) {
+                const guideUrl = `${b}${p}${q}`;
+                const html = await fetchText(guideUrl);
+                if (!html || html.length < 300) continue;
+
+                const events = parseGuideEvents(html, guideUrl);
+                if (events.length > 0) {
+                    return { events, sourceUrl: guideUrl };
+                }
+            }
+        }
+    }
+
+    return { events: [], sourceUrl: null };
+}
+
 // ── Main Scraper ────────────────────────────────────────────
 
 async function scrape() {
@@ -188,31 +339,39 @@ async function scrape() {
     let foundUrl = '';
     const ts = Math.floor(Date.now() / 1000);
 
-    // Try all URL combinations to find the channels JSON
+    // Build deduplicated list of URL paths to try
+    const uniquePaths = new Set();
     for (const base of BASE_URLS) {
-        if (jsonData) break;
-        console.log(`[*] Testing base: ${base}`);
-
+        const b = base.replace(/\/+$/, '');
+        // Base filenames × all path variants
         for (const nome of POSSIBILI_NOMI) {
-            if (jsonData) break;
-
             for (const pref of VARIANTI_PATH) {
-                if (jsonData) break;
-                const pathStr = pref + nome;
+                uniquePaths.add(`${b}/${pref}${nome}`);
+            }
+        }
+        // Already-pathed names — use directly (no extra prefix)
+        for (const nome of NOMI_CON_PATH) {
+            uniquePaths.add(`${b}/${nome}`);
+        }
+    }
 
-                const cacheBusters = ['', `?v=${ts}`, `?_=${ts}`, `?nocache=${ts}`];
-                for (const q of cacheBusters) {
-                    const tryUrl = `${base.replace(/\/+$/, '')}/${pathStr}${q}`;
-                    console.log(`  → ${tryUrl}`);
+    const cacheBusters = ['', `?v=${ts}`, `?_=${ts}`, `?nocache=${ts}`];
 
-                    const data = await fetchJson(tryUrl);
-                    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                        console.log(`  ✓ FOUND!`);
-                        jsonData = data;
-                        foundUrl = tryUrl;
-                        break;
-                    }
-                }
+    console.log(`[*] Will try ${uniquePaths.size} unique paths (×${cacheBusters.length} cache busters = ${uniquePaths.size * cacheBusters.length} max)`);
+
+    for (const basePath of uniquePaths) {
+        if (jsonData) break;
+
+        for (const q of cacheBusters) {
+            const tryUrl = `${basePath}${q}`;
+            console.log(`  → ${tryUrl}`);
+
+            const data = await fetchJson(tryUrl);
+            if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                console.log(`  ✓ FOUND!`);
+                jsonData = data;
+                foundUrl = tryUrl;
+                break;
             }
         }
     }
@@ -226,9 +385,26 @@ async function scrape() {
     const channelCount = Object.keys(jsonData).length;
     console.log(`[*] JSON found! ${channelCount} channels from: ${foundUrl}`);
 
+    // Fetch event rows shown in PepperLive guide and map them to channel IDs.
+    const { events: guideEvents, sourceUrl: guideSourceUrl } = await fetchGuideEvents();
+    if (guideEvents.length > 0) {
+        console.log(`[*] Guide events found: ${guideEvents.length} from ${guideSourceUrl}`);
+    } else {
+        console.log('[*] No guide events found (channels playlist will still be generated).');
+    }
+
+    const normalizedChannelMap = new Map();
+    for (const [name, fullUrl] of Object.entries(jsonData)) {
+        const key = normalizeChannelId(name);
+        if (!key || normalizedChannelMap.has(key)) continue;
+        normalizedChannelMap.set(key, { name, fullUrl });
+    }
+
     // Build M3U playlist
     const lines = ['#EXTM3U'];
     let countWithKey = 0;
+    let eventCount = 0;
+    let eventWithKey = 0;
 
     for (const [origName, fullUrl] of Object.entries(jsonData)) {
         if (typeof fullUrl !== 'string') continue;
@@ -267,14 +443,65 @@ async function scrape() {
         lines.push(cleanUrl);
     }
 
+    // Add event aliases (time + title + button label) when channel IDs are resolvable.
+    for (const ev of guideEvents) {
+        const direct = jsonData[ev.channelId] ? { name: ev.channelId, fullUrl: jsonData[ev.channelId] } : null;
+        const normalized = normalizedChannelMap.get(normalizeChannelId(ev.channelId)) || null;
+        const channel = direct || normalized;
+        if (!channel || typeof channel.fullUrl !== 'string') continue;
+
+        let cleanUrl;
+        try {
+            cleanUrl = cleanMpdUrl(channel.fullUrl);
+        } catch {
+            cleanUrl = channel.fullUrl;
+        }
+
+        let kid = null, key = null;
+        try {
+            const parsed = new URL(channel.fullUrl);
+            const ck = parsed.searchParams.get('ck');
+            if (ck) {
+                ({ kid, key } = extractKidKey(ck));
+            }
+        } catch {
+            // ignore URL parse errors
+        }
+
+        const rawDisplay = `${ev.time ? `${ev.time} ` : ''}${ev.title} [${ev.quality}]`;
+        const displayName = sanitizeM3uAttr(rawDisplay.replace(/\s+/g, ' ').trim());
+        const groupTitle = sanitizeM3uAttr(`PepperLive Eventi - ${ev.category || 'Generale'}`);
+        const tvgId = sanitizeM3uAttr(`${channel.name}__${ev.quality}`);
+
+        lines.push(`#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${displayName}" group-title="${groupTitle}",${displayName}`);
+
+        if (kid && key) {
+            lines.push('#KODIPROP:inputstream.adaptive.license_type=clearkey');
+            lines.push(`#KODIPROP:inputstream.adaptive.license_key=${kid}:${key}`);
+            eventWithKey++;
+        }
+
+        lines.push(`#KODIPROP:inputstream.adaptive.stream_headers=User-Agent=${UA}`);
+        lines.push(cleanUrl);
+        eventCount++;
+    }
+
     // Write playlist
     fs.writeFileSync(PLAYLIST_FILE, lines.join('\n'), 'utf8');
     console.log(`[✓] Playlist saved: ${PLAYLIST_FILE}`);
     console.log(`[✓] Total channels: ${channelCount}`);
     console.log(`[✓] With ClearKey: ${countWithKey}`);
+    if (eventCount > 0) {
+        console.log(`[✓] Added event aliases: ${eventCount} (${eventWithKey} with ClearKey)`);
+    }
 
     // Save history
-    saveHistory(startTime, true, channelCount, `Generated ${channelCount} channels (${countWithKey} with ClearKey)`);
+    saveHistory(
+        startTime,
+        true,
+        channelCount + eventCount,
+        `Generated ${channelCount} channels + ${eventCount} events (${countWithKey + eventWithKey} with ClearKey)`
+    );
 }
 
 function saveHistory(startTime, success, channelsCount, message) {

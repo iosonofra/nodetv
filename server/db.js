@@ -127,6 +127,11 @@ function getDefaultSettings() {
     pepperLiveAutoRun: false,
     pepperLiveInterval: '1',              // hours
     pepperLiveUseWarp: false,             // use Warp SOCKS5 proxy for scraper requests
+    // Sportzx scraper settings
+    sportzxAutoRun: false,
+    sportzxInterval: '1',                 // hours
+    sportzxTimeout: 15,                   // per-request timeout in seconds
+    sportzxExcludedCategories: ['adult', 'test', 'xxx'],
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

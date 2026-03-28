@@ -90,6 +90,29 @@ You can run nodecast-tv easily using Docker.
 
 The application will be available at `http://localhost:3000`.
 
+### Sportzx Scraper Dependencies (Alpine)
+
+The new Sportzx scraper runs a Python script and requires Python modules in your runtime image/container.
+
+Install Alpine OS packages:
+
+```sh
+apk add --no-cache python3 py3-pip py3-requests py3-pycryptodome
+```
+
+If your Alpine repository does not provide `py3-pycryptodome`, use:
+
+```sh
+apk add --no-cache python3 py3-pip build-base musl-dev libffi-dev openssl-dev
+python3 -m pip install --no-cache-dir -r requirements-sportzx.txt
+```
+
+Optional environment variable (if Python is not in default PATH):
+
+```sh
+PYTHON_BIN=/usr/bin/python3
+```
+
 
 ### Hardware Acceleration Setup
 

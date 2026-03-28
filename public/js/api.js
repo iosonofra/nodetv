@@ -115,6 +115,15 @@ const API = {
         download: () => '/api/pepperlive/download'
     },
 
+    // Sportzx Scraper
+    sportzx: {
+        getStatus: () => API.request('GET', '/sportzx/status'),
+        getLogs: () => API.request('GET', '/sportzx/logs'),
+        run: () => API.request('POST', '/sportzx/run'),
+        updateSettings: (data) => API.request('PUT', '/sportzx/settings', data),
+        download: () => '/api/sportzx/download'
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

@@ -117,17 +117,29 @@ PYTHON_BIN=/usr/bin/python3
 
 The Hattrick Eventi scraper also runs as a Python script and requires HTML parsing plus Cloudflare-aware HTTP requests.
 
-Install with pip:
+Install Alpine OS packages:
+
+```sh
+apk add --no-cache python3 py3-pip py3-requests py3-beautifulsoup4 ca-certificates
+```
+
+Then install Python requirements (recommended):
 
 ```sh
 python3 -m pip install --no-cache-dir -r requirements-hattrickeventi.txt
 ```
+
+Notes:
+- `requests` + `beautifulsoup4` are the minimum required dependencies.
+- `cloudscraper` is strongly recommended for anti-bot / Cloudflare protected pages.
+- The scraper now falls back to plain `requests` if `cloudscraper` is missing, so it still runs on minimal Alpine images.
 
 Supported runtime environment variables:
 
 ```sh
 HATTRICKEVENTI_OUTPUT=/path/to/data/scraper/hattrickeventi.m3u
 HATTRICKEVENTI_TIMEOUT=15
+HATTRICKEVENTI_DELAY=1.5
 PYTHON_BIN=/usr/bin/python3
 ```
 

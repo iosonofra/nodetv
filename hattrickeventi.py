@@ -4,8 +4,13 @@ import time
 from pathlib import Path
 from urllib.parse import urljoin
 
-import cloudscraper
+import requests
 from bs4 import BeautifulSoup
+
+try:
+    import cloudscraper
+except Exception:
+    cloudscraper = None
 
 
 MAIN_URL = os.getenv("HATTRICKEVENTI_MAIN_URL", "https://htsport.cc/")
@@ -20,19 +25,29 @@ USER_AGENT = os.getenv(
 )
 REFERRER = os.getenv("HATTRICKEVENTI_REFERRER", "https://mediahosting.space/")
 ORIGIN = os.getenv("HATTRICKEVENTI_ORIGIN", "https://mediahosting.space")
-REQUEST_TIMEOUT = int(os.getenv("HATTRICKEVENTI_TIMEOUT", "15"))
-REQUEST_DELAY = float(os.getenv("HATTRICKEVENTI_DELAY", "1.5"))
+REQUEST_TIMEOUT = int(os.getenv("HATTRICKEVENTI_TIMEOUT", "15") or "15")
+REQUEST_DELAY = float(os.getenv("HATTRICKEVENTI_DELAY", "1.5") or "1.5")
 GROUP_TITLE = os.getenv("HATTRICKEVENTI_GROUP", "Eventi IPTV")
 
 
 def build_scraper():
-    session = cloudscraper.create_scraper(
-        browser={
-            "browser": "chrome",
-            "platform": "windows",
-            "mobile": False,
-        }
-    )
+    if cloudscraper is not None:
+        try:
+            session = cloudscraper.create_scraper(
+                browser={
+                    "browser": "chrome",
+                    "platform": "windows",
+                    "mobile": False,
+                }
+            )
+            print("[INFO] HTTP client: cloudscraper")
+        except Exception as exc:
+            print(f"[WARN] cloudscraper unavailable ({exc}), falling back to requests")
+            session = requests.Session()
+    else:
+        print("[WARN] cloudscraper not installed, falling back to requests")
+        session = requests.Session()
+
     session.headers.update(
         {
             "User-Agent": USER_AGENT,
@@ -158,6 +173,10 @@ def main():
     print(f"[INFO] Playlist created: {output_path}")
     print(f"[INFO] Streams added: {len(playlist_entries)}")
     print(f"[INFO] Logo used: {IMAGE_URL}")
+
+    if len(playlist_entries) == 0:
+        print("[WARN] No streams found. If this persists on Alpine, install cloudscraper for anti-bot pages.")
+
     return 0
 
 

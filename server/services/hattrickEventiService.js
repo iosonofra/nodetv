@@ -117,12 +117,14 @@ class HattrickEventiService {
         this.addLog(`[*] Timeout: ${timeoutSeconds}s`);
 
         const python = getPythonLauncher();
-        const args = [...python.argsPrefix, this.scriptPath];
+        const args = [...python.argsPrefix, '-u', this.scriptPath];
 
         this.currentProcess = spawn(python.cmd, args, {
             env: {
                 ...process.env,
                 SCRAPER_RUN_TYPE: runType,
+                PYTHONUNBUFFERED: '1',
+                PYTHONIOENCODING: 'utf-8',
                 HATTRICKEVENTI_OUTPUT: this.playlistFile,
                 HATTRICKEVENTI_TIMEOUT: String(timeoutSeconds)
             }

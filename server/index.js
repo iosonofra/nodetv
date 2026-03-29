@@ -102,6 +102,7 @@ app.use('/api/scraper', require('./routes/scraper'));
 app.use('/api/sportsonline', require('./routes/sportsonline'));
 app.use('/api/pepperlive', require('./routes/pepperlive'));
 app.use('/api/sportzx', require('./routes/sportzx'));
+app.use('/api/hattrickeventi', require('./routes/hattrickeventi'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/history', require('./routes/history'));
 
@@ -150,6 +151,10 @@ app.listen(PORT, async () => {
         // Start the Sportzx scraper auto-run
         const sportzxService = require('./services/sportzxService');
         sportzxService.startAutoRun();
+
+        // Start the Hattrick Eventi scraper auto-run
+        const hattrickEventiService = require('./services/hattrickEventiService');
+        hattrickEventiService.startAutoRun();
 
         // Detect hardware acceleration capabilities
         try {

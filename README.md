@@ -113,6 +113,24 @@ Optional environment variable (if Python is not in default PATH):
 PYTHON_BIN=/usr/bin/python3
 ```
 
+### Hattrick Eventi Scraper Dependencies
+
+The Hattrick Eventi scraper also runs as a Python script and requires HTML parsing plus Cloudflare-aware HTTP requests.
+
+Install with pip:
+
+```sh
+python3 -m pip install --no-cache-dir -r requirements-hattrickeventi.txt
+```
+
+Supported runtime environment variables:
+
+```sh
+HATTRICKEVENTI_OUTPUT=/path/to/data/scraper/hattrickeventi.m3u
+HATTRICKEVENTI_TIMEOUT=15
+PYTHON_BIN=/usr/bin/python3
+```
+
 
 ### Hardware Acceleration Setup
 

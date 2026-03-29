@@ -132,6 +132,10 @@ function getDefaultSettings() {
     sportzxInterval: '1',                 // hours
     sportzxTimeout: 15,                   // per-request timeout in seconds
     sportzxExcludedCategories: ['adult', 'test', 'xxx'],
+    // Hattrick Eventi scraper settings
+    hattrickEventiAutoRun: false,
+    hattrickEventiInterval: '1',          // hours
+    hattrickEventiTimeout: 15,            // per-request timeout in seconds
     // Warp Settings
     warpProxyUrl: 'socks5://127.0.0.1:40001'
   };

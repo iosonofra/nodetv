@@ -124,6 +124,15 @@ const API = {
         download: () => '/api/sportzx/download'
     },
 
+    // Hattrick Eventi Scraper
+    hattrickeventi: {
+        getStatus: () => API.request('GET', '/hattrickeventi/status'),
+        getLogs: () => API.request('GET', '/hattrickeventi/logs'),
+        run: () => API.request('POST', '/hattrickeventi/run'),
+        updateSettings: (data) => API.request('PUT', '/hattrickeventi/settings', data),
+        download: () => '/api/hattrickeventi/download'
+    },
+
     // Favorites
     favorites: {
         getAll: (sourceId = null, itemType = null) => {

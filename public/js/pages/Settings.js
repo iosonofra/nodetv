@@ -40,6 +40,9 @@ class SettingsPage {
 
         // Sportzx scraper management (admin only)
         this.initSportzxManagement();
+
+        // Hattrick Eventi scraper management (admin only)
+        this.initHattrickEventiManagement();
     }
 
     initPlayerSettings() {
@@ -923,6 +926,10 @@ class SettingsPage {
         if (this._sportzxInterval) {
             clearInterval(this._sportzxInterval);
             this._sportzxInterval = null;
+        }
+        if (this._hattrickEventiInterval) {
+            clearInterval(this._hattrickEventiInterval);
+            this._hattrickEventiInterval = null;
         }
     }
 
@@ -2232,6 +2239,273 @@ class SettingsPage {
         }
     }
 
+    // ==========================================
+    // Hattrick Eventi Scraper Management
+    // ==========================================
+
+    initHattrickEventiManagement() {
+        const runBtn = document.getElementById('ht-run-scraper');
+        const clearLogsBtn = document.getElementById('clear-ht-logs');
+        const saveSettingsBtn = document.getElementById('save-ht-settings');
+        const autoRunToggle = document.getElementById('setting-ht-auto-run');
+        const intervalContainer = document.getElementById('ht-interval-container');
+
+        if (runBtn) {
+            runBtn.addEventListener('click', () => this.runHattrickEventi());
+        }
+
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', () => this.clearHattrickEventiLogs());
+        }
+
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', () => this.saveHattrickEventiSettings());
+        }
+
+        if (autoRunToggle && intervalContainer) {
+            autoRunToggle.addEventListener('change', () => {
+                intervalContainer.style.display = autoRunToggle.checked ? 'flex' : 'none';
+            });
+        }
+    }
+
+    async saveHattrickEventiSettings() {
+        const autoRunToggle = document.getElementById('setting-ht-auto-run');
+        const intervalSelect = document.getElementById('setting-ht-interval');
+        const timeoutInput = document.getElementById('setting-ht-timeout');
+        const saveBtn = document.getElementById('save-ht-settings');
+
+        if (!autoRunToggle || !intervalSelect) return;
+
+        if (saveBtn) saveBtn.disabled = true;
+
+        let timeout = 15;
+        if (timeoutInput) {
+            timeout = parseInt(timeoutInput.value, 10);
+            if (isNaN(timeout) || timeout < 5) timeout = 15;
+            if (timeout > 60) timeout = 60;
+        }
+
+        try {
+            await API.hattrickeventi.updateSettings({
+                hattrickEventiAutoRun: autoRunToggle.checked,
+                hattrickEventiInterval: intervalSelect.value,
+                hattrickEventiTimeout: timeout
+            });
+            this.appendHattrickEventiLog('Hattrick Eventi settings updated successfully.');
+            this.loadHattrickEventiStatus();
+        } catch (err) {
+            this.appendHattrickEventiLog('Error saving Hattrick Eventi settings: ' + err.message);
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
+    async runHattrickEventi() {
+        const runBtn = document.getElementById('ht-run-scraper');
+        if (runBtn) runBtn.disabled = true;
+
+        try {
+            await API.hattrickeventi.run();
+            this.appendHattrickEventiLog('Hattrick Eventi scraper started...');
+            this.loadHattrickEventiStatus();
+        } catch (err) {
+            this.appendHattrickEventiLog('Error starting Hattrick Eventi: ' + err.message);
+            if (runBtn) runBtn.disabled = false;
+        }
+    }
+
+    async loadHattrickEventiStatus() {
+        try {
+            const status = await API.hattrickeventi.getStatus();
+            const statusText = document.getElementById('ht-status-text');
+            const spinner = document.getElementById('ht-loading-spinner');
+            const runBtn = document.getElementById('ht-run-scraper');
+            const fileInfoContainer = document.getElementById('ht-file-info');
+
+            if (statusText) {
+                statusText.textContent = status.isRunning ? 'Running' : 'Idle';
+                statusText.style.color = status.isRunning ? 'var(--color-accent)' : 'var(--color-text-secondary)';
+            }
+
+            if (spinner) {
+                spinner.style.display = status.isRunning ? 'block' : 'none';
+            }
+
+            if (runBtn) {
+                runBtn.disabled = status.isRunning;
+            }
+
+            const fileDetails = document.getElementById('ht-file-details');
+            if (fileDetails && status.fileInfo) {
+                const actions = document.getElementById('ht-file-actions');
+                if (status.fileInfo.exists) {
+                    const sizeKB = (status.fileInfo.size / 1024).toFixed(1);
+                    const lastUpdated = new Date(status.fileInfo.mtime).toLocaleString();
+                    fileDetails.innerHTML = `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Output File:</span>
+                                <span style="font-weight: 500; font-family: monospace;">hattrickeventi.m3u</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">File Size:</span>
+                                <span style="font-weight: 500;">${sizeKB} KB</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span class="hint">Last Modified:</span>
+                                <span style="font-weight: 500;">${lastUpdated}</span>
+                            </div>
+                        </div>
+                    `;
+                    fileInfoContainer.style.display = 'block';
+                    if (actions) actions.style.display = 'block';
+                } else {
+                    fileDetails.innerHTML = '<p class="hint">Output file does not exist yet.</p>';
+                    fileInfoContainer.style.display = 'block';
+                    if (actions) actions.style.display = 'none';
+                }
+            }
+
+            const cronInfo = document.getElementById('ht-cron-info');
+            if (cronInfo && status.autoRunInfo) {
+                const info = status.autoRunInfo;
+                const autoRunToggle = document.getElementById('setting-ht-auto-run');
+                const intervalSelect = document.getElementById('setting-ht-interval');
+                const intervalContainer = document.getElementById('ht-interval-container');
+                const timeoutInput = document.getElementById('setting-ht-timeout');
+
+                if (autoRunToggle && !this._htSettingsInitialized) {
+                    autoRunToggle.checked = info.enabled;
+                    if (intervalSelect) intervalSelect.value = String(info.intervalHours);
+                    if (intervalContainer) intervalContainer.style.display = info.enabled ? 'flex' : 'none';
+                    if (timeoutInput && info.timeoutSeconds != null) {
+                        timeoutInput.value = String(info.timeoutSeconds);
+                    }
+                    this._htSettingsInitialized = true;
+                }
+
+                if (info.enabled) {
+                    const nextRun = info.nextRunExpected ? new Date(info.nextRunExpected).toLocaleString() : 'Pending';
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="status-badge status-online" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                                <span style="color: var(--color-text-secondary);">Auto-run active: every ${info.intervalHours}h</span>
+                            </div>
+                            <div style="text-align: right;">
+                                <span class="hint">Next run:</span>
+                                <span style="font-weight: 500; margin-left: 4px; color: var(--color-accent);">${nextRun}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    cronInfo.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
+                            <div class="status-badge status-offline" style="width: 8px; height: 8px; padding: 0; border-radius: 50%;"></div>
+                            <span class="hint">Auto-run is currently disabled.</span>
+                        </div>
+                    `;
+                }
+                cronInfo.style.display = 'block';
+            }
+
+            const statusString = status.isRunning ? 'running' : 'idle';
+            if (this._lastHtStatus === 'running' && statusString === 'idle') {
+                this.loadHattrickEventiHistory();
+                if (this.app.sourceManager) {
+                    this.app.sourceManager.loadSources();
+                }
+            }
+            this._lastHtStatus = statusString;
+        } catch (err) {
+            console.warn('Failed to load Hattrick Eventi status:', err);
+        }
+    }
+
+    async loadHattrickEventiLogs() {
+        try {
+            const data = await API.hattrickeventi.getLogs();
+            if (data.logs) {
+                const logsContainer = document.getElementById('ht-logs');
+                if (logsContainer && this._lastHtLogsLength !== data.logs.length) {
+                    logsContainer.innerHTML = data.logs.map(log =>
+                        `<div class="log-entry">${this.escapeHtml(log)}</div>`
+                    ).join('');
+                    logsContainer.scrollTop = logsContainer.scrollHeight;
+                    this._lastHtLogsLength = data.logs.length;
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to load Hattrick Eventi logs:', err);
+        }
+    }
+
+    async loadHattrickEventiHistory() {
+        const historyList = document.getElementById('ht-history-list');
+        if (!historyList) return;
+
+        try {
+            const data = await API.hattrickeventi.getStatus();
+            const history = data.history || [];
+
+            if (history.length === 0) {
+                historyList.innerHTML = '<p class="hint">No history available yet.</p>';
+                return;
+            }
+
+            historyList.innerHTML = history.slice(0, 10).map(item => `
+                <div class="source-item" style="padding: var(--space-sm); border-bottom: 1px solid var(--color-border); background: ${item.success !== false ? 'transparent' : 'rgba(239, 68, 68, 0.05)'}">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                ${new Date(item.timestamp).toLocaleString()}
+                                ${item.runType === 'auto' ? '<span class="version-badge" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); font-size: 0.6rem; padding: 1px 4px; border-radius: 4px;">AUTO</span>' : ''}
+                            </div>
+                            <div class="hint" style="font-size: 0.75rem;">Duration: ${Math.round((item.durationMs || 0) / 1000)}s | Playlist: ${(item.playlistBytes || 0)} bytes</div>
+                        </div>
+                        <span class="status-badge ${item.success !== false ? 'status-online' : 'status-offline'}">
+                            ${item.success !== false ? 'Success' : 'Failed'}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            console.error('Error loading Hattrick Eventi history:', err);
+        }
+    }
+
+    startHattrickEventiStatusPolling() {
+        if (this._hattrickEventiInterval) return;
+
+        this.loadHattrickEventiStatus();
+        this.loadHattrickEventiHistory();
+        this.loadHattrickEventiLogs();
+
+        this._hattrickEventiInterval = setInterval(() => {
+            this.loadHattrickEventiStatus();
+            this.loadHattrickEventiLogs();
+        }, 5000);
+    }
+
+    appendHattrickEventiLog(message) {
+        const logsContainer = document.getElementById('ht-logs');
+        if (!logsContainer) return;
+
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsContainer.appendChild(entry);
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+    }
+
+    clearHattrickEventiLogs() {
+        const logsContainer = document.getElementById('ht-logs');
+        if (logsContainer) {
+            logsContainer.innerHTML = '<div class="log-entry" style="color: var(--color-text-muted);">Logs cleared.</div>';
+        }
+    }
+
     appendLog(message) {
         const logsContainer = document.getElementById('scraper-logs');
         if (!logsContainer) return;
@@ -2316,6 +2590,7 @@ class SettingsPage {
             this.startSportsonlineStatusPolling();
             this.startPepperLiveStatusPolling();
             this.startSportzxStatusPolling();
+            this.startHattrickEventiStatusPolling();
         }
 
         // Refresh ALL player settings from server
@@ -2450,6 +2725,7 @@ class SettingsPage {
         // Reset initialization flag so settings are re-loaded next time
         this._scraperSettingsInitialized = false;
         this._zxSettingsInitialized = false;
+        this._htSettingsInitialized = false;
     }
 }
 

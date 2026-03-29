@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
     python3-pip \
+    python3-bs4 \
     python3-requests \
     python3-pycryptodome \
     make \
@@ -48,6 +49,9 @@ RUN npm ci --only=production
 
 # Copy application files
 COPY . .
+
+# Python scraper dependencies not provided by apt base packages
+RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements-hattrickeventi.txt
 
 # Create data and cache directories
 RUN mkdir -p /app/data /app/transcode-cache && chmod 777 /app/transcode-cache

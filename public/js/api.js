@@ -14,6 +14,14 @@ const API = {
             }
         };
 
+        // Prevent stale responses for polling endpoints (status/logs).
+        if (method === 'GET') {
+            options.cache = 'no-store';
+            options.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+            options.headers['Pragma'] = 'no-cache';
+            options.headers['Expires'] = '0';
+        }
+
         // Add authentication token if available
         const token = localStorage.getItem('authToken');
         if (token) {

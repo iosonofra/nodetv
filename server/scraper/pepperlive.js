@@ -115,6 +115,11 @@ function sanitizeM3uAttr(value) {
     return String(value || '').replace(/"/g, "'").trim();
 }
 
+function countTag(text, re) {
+    const m = text.match(re);
+    return m ? m.length : 0;
+}
+
 /**
  * Extract KID and KEY from the base64-encoded ck= parameter.
  * Supports both "kid:key" and JSON {"kid":"...","key":"..."} formats.
@@ -303,6 +308,92 @@ function parseGuideEvents(html, pageUrl) {
 }
 
 /**
+ * Parse homepage using the same structure used by PepperLiveEvents.py.
+ * Keeps only real match-card events with MPD premium buttons.
+ */
+function parseHomepageEvents(html) {
+    if (!html) return [];
+
+    const events = [];
+    const dedupe = new Set();
+    const lines = html.split(/\r?\n/);
+    let i = 0;
+    let currentDate = 'Sconosciuta';
+    let currentCategory = 'Sconosciuta';
+
+    while (i < lines.length) {
+        const line = (lines[i] || '').trim();
+
+        const dateMatch = line.match(/<div\s+class="date-header[^"]*">([^<]+)<\/div>/i);
+        if (dateMatch) {
+            currentDate = stripHtml(dateMatch[1]).toUpperCase() || currentDate;
+            i += 1;
+            continue;
+        }
+
+        const categoryMatch = line.match(/<span\s+class="category-label[^"]*">([^<]+)<\/span>/i);
+        if (categoryMatch) {
+            currentCategory = stripHtml(categoryMatch[1]).replace(/\s+/g, ' ').replace(/\s*-\s*$/, '').trim() || currentCategory;
+            i += 1;
+            continue;
+        }
+
+        if (line.includes('<div class="match-card')) {
+            let card = lines[i] || '';
+            let depth = countTag(card, /<div\b/gi) - countTag(card, /<\/div>/gi);
+            i += 1;
+
+            while (i < lines.length && depth > 0) {
+                card += `\n${lines[i]}`;
+                depth += countTag(lines[i], /<div\b/gi) - countTag(lines[i], /<\/div>/gi);
+                i += 1;
+            }
+
+            const timeMatch = card.match(/<span\s+class="ora-txt[^"]*">([\s\S]*?)<\/span>/i)
+                || card.match(/<div\s+class="ora-txt[^"]*">([\s\S]*?)<\/div>/i);
+            const timeText = stripHtml(timeMatch ? timeMatch[1] : '') || '??:??';
+
+            const teamsMatch = card.match(/<div\s+class="teams-box[^"]*">([\s\S]*?)<\/div>/i);
+            let teams = stripHtml(teamsMatch ? teamsMatch[1] : '');
+            teams = teams.replace(/\bVS\b/gi, ' - ').replace(/\s+/g, ' ').trim();
+
+            const linkRe = /href="live\.php\?ch=([^"]+)"[^>]*class="[^"]*btn-premium[^"]*"[^>]*>\s*MPD\s*<\/a>/gi;
+            let linkMatch;
+            while ((linkMatch = linkRe.exec(card)) !== null) {
+                const channelId = (linkMatch[1] || '').trim();
+                if (!channelId) continue;
+
+                const parts = [];
+                if (teams) parts.push(teams);
+                if (timeText && timeText !== '??:??') parts.push(timeText);
+                if (currentCategory && currentCategory !== 'Sconosciuta') parts.push(currentCategory);
+                const title = parts.length > 0 ? parts.join(' • ') : `Evento ${channelId}`;
+
+                const key = `${currentDate}|${channelId}|${title}`;
+                if (dedupe.has(key)) continue;
+                dedupe.add(key);
+
+                events.push({
+                    channelId,
+                    title,
+                    date: currentDate,
+                    time: timeText,
+                    teams,
+                    category: currentCategory,
+                    quality: 'MPD',
+                });
+            }
+
+            continue;
+        }
+
+        i += 1;
+    }
+
+    return events;
+}
+
+/**
  * Fetch and parse events from PepperLive homepage.
  */
 async function fetchGuideEvents() {
@@ -318,7 +409,10 @@ async function fetchGuideEvents() {
                 const html = await fetchText(guideUrl);
                 if (!html || html.length < 300) continue;
 
-                const events = parseGuideEvents(html, guideUrl);
+                let events = parseHomepageEvents(html);
+                if (events.length === 0) {
+                    events = parseGuideEvents(html, guideUrl);
+                }
                 if (events.length > 0) {
                     return { events, sourceUrl: guideUrl };
                 }
@@ -405,6 +499,7 @@ async function scrape() {
     let countWithKey = 0;
     let eventCount = 0;
     let eventWithKey = 0;
+    const eventDedupe = new Set();
 
     for (const [origName, fullUrl] of Object.entries(jsonData)) {
         if (typeof fullUrl !== 'string') continue;
@@ -468,10 +563,15 @@ async function scrape() {
             // ignore URL parse errors
         }
 
-        const rawDisplay = `${ev.time ? `${ev.time} ` : ''}${ev.title} [${ev.quality}]`;
+        const channelDisplayName = CANALI_RINOMINA[channel.name] || channel.name;
+        const rawDisplay = `${ev.title} (${channelDisplayName})`;
         const displayName = sanitizeM3uAttr(rawDisplay.replace(/\s+/g, ' ').trim());
-        const groupTitle = sanitizeM3uAttr(`PepperLive Eventi - ${ev.category || 'Generale'}`);
-        const tvgId = sanitizeM3uAttr(`${channel.name}__${ev.quality}`);
+        const groupTitle = sanitizeM3uAttr(`PepperLive Eventi - ${ev.date || ev.category || 'Sconosciuta'}`);
+        const tvgId = sanitizeM3uAttr(`${channel.name}__event`);
+
+        const eventKey = `${tvgId}|${displayName}|${cleanUrl}`;
+        if (eventDedupe.has(eventKey)) continue;
+        eventDedupe.add(eventKey);
 
         lines.push(`#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${displayName}" group-title="${groupTitle}",${displayName}`);
 

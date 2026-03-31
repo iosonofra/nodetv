@@ -1873,12 +1873,15 @@ class SettingsPage {
             if (data.logs) {
                 const logsContainer = document.getElementById('pl-logs');
                 if (logsContainer) {
-                    if (this._lastPlLogsLength !== data.logs.length) {
+                    const lastLine = data.logs.length > 0 ? data.logs[data.logs.length - 1] : '';
+                    const signature = `${data.logs.length}:${lastLine}`;
+                    if (this._lastPlLogsSignature !== signature) {
                         logsContainer.innerHTML = data.logs.map(log =>
                             `<div class="log-entry">${this.escapeHtml(log)}</div>`
                         ).join('');
                         logsContainer.scrollTop = logsContainer.scrollHeight;
                         this._lastPlLogsLength = data.logs.length;
+                        this._lastPlLogsSignature = signature;
                     }
                 }
             }

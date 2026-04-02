@@ -50,7 +50,7 @@ RUN npm ci --only=production
 # Copy application files
 COPY . .
 
-# Python scraper dependencies not provided by apt base packages
+# Python scraper dependencies (headless-browser fallback uses Puppeteer from npm, no Playwright needed)
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements-hattrickeventi.txt
 
 # Create data and cache directories

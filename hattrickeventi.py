@@ -1,4 +1,7 @@
+import json
 import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -95,11 +98,74 @@ def extract_event_pages(soup):
     return deduped
 
 
+def _is_cloudflare_challenge(response):
+    """Return True if the response looks like a Cloudflare JS/IUAM challenge page."""
+    ct = response.headers.get("Content-Type", "")
+    if "text/html" not in ct:
+        return False
+    body = response.text
+    return (
+        "cf-browser-verification" in body
+        or "challenge-form" in body
+        or "<title>Just a moment" in body
+        or "cf_clearance" in body
+        or (response.headers.get("cf-ray") and len(body) < 10_000 and "iframe" not in body.lower())
+    )
+
+
+def _extract_stream_from_source(raw_html):
+    """Regex-based last-resort scan for streaming URLs embedded in the page source."""
+    # Pattern: iframe src containing a stream URL as fragment, e.g. src="player.php#https://..."
+    m = re.search(
+        r'<iframe[^>]+src=["\']([^"\']*#https?://[^"\']+)["\']',
+        raw_html,
+        re.IGNORECASE,
+    )
+    if m:
+        fragment = m.group(1).split("#", 1)[1].strip()
+        if fragment.startswith(("http://", "https://")):
+            return fragment, None
+
+    # Pattern: JS player config with file/source/url key pointing to stream
+    m = re.search(
+        r'(?:file|source|src|url)\s*[=:]\s*["\']'
+        r'(https?://[^"\']+\.(?:m3u8|mpd|ts)(?:\?[^"\']*)?)["\']',
+        raw_html,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1), None
+
+    # Pattern: bare https streaming URL in source (m3u8/mpd only, to avoid false positives)
+    m = re.search(
+        r'"(https?://[^"]+\.(?:m3u8|mpd)(?:\?[^"]*)?)"',
+        raw_html,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1), None
+
+    return None, None
+
+
 def extract_stream_url(session, page_url):
     response = session.get(page_url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
 
-    event_soup = BeautifulSoup(response.text, "html.parser")
+    cf_ray = response.headers.get("cf-ray", "")
+    if cf_ray:
+        cf_note = f" (cf-ray: {cf_ray})"
+    else:
+        cf_note = ""
+
+    if _is_cloudflare_challenge(response):
+        return (
+            None,
+            f"Cloudflare challenge page received{cf_note} — install/update cloudscraper to bypass",
+        )
+
+    raw_html = response.text
+    event_soup = BeautifulSoup(raw_html, "html.parser")
     iframe = event_soup.find("iframe", id="iframe")
     if not iframe or not iframe.get("src"):
         iframe = event_soup.find(
@@ -107,19 +173,93 @@ def extract_stream_url(session, page_url):
             attrs={"class": lambda value: value and "iframe" in str(value).lower()},
         )
 
-    if not iframe or not iframe.get("src"):
-        return None, "No iframe found"
+    if iframe and iframe.get("src"):
+        src = iframe["src"].strip()
+        if "#" in src:
+            stream_url = src.split("#", 1)[1].strip()
+            if stream_url.startswith(("http://", "https://")):
+                return stream_url, None
+            return None, "Iframe fragment is not an HTTP URL"
+        # iframe found but no fragment — try regex on its src directly
+        if src.startswith(("http://", "https://")):
+            if any(ext in src for ext in (".m3u8", ".mpd")):
+                return src, None
+        return None, f"Iframe src has no stream fragment: {src[:120]}"
 
-    src = iframe["src"].strip()
-    if "#" not in src:
-        return None, "Iframe src has no stream fragment"
+    # No static iframe — try regex scan of the full source
+    stream_url, _ = _extract_stream_from_source(raw_html)
+    if stream_url:
+        print(f"[INFO] Stream found via regex scan (JS-embedded)")
+        return stream_url, None
 
-    stream_url = src.split("#", 1)[1].strip()
-    if not stream_url.startswith(("http://", "https://")):
-        return None, "Fragment is not an HTTP URL"
+    # Last resort: headless browser with network interception
+    print(f"[INFO] Static parse failed — launching headless browser for {page_url}")
+    stream_url, pw_error = _extract_via_puppeteer(page_url)
+    if stream_url:
+        print(f"[INFO] Stream found via headless browser")
+        return stream_url, None
+    print(f"[WARN] Puppeteer fallback: {pw_error}")
 
-    return stream_url, None
+    page_title = ""
+    title_tag = event_soup.find("title")
+    if title_tag:
+        page_title = f" (page title: {title_tag.get_text(strip=True)[:60]})"
+    return (
+        None,
+        f"No iframe or stream URL found{cf_note}{page_title}",
+    )
 
+
+# ---------------------------------------------------------------------------
+# Puppeteer headless-browser fallback (Node.js, already installed)
+# ---------------------------------------------------------------------------
+
+_HELPER_SCRIPT = Path(__file__).parent / "scraper" / "hattrick_intercept.js"
+
+
+def _extract_via_puppeteer(page_url: str) -> "tuple[str | None, str | None]":
+    """Spawn the Node.js Puppeteer helper and capture the intercepted stream URL."""
+    if not _HELPER_SCRIPT.exists():
+        return None, f"Puppeteer helper not found at {_HELPER_SCRIPT}"
+
+    node_bin = os.getenv("NODE_BIN", "node")
+    timeout = REQUEST_TIMEOUT + 15
+    try:
+        result = subprocess.run(
+            [node_bin, str(_HELPER_SCRIPT), page_url],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ,
+                 "HATTRICKEVENTI_USER_AGENT": USER_AGENT,
+                 "HATTRICKEVENTI_REFERRER": REFERRER,
+                 "HATTRICKEVENTI_TIMEOUT": str(REQUEST_TIMEOUT)},
+        )
+    except FileNotFoundError:
+        return None, "'node' not found in PATH — set NODE_BIN env var if needed"
+    except subprocess.TimeoutExpired:
+        return None, f"Puppeteer helper timed out after {timeout}s"
+    except Exception as exc:
+        return None, f"Puppeteer helper error: {exc}"
+
+    stdout = (result.stdout or "").strip()
+    if not stdout:
+        stderr = (result.stderr or "").strip()[:200]
+        return None, f"Puppeteer helper produced no output. stderr: {stderr}"
+
+    try:
+        # Take the last JSON line (Node may print warnings before it)
+        last_line = stdout.splitlines()[-1]
+        data = json.loads(last_line)
+    except json.JSONDecodeError:
+        return None, f"Puppeteer helper output not JSON: {stdout[:200]}"
+
+    if "stream" in data:
+        return data["stream"], None
+    return None, data.get("error", "Unknown error from Puppeteer helper")
+
+
+# ---------------------------------------------------------------------------
 
 def write_playlist(entries):
     output_path = Path(OUTPUT_FILE)
@@ -175,7 +315,11 @@ def main():
     print(f"[INFO] Logo used: {IMAGE_URL}")
 
     if len(playlist_entries) == 0:
-        print("[WARN] No streams found. If this persists on Alpine, install cloudscraper for anti-bot pages.")
+        if cloudscraper is None:
+            print("[WARN] No streams found. cloudscraper is NOT installed — Cloudflare-protected pages")
+            print("[WARN] cannot be bypassed. Run: pip install cloudscraper")
+        else:
+            print("[WARN] No streams found. The page structure may have changed or no events are live.")
 
     return 0
 

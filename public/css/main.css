@@ -4386,6 +4386,21 @@ kbd {
   display: none;
 }
 
+/* FPS Badge */
+.fps-badge {
+  display: inline-block;
+  background: rgba(100, 100, 100, 0.75);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.fps-badge.hidden {
+  display: none;
+}
+
 /* Watch Header Bar (Title + Transcode Status) */
 /* Moved to original definition around line 3311 */
 

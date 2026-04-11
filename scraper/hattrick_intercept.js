@@ -45,10 +45,23 @@ async function intercept(targetUrl) {
 
         let streamUrl = null;
 
+        // Returns true if this URL is "better" than the current candidate.
+        // Manifests (.m3u8/.mpd) beat raw segments (.ts); never overwrite a manifest.
+        function isBetterStream(url) {
+            if (!isStreamUrl(url)) return false;
+            if (!streamUrl) return true;
+            const lower = url.toLowerCase();
+            const currentLower = streamUrl.toLowerCase();
+            const isManifest = lower.includes('.m3u8') || lower.includes('.mpd');
+            const currentIsManifest = currentLower.includes('.m3u8') || currentLower.includes('.mpd');
+            // Upgrade .ts → manifest; never downgrade manifest → .ts
+            return isManifest && !currentIsManifest;
+        }
+
         // Intercept all requests before they fire
         await page.setRequestInterception(true);
         page.on('request', req => {
-            if (!streamUrl && isStreamUrl(req.url())) {
+            if (isBetterStream(req.url())) {
                 streamUrl = req.url();
             }
             req.continue();
@@ -56,7 +69,7 @@ async function intercept(targetUrl) {
 
         // Also catch responses (covers fetch/XHR that request interception may miss)
         page.on('response', res => {
-            if (!streamUrl && isStreamUrl(res.url())) {
+            if (isBetterStream(res.url())) {
                 streamUrl = res.url();
             }
         });

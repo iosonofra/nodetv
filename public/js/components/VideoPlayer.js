@@ -1242,7 +1242,16 @@ class VideoPlayer {
                 const remuxUrl = this.getRemuxUrl(streamUrl, channel.sourceId);
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                    if (e.name === 'AbortError') return;
+                    if (e.name === 'NotSupportedError') {
+                        console.error('[Player] Force Remux media error:', e.message);
+                        this.showError(
+                            'Stream remux failed — the server could not process this stream.<br><br>' +
+                            'The stream URL may have expired or the format is not supported.'
+                        );
+                    } else {
+                        console.log('[Player] Force remux play interrupted:', e);
+                    }
                 });
 
                 // Update UI and dispatch events
@@ -1260,7 +1269,19 @@ class VideoPlayer {
                 const remuxUrl = this.getRemuxUrl(streamUrl, channel.sourceId);
                 this.video.src = remuxUrl;
                 this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                    if (e.name === 'AbortError') return;
+                    if (e.name === 'NotSupportedError' || e.name === 'NotAllowedError') {
+                        if (e.name === 'NotSupportedError') {
+                            console.error('[Player] Remux media error:', e.message);
+                            this.showError(
+                                'Stream remux failed — the server could not process this stream.<br><br>' +
+                                'The stream URL may have expired or the format is not supported.<br>' +
+                                'Try refreshing the channel.'
+                            );
+                        }
+                    } else {
+                        console.log('[Player] Remux play interrupted:', e);
+                    }
                 });
 
                 this.updateNowPlaying(channel);
@@ -1638,13 +1659,24 @@ class VideoPlayer {
      */
     updateQualityBadge() {
         const badge = document.getElementById('player-quality-badge');
-        if (!badge) return;
+        if (badge) {
+            if (this.currentStreamInfo?.height > 0) {
+                badge.textContent = this.getQualityLabel(this.currentStreamInfo.height);
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
 
-        if (this.currentStreamInfo?.height > 0) {
-            badge.textContent = this.getQualityLabel(this.currentStreamInfo.height);
-            badge.classList.remove('hidden');
-        } else {
-            badge.classList.add('hidden');
+        const fpsBadge = document.getElementById('player-fps-badge');
+        if (fpsBadge) {
+            const fps = this.currentStreamInfo?.fps;
+            if (fps > 0) {
+                fpsBadge.textContent = `${fps} fps`;
+                fpsBadge.classList.remove('hidden');
+            } else {
+                fpsBadge.classList.add('hidden');
+            }
         }
     }
 
@@ -1836,6 +1868,8 @@ class VideoPlayer {
         this.currentStreamInfo = null;
         const badge = document.getElementById('player-quality-badge');
         if (badge) badge.classList.add('hidden');
+        const fpsBadge = document.getElementById('player-fps-badge');
+        if (fpsBadge) fpsBadge.classList.add('hidden');
     }
 
     /**

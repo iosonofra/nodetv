@@ -125,11 +125,20 @@ function analyzeProbeResult(probeResult, url) {
 
     const compatible = !needsTranscode && !needsRemux;
 
+    // Parse FPS from avg_frame_rate or r_frame_rate (stored as "num/den" fraction)
+    let fps = 0;
+    const fpsSource = videoStream?.avg_frame_rate || videoStream?.r_frame_rate || '';
+    if (fpsSource && fpsSource.includes('/')) {
+        const [num, den] = fpsSource.split('/').map(Number);
+        if (den > 0) fps = Math.round((num / den) * 10) / 10; // one decimal
+    }
+
     return {
         video: videoCodec,
         audio: audioCodec,
         width: videoStream?.width || 0,
         height: videoStream?.height || 0,
+        fps: fps,
         audioChannels: audioStream?.channels || 0, // For Smart Audio Copy
         container: container,
         compatible: compatible,

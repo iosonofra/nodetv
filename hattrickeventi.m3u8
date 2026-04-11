@@ -1,0 +1,8 @@
+#EXTM3U
+
+#EXTINF:-1 tvg-id="" tvg-logo="https://i.postimg.cc/Kvwg9t3F/3790038-logo-vetrina-dazn-sport-dazn-a-11563364038i3yzrattgk-removebg-preview.png" group-title="Eventi IPTV",ATP Montecarlo
+#EXTVLCOPT:http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36
+#EXTVLCOPT:http-referrer=https://mediahosting.space/
+#EXTVLCOPT:http-origin=https://mediahosting.space
+#EXTVLCOPT:http-header=Origin: https://mediahosting.space
+https://relayn.screenistream.xyz/stream/130/index.m3u8?token=aN7QrmHIoz60HOhI&headers=eyJyZWZlcmVyIjoiaHR0cHM6Ly9tZWRpYWhvc3Rpbmcuc3BhY2UvIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYWhvc3Rpbmcuc3BhY2UiLCJ1c2VyLWFnZW50IjoiTW96aWxsYS81LjAifQ

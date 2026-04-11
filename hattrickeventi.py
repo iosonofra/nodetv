@@ -113,6 +113,11 @@ def _is_cloudflare_challenge(response):
     )
 
 
+def _unescape_url(url: str) -> str:
+    """Unescape JS-encoded slashes like \\/ → /"""
+    return url.replace("\\/", "/")
+
+
 def _extract_stream_from_source(raw_html):
     """Regex-based last-resort scan for streaming URLs embedded in the page source."""
     # Pattern: iframe src containing a stream URL as fragment, e.g. src="player.php#https://..."
@@ -127,14 +132,15 @@ def _extract_stream_from_source(raw_html):
             return fragment, None
 
     # Pattern: JS player config with file/source/url key pointing to stream
+    # Handles both normal slashes and JS-escaped \/ slashes
     m = re.search(
-        r'(?:file|source|src|url)\s*[=:]\s*["\']'
-        r'(https?://[^"\']+\.(?:m3u8|mpd|ts)(?:\?[^"\']*)?)["\']',
+        r'(?:file|source|src|url|streamUrl|hlsUrl)\s*[=:]\s*["\']'
+        r'(https?:(?:\\/|/)[^"\']+\.(?:m3u8|mpd|ts)(?:[^"\']*)?)["\']',
         raw_html,
         re.IGNORECASE,
     )
     if m:
-        return m.group(1), None
+        return _unescape_url(m.group(1)), None
 
     # Pattern: bare https streaming URL in source (m3u8/mpd only, to avoid false positives)
     m = re.search(
@@ -146,6 +152,35 @@ def _extract_stream_from_source(raw_html):
         return m.group(1), None
 
     return None, None
+
+
+def _follow_iframe_src(session, iframe_url: str, referer: str = None, depth: int = 0):
+    """Follow an iframe src URL up to 3 levels deep to find a stream URL."""
+    if depth > 3:
+        return None, "Max iframe chain depth exceeded"
+    try:
+        headers = {}
+        if referer:
+            headers["Referer"] = referer
+        resp = session.get(iframe_url, timeout=REQUEST_TIMEOUT, headers=headers)
+        resp.raise_for_status()
+    except Exception as exc:
+        return None, f"Failed to fetch iframe URL: {exc}"
+
+    # Try regex scan on this page
+    stream_url, _ = _extract_stream_from_source(resp.text)
+    if stream_url:
+        return stream_url, None
+
+    # Try nested iframe
+    inner_soup = BeautifulSoup(resp.text, "html.parser")
+    inner_iframe = inner_soup.find("iframe")
+    if inner_iframe and inner_iframe.get("src"):
+        inner_src = inner_iframe["src"].strip()
+        if inner_src.startswith(("http://", "https://")):
+            return _follow_iframe_src(session, inner_src, referer=iframe_url, depth=depth + 1)
+
+    return None, f"No stream found following iframe chain from {iframe_url[:80]}"
 
 
 def extract_stream_url(session, page_url):
@@ -184,6 +219,12 @@ def extract_stream_url(session, page_url):
         if src.startswith(("http://", "https://")):
             if any(ext in src for ext in (".m3u8", ".mpd")):
                 return src, None
+            # Follow iframe chain (handles redirect-wrappers like popcdn.day/go.php)
+            print(f"[INFO] Following iframe chain: {src[:80]}")
+            chain_url, chain_err = _follow_iframe_src(session, src, referer=page_url)
+            if chain_url:
+                return chain_url, None
+            print(f"[WARN] Iframe chain: {chain_err}")
         return None, f"Iframe src has no stream fragment: {src[:120]}"
 
     # No static iframe — try regex scan of the full source

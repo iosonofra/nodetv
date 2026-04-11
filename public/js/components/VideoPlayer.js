@@ -1227,6 +1227,18 @@ class VideoPlayer {
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams
             const isRawTs = lowerOriginalUrlForType.includes('.ts') && !lowerOriginalUrlForType.includes('.m3u8');
+
+            // Detect HLS segment URLs: .ts files with /hls/ in the path are HLS segments,
+            // not standalone streams. Derive the manifest URL and play as HLS.
+            const hlsSegmentMatch = isRawTs && /\/hls\//i.test(originalUrlForType)
+                ? originalUrlForType.replace(/\/[^/?]+\.ts(?=\?|$)/i, '/index.m3u8')
+                : null;
+            if (hlsSegmentMatch) {
+                console.log('[Player] Detected HLS segment URL, deriving manifest:', hlsSegmentMatch);
+                // Re-invoke play() with the corrected manifest URL
+                return this.play(channel, hlsSegmentMatch);
+            }
+
             const isExtensionless = !lowerOriginalUrlForType.includes('.m3u8') &&
                 !lowerOriginalUrlForType.includes('.mp4') &&
                 !lowerOriginalUrlForType.includes('.mkv') &&

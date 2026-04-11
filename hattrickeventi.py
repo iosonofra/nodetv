@@ -133,9 +133,10 @@ def _extract_stream_from_source(raw_html):
 
     # Pattern: JS player config with file/source/url key pointing to stream
     # Handles both normal slashes and JS-escaped \/ slashes
+    # Only match manifests (.m3u8/.mpd), NOT .ts segments
     m = re.search(
         r'(?:file|source|src|url|streamUrl|hlsUrl)\s*[=:]\s*["\']'
-        r'(https?:(?:\\/|/)[^"\']+\.(?:m3u8|mpd|ts)(?:[^"\']*)?)["\']',
+        r'(https?:(?:\\/|/)[^"\']+\.(?:m3u8|mpd)(?:[^"\']*)?)["\']',
         raw_html,
         re.IGNORECASE,
     )

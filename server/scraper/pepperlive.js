@@ -1,6 +1,6 @@
 /**
  * PepperLive Scraper
- * Fetches channel JSON from pepperlive.info, extracts MPD URLs and ClearKey
+ * Fetches channel JSON from chilistream.net, extracts MPD URLs and ClearKey
  * credentials, and generates an M3U playlist with KODIPROP entries.
  * Pure HTTP — no Puppeteer needed.
  */
@@ -32,8 +32,8 @@ const TIMEOUT = 12000;
 // ── Configuration ────────────────────────────────────────────
 
 const BASE_URLS = [
-    'https://pepperlive.info',
-    'https://www.pepperlive.info',
+    'https://www.chilistream.net',
+    'https://chilistream.net',
 ];
 
 const GUIDE_PATHS = ['/', '/index.php'];

@@ -15,8 +15,8 @@ import sys
 # =============================================
 
 BASE_URLS = [
-    "https://pepperlive.info",
-    "https://www.pepperlive.info",
+    "https://www.chilistream.net",
+    "https://chilistream.net",
 ]
 
 TIMEOUT = 12

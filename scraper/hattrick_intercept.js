@@ -1,4 +1,4 @@
-/**
+ag/**
  * hattrick_intercept.js
  * Called by hattrickeventi.py as a subprocess.
  * Usage: node hattrick_intercept.js <url>

@@ -1201,10 +1201,12 @@ class VideoPlayer {
             const isUrlHttp = streamUrl.startsWith('http:');
             const isDlstreamsChannel = !!(channel && channel.tvgId && String(channel.tvgId).startsWith('dl_'));
             const hasKodiHeaders = streamUrl.includes('|');
+            const hasVlcHeaders = !!(channel && channel.proxyHeaders && Object.keys(channel.proxyHeaders).length > 0);
             const needsProxy = this.settings.forceProxy ||
                 (channel && channel.useWarp) ||
                 isDlstreamsChannel ||
                 hasKodiHeaders ||
+                hasVlcHeaders ||
                 proxyRequiredDomains.some(domain => streamUrl.includes(domain));
 
             this.isUsingProxy = needsProxy;

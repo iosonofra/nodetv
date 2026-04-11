@@ -138,6 +138,15 @@ async function parse(input) {
                 const value = propString.substring(eqIndex + 1).trim();
                 currentProperties[key] = value;
             }
+        } else if (trimmed.startsWith('#EXTVLCOPT:')) {
+            // Parse EXTVLCOPT lines (VLC-style HTTP headers)
+            const optString = trimmed.substring(11).trim();
+            const eqIndex = optString.indexOf('=');
+            if (eqIndex !== -1) {
+                const key = optString.substring(0, eqIndex).trim();
+                const value = optString.substring(eqIndex + 1).trim();
+                currentProperties[`vlcopt.${key}`] = value;
+            }
         } else if (!trimmed.startsWith('#')) {
             // This is a stream URL
             if (currentInfo) {
@@ -266,6 +275,15 @@ async function* parseStreaming(input, batchSize = 500) {
                 const key = propString.substring(0, eqIndex).trim();
                 const value = propString.substring(eqIndex + 1).trim();
                 currentProperties[key] = value;
+            }
+        } else if (trimmed.startsWith('#EXTVLCOPT:')) {
+            // Parse EXTVLCOPT lines (VLC-style HTTP headers)
+            const optString = trimmed.substring(11).trim();
+            const eqIndex = optString.indexOf('=');
+            if (eqIndex !== -1) {
+                const key = optString.substring(0, eqIndex).trim();
+                const value = optString.substring(eqIndex + 1).trim();
+                currentProperties[`vlcopt.${key}`] = value;
             }
         } else if (!trimmed.startsWith('#')) {
             if (currentInfo) {

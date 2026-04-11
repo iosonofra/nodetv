@@ -855,20 +855,41 @@ class ChannelList {
         const useWarp = source?.useWarp || false;
 
         // Map streams to channels
-        const channelList = streams.map(stream => ({
-            id: `m3u_${sourceId}_${stream.stream_id}`,
-            streamId: stream.stream_id,
-            useWarp,
-            name: stream.name,
-            tvgId: stream.epg_channel_id,
-            tvgLogo: stream.stream_icon,
-            url: stream.stream_url, // M3U has direct URLs
-            groupId: `m3u_${sourceId}_${stream.category_id}`,
-            groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
-            sourceId,
-            sourceType: 'm3u',
-            properties: stream.properties || null
-        }));
+        const channelList = streams.map(stream => {
+            const props = stream.properties || null;
+
+            // Derive proxyHeaders from #EXTVLCOPT properties (vlcopt.http-referrer, etc.)
+            let proxyHeaders = null;
+            if (props) {
+                const vlcHeaderMap = {
+                    'vlcopt.http-referrer': 'Referer',
+                    'vlcopt.http-user-agent': 'User-Agent',
+                    'vlcopt.http-origin': 'Origin',
+                };
+                for (const [vlcKey, httpHeader] of Object.entries(vlcHeaderMap)) {
+                    if (props[vlcKey]) {
+                        if (!proxyHeaders) proxyHeaders = {};
+                        proxyHeaders[httpHeader] = props[vlcKey];
+                    }
+                }
+            }
+
+            return {
+                id: `m3u_${sourceId}_${stream.stream_id}`,
+                streamId: stream.stream_id,
+                useWarp,
+                name: stream.name,
+                tvgId: stream.epg_channel_id,
+                tvgLogo: stream.stream_icon,
+                url: stream.stream_url, // M3U has direct URLs
+                groupId: `m3u_${sourceId}_${stream.category_id}`,
+                groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
+                sourceId,
+                sourceType: 'm3u',
+                properties: props,
+                proxyHeaders
+            };
+        });
 
         this.channels = this.channels.concat(channelList);
     }

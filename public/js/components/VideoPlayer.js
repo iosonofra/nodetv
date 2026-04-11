@@ -1253,15 +1253,20 @@ class VideoPlayer {
                 return;
             }
 
-            // If raw TS detected without Force Remux enabled, show error
+            // If raw TS detected without Force Remux enabled, auto-remux instead of erroring
             if (isRawTs && !this.settings.forceRemux) {
-                console.warn('[Player] Raw MPEG-TS stream detected. Browsers cannot play .ts files directly.');
-                this.showError(
-                    'This stream uses raw MPEG-TS format (.ts) which browsers cannot play directly.<br><br>' +
-                    '<strong>To fix this:</strong><br>' +
-                    '1. Enable <strong>"Force Remux"</strong> in Settings → Streaming<br>' +
-                    '2. Or configure your source to output HLS (.m3u8) format'
-                );
+                console.warn('[Player] Raw MPEG-TS stream detected. Auto-routing through FFmpeg remux.');
+                this.updateTranscodeStatus('remuxing', 'Remux (Auto)');
+                const remuxUrl = this.getRemuxUrl(streamUrl, channel.sourceId);
+                this.video.src = remuxUrl;
+                this.video.play().catch(e => {
+                    if (e.name !== 'AbortError') console.log('[Player] Autoplay prevented:', e);
+                });
+
+                this.updateNowPlaying(channel);
+                this.showNowPlayingOverlay();
+                this.fetchEpgData(channel);
+                window.dispatchEvent(new CustomEvent('channelChanged', { detail: channel }));
                 return;
             }
 
